@@ -171,6 +171,25 @@ class TTSEngine:
                 sentence_callback(sentence)
             await self.speak(sentence)
     
+def _clean_text_for_speech(text: str) -> str:
+    """Clean markdown, code blocks, URLs, and rich tags for clear TTS vocalization"""
+    if not text:
+        return ""
+    # Remove code blocks ```...```
+    cleaned = re.sub(r'```[\s\S]*?```', ' code block omitted ', text)
+    # Remove inline backticks `code`
+    cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
+    # Remove markdown headers #, ##, etc.
+    cleaned = re.sub(r'#+\s*', '', cleaned)
+    # Remove URLs
+    cleaned = re.sub(r'https?://\S+', '', cleaned)
+    # Remove rich formatting tags like [bold cyan], [/bold cyan]
+    cleaned = re.sub(r'\[/?[a-zA-Z0-9_:\s]+\]', '', cleaned)
+    # Clean up whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
+
     async def speak(self, text: str):
         """
         Speak text using configured TTS engine
@@ -178,13 +197,14 @@ class TTSEngine:
         Args:
             text: Text to speak
         """
-        if not text.strip():
+        clean_text = _clean_text_for_speech(text)
+        if not clean_text:
             return
         
         if self.engine_type == "edge":
-            await self._speak_edge(text)
+            await self._speak_edge(clean_text)
         else:
-            self._speak_pyttsx(text)
+            self._speak_pyttsx(clean_text)
     
     async def _speak_edge(self, text: str):
         """Speak using edge-tts"""

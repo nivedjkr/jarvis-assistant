@@ -575,12 +575,6 @@ class JARVISCLI:
                 response_text += chunk
                 status.update(f"[bold cyan]JARVIS:[/bold cyan] {response_text[-50:]}")
         
-        # Speak response if voice mode is enabled
-        if self.voice_manager.enabled:
-            await self.voice_manager.speak_response(response_text)
-        else:
-            ui.set_state(UIState.IDLE)
-        
         return response_text
     
     def _handle_voice_transcription(self, text: str):
@@ -731,11 +725,19 @@ class JARVISCLI:
                     # Display response using HUD UI panel
                     ui.render_response(response)
                     
+                    # Speak response out loud every time
+                    if self.voice_manager.enabled:
+                        await self.voice_manager.speak_response(response)
+                    else:
+                        ui.set_state(UIState.IDLE)
+                    
                     # Log conversation turn & auto-extract durable facts if not a slash command
                     if not user_input.startswith("/"):
                         self.memory.log_conversation_message("user", user_input)
                         self.memory.log_conversation_message("assistant", response)
                         asyncio.create_task(self.api_client.extract_and_save_facts(user_input, response))
+                else:
+                    ui.set_state(UIState.IDLE)
                 
                 # Clear busy state
                 self.is_busy = False
