@@ -690,8 +690,6 @@ class ProactiveMonitor:
             
             import random
             greeting_text = random.choice(greeting_phrases)
-            if status_str:
-                greeting_text += f" Note: You have {status_str}."
             
             from jarvis.ui import ui
             ui.render_response(greeting_text)
