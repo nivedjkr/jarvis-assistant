@@ -402,35 +402,35 @@ class JARVISCLI:
         
         if cmd_lower == "/help":
             self.show_help()
-            return None
+            return "Here are the available commands and natural language options, sir."
         elif cmd_lower == "/clear":
             console.clear()
             self.show_banner()
-            return None
+            return "Console cleared, sir."
         elif cmd_lower == "/exit":
             self.running = False
             return "Goodbye! Have a great day!"
         elif cmd_lower == "/history":
             self.show_history()
-            return None
+            return "Displaying conversation history, sir."
         elif cmd_lower == "/tools":
             self.show_tools()
-            return None
+            return "Displaying available tools, sir."
         elif cmd_lower == "/reminders":
             self.show_reminders()
-            return None
+            return "Displaying your reminders, sir."
         elif cmd_lower == "/notes":
             self.show_notes()
-            return None
+            return "Displaying your saved notes, sir."
         elif cmd_lower == "/tasks":
             self.show_tasks()
-            return None
+            return "Displaying recent task history, sir."
         elif cmd_lower == "/profile":
             self.show_profile()
-            return None
+            return "Displaying user profile statistics, sir."
         elif cmd_lower == "/apps":
             self.show_apps()
-            return None
+            return "Displaying registered applications, sir."
         elif cmd_lower.startswith("/addapp"):
             parts = cmd_raw.split(maxsplit=1)
             args_str = parts[1] if len(parts) > 1 else ""
@@ -443,7 +443,7 @@ class JARVISCLI:
             parts = cmd_raw.split(maxsplit=1)
             category = parts[1] if len(parts) > 1 else None
             self.show_facts(category)
-            return None
+            return "Displaying stored facts, sir."
         elif cmd_lower.startswith("/remember"):
             parts = cmd_raw.split(maxsplit=1)
             fact_text = parts[1] if len(parts) > 1 else ""
