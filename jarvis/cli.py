@@ -6,6 +6,7 @@ import asyncio
 import sys
 import subprocess
 import re
+from datetime import datetime, timedelta
 from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -781,7 +782,76 @@ class JARVISCLI:
                 return f"Topic '[cyan]{topic_val}[/cyan]' was not found."
         else:
             return "Usage: /awareness [on|off|topics|add <topic>|remove <topic>|check]"
-    
+
+    def parse_reminder_time(self, user_input: str) -> tuple[str, datetime]:
+        """
+        Parse reminder text and compute real due_at datetime.
+        Supports seconds, minutes, hours, days (e.g. 'in 15 seconds', 'in 2 mins', 'in 1 hour', 'in 30s').
+        """
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        clean_input = user_input.strip()
+        
+        # Duration regex: e.g. "in 15 seconds", "in 2 minutes", "in 1 hour", "in 30 sec", "in 45s"
+        match = re.search(r'\bin\s+(\d+)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\b', clean_input, re.I)
+        
+        seconds_to_add = 300  # Default 5 minutes if no duration is specified
+        
+        if match:
+            amount = int(match.group(1))
+            unit = match.group(2).lower()
+            
+            if unit in ["s", "sec", "secs", "second", "seconds"]:
+                seconds_to_add = amount
+            elif unit in ["m", "min", "mins", "minute", "minutes"]:
+                seconds_to_add = amount * 60
+            elif unit in ["h", "hr", "hrs", "hour", "hours"]:
+                seconds_to_add = amount * 3600
+            elif unit in ["d", "day", "days"]:
+                seconds_to_add = amount * 86400
+
+            # Remove duration specifier from text
+            reminder_text = re.sub(r'\bin\s+\d+\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\b', '', clean_input, flags=re.I).strip()
+        else:
+            reminder_text = clean_input
+            
+        # Remove common prefixes
+        reminder_text = re.sub(r'^(remind\s+(me\s+)?(to\s+)?|set\s+a\s+reminder\s+(to\s+)?|add\s+reminder\s+(to\s+)?)', '', reminder_text, flags=re.I).strip()
+        if not reminder_text:
+            reminder_text = "General Reminder"
+            
+        due_at = now + timedelta(seconds=seconds_to_add)
+        return reminder_text, due_at
+
+    def get_pending_reminders_summary(self) -> str:
+        """Query pending database reminders and format exact status summary"""
+        from datetime import datetime
+        reminders = self.memory.get_reminders()
+        pending = [r for r in reminders if not r["completed"]]
+        
+        if not pending:
+            return "No pending reminders in database, sir."
+            
+        now = datetime.now()
+        lines = ["Pending Reminders:"]
+        for r in pending:
+            due_date_str = r.get("due_date")
+            if due_date_str:
+                try:
+                    due_dt = datetime.fromisoformat(due_date_str)
+                    diff = (due_dt - now).total_seconds()
+                    due_time_fmt = due_dt.strftime("%H:%M:%S")
+                    if diff > 0:
+                        lines.append(f"- '{r['text']}' is pending, due at {due_time_fmt} (in {int(diff)} seconds).")
+                    else:
+                        lines.append(f"- '{r['text']}' is pending, due at {due_time_fmt} (overdue).")
+                except ValueError:
+                    lines.append(f"- '{r['text']}' is pending.")
+            else:
+                lines.append(f"- '{r['text']}' is pending.")
+                
+        return "\n".join(lines)
+
     async def _check_tool_commands(self, user_input: str) -> Optional[str]:
         """Check if input matches a tool command or protocol trigger"""
         input_lower = user_input.lower()
@@ -892,12 +962,15 @@ class JARVISCLI:
                 except ValueError:
                     return "Please specify a command to run"
         
-        # Add reminder
-        elif "remind" in input_lower:
-            reminder_text = re.sub(r'^(remind\s+(me\s+)?(to\s+)?|set\s+a\s+reminder\s+(to\s+)?)', '', user_input, flags=re.I).strip()
-            if reminder_text:
-                reminder = self.memory.add_reminder(reminder_text)
-                return f"Reminder added: {reminder_text}"
+        # Add or check reminder
+        elif "remind" in input_lower or "reminder" in input_lower:
+            if any(kw in input_lower for kw in ["show", "list", "check", "where", "what", "pending"]):
+                return self.get_pending_reminders_summary()
+            
+            reminder_text, due_at = self.parse_reminder_time(user_input)
+            reminder = self.memory.add_reminder(reminder_text, due_date=due_at.isoformat())
+            due_time_str = due_at.strftime("%H:%M:%S")
+            return f"Reminder set for '{reminder_text}' (due at {due_time_str})."
         
         # Add note
         elif input_lower.startswith("note:") or input_lower.startswith("save note:") or input_lower.startswith("add note:"):

@@ -632,7 +632,7 @@ class VoiceManager:
 class ProactiveMonitor:
     """Background thread for proactive reminder monitoring"""
     
-    def __init__(self, memory, tts_engine, check_interval: int = 60):
+    def __init__(self, memory, tts_engine, check_interval: int = 2):
         """
         Initialize proactive monitor
         
@@ -679,12 +679,11 @@ class ProactiveMonitor:
     def _check_reminders(self):
         """Check for due reminders"""
         reminders = self.memory.get_reminders()
+        pending = [r for r in reminders if not r["completed"]]
         current_time = datetime.now()
+        due_count = 0
         
-        for reminder in reminders:
-            if reminder["completed"]:
-                continue
-            
+        for reminder in pending:
             reminder_id = reminder["id"]
             if reminder_id in self.delivered_reminders:
                 continue
@@ -695,11 +694,25 @@ class ProactiveMonitor:
                 try:
                     due_datetime = datetime.fromisoformat(due_date)
                     if current_time >= due_datetime:
-                        self._queue_announcement(reminder["text"])
+                        due_count += 1
+                        reminder_text = reminder["text"]
+                        phrase = self._get_reminder_phrases(reminder_text)
+                        
+                        # Print unprompted to console HUD
+                        console.print(f"\n[bold bright_cyan]⏰ PROACTIVE REMINDER:[/bold bright_cyan] [bold white]{reminder_text}[/bold white]\n")
+                        
                         self.delivered_reminders.add(reminder_id)
                         self.memory.complete_reminder(reminder_id)
+                        
+                        # Queue for TTS delivery
+                        self.announcement_queue.append(phrase)
                 except ValueError:
                     pass
+
+        # Log monitor cycle for transparency
+        now_str = current_time.strftime("%H:%M:%S")
+        if pending or due_count > 0:
+            console.print(f"[dim cyan][MONITOR {now_str}][/dim cyan] Checked {len(pending)} pending reminders ({due_count} due).", highlight=False)
     
     def _queue_announcement(self, text: str):
         """Queue an announcement"""
