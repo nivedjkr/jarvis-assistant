@@ -6,7 +6,8 @@ Handles rich terminal rendering, ASCII banner, panel wrappers, state management,
 import sys
 from enum import Enum
 import time
-from typing import Callable
+from datetime import datetime
+from typing import Callable, Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -26,6 +27,15 @@ if sys.platform == "win32":
 
 console = Console()
 
+# --- Design System & Color Palette Constants ---
+COLOR_PRIMARY = "bright_cyan"       # Primary Accent: Electric Blue / Cyan (#00D9FF)
+COLOR_SECONDARY = "dim white"      # Secondary / Metadata: Gray
+COLOR_SUCCESS = "bold green"       # Success / Confirmation
+COLOR_WARNING = "bold yellow"      # Warning / Caution
+COLOR_ERROR = "bold red"           # Error / Alert
+COLOR_BORDER = "cyan"              # Panel Border Style
+PROMPT_SYMBOL = "[bold bright_cyan]JARVIS ▸ [/bold bright_cyan]"
+
 
 class UIState(str, Enum):
     IDLE = "IDLE"
@@ -36,7 +46,7 @@ class UIState(str, Enum):
 
 
 class UIManager:
-    """Manages HUD terminal aesthetics and live status animations for JARVIS"""
+    """Manages HUD terminal aesthetics, sci-fi panels, and status animations for JARVIS"""
     
     WAVEFORM_FRAMES = [
         "▁ ▃ ▅ ▇ ▅ ▃ ▁",
@@ -65,39 +75,50 @@ class UIManager:
             self.state = state
 
     def get_state(self) -> UIState:
-        """Get the current state"""
+        """Get current state"""
         return self.state
 
     def get_status_badge(self) -> str:
-        """Return styled status indicator badge line"""
+        """Return styled status indicator badge line with timestamp"""
+        now = datetime.now().strftime("%H:%M:%S")
+        timestamp = f"[dim white][{now}][/dim white]"
+        
         if self.state == UIState.IDLE:
-            return "[bold cyan]● STATE:[/bold cyan] [dim cyan]IDLE[/dim cyan]"
+            badge = "[bold cyan]● STATE:[/bold cyan] [dim cyan]IDLE[/dim cyan]"
         elif self.state == UIState.LISTENING:
-            return "[bold cyan]● STATE:[/bold cyan] [bold bright_cyan]🎤 LISTENING[/bold bright_cyan]"
+            badge = "[bold cyan]● STATE:[/bold cyan] [bold bright_cyan]🎤 LISTENING[/bold bright_cyan]"
         elif self.state == UIState.THINKING:
-            return "[bold cyan]● STATE:[/bold cyan] [bold cyan]🧠 THINKING[/bold cyan]"
+            badge = "[bold cyan]● STATE:[/bold cyan] [bold cyan]🧠 THINKING[/bold cyan]"
         elif self.state == UIState.SPEAKING:
-            return "[bold cyan]● STATE:[/bold cyan] [bold bright_cyan]🔊 SPEAKING[/bold bright_cyan]"
+            badge = "[bold cyan]● STATE:[/bold cyan] [bold bright_cyan]🔊 SPEAKING[/bold bright_cyan]"
         elif self.state == UIState.EXECUTING:
-            return "[bold cyan]● STATE:[/bold cyan] [bold yellow]⚡ EXECUTING[/bold yellow]"
-        return "[bold cyan]● STATE:[/bold cyan] [dim cyan]IDLE[/dim cyan]"
+            badge = "[bold cyan]● STATE:[/bold cyan] [bold yellow]⚡ EXECUTING[/bold yellow]"
+        else:
+            badge = "[bold cyan]● STATE:[/bold cyan] [dim cyan]IDLE[/dim cyan]"
+            
+        return f"{timestamp} {badge}"
 
     def show_banner(self):
         """Display sci-fi HUD startup banner once on launch"""
-        banner_art = """[bold bright_cyan]
-    ███████╗.█████╗ .██████╗.██╗   ██╗██╗.███████╗
-    ╚══███╔╝██╔══██╗██╔══██╗██║   ██║██║██╔════╝
-      ███╔╝ ███████║██████╔╝██║   ██║██║███████╗
-     ███╔╝  ██╔══██║██╔══██╗╚██╗ ██╔╝██║╚════██║
-    ███████╗██║  ██║██║  ██║ ╚████╔╝ ██║███████║
-    ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝  ╚═════╝  ╚═╝╚══════╝
-[/bold bright_cyan]
-[bold white]  J.A.R.V.I.S. // TACTICAL HUD TERMINAL INTERFACE[/bold white]
-[dim cyan]  Powered by NVIDIA NIM API | Type [bold white]/help[/bold white] for commands, [bold white]/exit[/bold white] to quit[/dim cyan]"""
+        banner_art = (
+            "[bold bright_cyan]"
+            "  ███████╗.█████╗ .██████╗.██╗   ██╗██╗.███████╗\n"
+            "  ╚══███╔╝██╔══██╗██╔══██╗██║   ██║██║██╔════╝\n"
+            "    ███╔╝ ███████║██████╔╝██║   ██║██║███████╗\n"
+            "   ███╔╝  ██╔══██║██╔══██╗╚██╗ ██╔╝██║╚════██║\n"
+            "  ███████╗██║  ██║██║  ██║ ╚████╔╝ ██║███████║\n"
+            "  ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝  ╚═════╝  ╚═╝╚══════╝\n"
+            "[/bold bright_cyan]\n"
+            "              [dim white]Created by Nived[/dim white]\n"
+            "[cyan]──────────────────────────────────────────────────────────[/cyan]\n"
+            "  [dim cyan]v1.0[/dim cyan] [cyan]|[/cyan] [dim white]All systems nominal[/dim white] [cyan]|[/cyan] [dim cyan]Type [bold white]/help[/bold white] for commands[/dim cyan]"
+        )
 
         panel = Panel(
             banner_art,
-            border_style="cyan",
+            title="[bold bright_cyan] J . A . R . V . I . S . [/bold bright_cyan]",
+            title_align="center",
+            border_style=COLOR_BORDER,
             box=box.ROUNDED,
             padding=(1, 2)
         )
@@ -111,23 +132,22 @@ class UIManager:
             content,
             title="[bold bright_cyan]JARVIS[/bold bright_cyan]",
             title_align="left",
-            border_style="cyan",
+            border_style=COLOR_BORDER,
             box=box.ROUNDED,
             padding=(1, 2)
         )
         self.console.print(panel)
 
-    def render_tool_exec(self, message: str):
-        """Print tool call with dimmed cyan prefix and icon"""
-        self.console.print(f"[dim bright_cyan][EXEC][/dim bright_cyan] [dim white]{message}[/dim white]")
+    def render_tool_exec(self, message: str, tag: str = "EXEC"):
+        """Print tool call with dimmed cyan bracketed tag prefix"""
+        self.console.print(f"[dim cyan][{tag}][/dim cyan] [dim white]{message}[/dim white]")
 
     def get_user_input(self, prompt_text: str = "") -> str:
-        """Get user input with HUD prompt symbol and visually separate user vs JARVIS text"""
-        prompt_symbol = "[bold green]>[/bold green] "
+        """Get user input with electric cyan prompt symbol"""
         try:
-            return Prompt.ask(prompt_symbol, default="", show_default=False)
+            return Prompt.ask(PROMPT_SYMBOL, default="", show_default=False)
         except Exception:
-            return input("> ")
+            return input("JARVIS ▸ ")
 
     def animate_speaking(self, check_busy_fn: Callable[[], bool]):
         """
