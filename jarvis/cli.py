@@ -76,6 +76,14 @@ class JARVISCLI:
         self.command_history = []
         self.voice_input_queue = asyncio.Queue()
         self.is_busy = False  # Track if JARVIS is busy (speaking, recording, etc.)
+        self.current_tts_task: Optional[asyncio.Task] = None
+
+    def stop_speech(self):
+        """Stop any running TTS task and active audio playback immediately"""
+        if self.current_tts_task and not self.current_tts_task.done():
+            self.current_tts_task.cancel()
+            self.current_tts_task = None
+        self.voice_manager.stop_speaking()
     
     def _load_config(self, config_path: str) -> dict:
         """Load configuration"""
@@ -566,10 +574,10 @@ class JARVISCLI:
             return "Output-only response speech enabled, sir."
         elif cmd_lower == "/speak off":
             self.voice_manager.speak_responses = False
-            self.voice_manager.stop_speaking()
+            self.stop_speech()
             return "Output-only response speech disabled, sir."
         elif cmd_lower in ["/mute", "/stop"]:
-            self.voice_manager.stop_speaking()
+            self.stop_speech()
             return "Muted active speech playback, sir."
         elif cmd_lower.startswith("/awareness"):
             return self.handle_awareness_command(cmd_raw)
@@ -1047,8 +1055,8 @@ class JARVISCLI:
                 if not user_input:
                     continue
                 
-                # Stop previous speech immediately when a new message is received
-                self.voice_manager.stop_speaking()
+                # Stop previous speech and cancel active speech task immediately on new message
+                self.stop_speech()
                 
                 # Set busy state
                 self.is_busy = True
@@ -1061,9 +1069,12 @@ class JARVISCLI:
                     # Display response using HUD UI panel
                     ui.render_response(response)
                     
-                    # Speak response out loud in background (non-blocking) if enabled
+                    # Stop any transient speech and start new response speech task
+                    self.stop_speech()
                     if self.voice_manager.speak_responses or self.voice_manager.enabled:
-                        asyncio.create_task(self.voice_manager.speak_response(response))
+                        self.current_tts_task = asyncio.create_task(
+                            self.voice_manager.speak_response(response)
+                        )
                     
                     ui.set_state(UIState.IDLE)
                     

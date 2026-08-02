@@ -161,17 +161,31 @@ class TTSEngine:
         self.voice = voice
         self.pyttsx_engine = None
         self.is_cancelled = False
+        self._is_speaking = False
         self._initialize()
     
+    @property
+    def is_speaking(self) -> bool:
+        """Check if audio or TTS generation is currently active and not cancelled"""
+        if self.is_cancelled:
+            return False
+        return self._is_speaking
+
     def stop_speaking(self):
         """Stop audio playback immediately and cancel remaining speech queue"""
         self.is_cancelled = True
         try:
-            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
-                pygame.mixer.music.stop()
-                pygame.mixer.music.unload()
-        except Exception:
-            pass
+            if pygame.mixer.get_init():
+                if pygame.mixer.music.get_busy():
+                    pygame.mixer.music.stop()
+                try:
+                    pygame.mixer.music.unload()
+                except Exception:
+                    pass
+        except Exception as e:
+            console.print(f"[dim yellow]Stop speaking warning: {e}[/dim yellow]")
+        finally:
+            self._is_speaking = False
 
     def _initialize(self):
         """Initialize the TTS engine"""
@@ -216,8 +230,13 @@ class TTSEngine:
             if self.is_cancelled:
                 break
             if sentence_callback:
-                sentence_callback(sentence)
+                try:
+                    sentence_callback(sentence)
+                except Exception:
+                    pass
             await self.speak(sentence, speak_code_blocks=speak_code_blocks)
+            if self.is_cancelled:
+                break
     
     async def speak(self, text: str, speak_code_blocks: bool = False):
         """
@@ -234,6 +253,7 @@ class TTSEngine:
         if not clean_text:
             return
         
+        self._is_speaking = True
         try:
             if self.engine_type == "edge":
                 await self._speak_edge(clean_text)
@@ -241,6 +261,8 @@ class TTSEngine:
                 self._speak_pyttsx(clean_text)
         except Exception as e:
             console.print(f"[dim yellow]TTS error: {e}[/dim yellow]")
+        finally:
+            self._is_speaking = False
     
     async def _speak_edge(self, text: str):
         """Speak using edge-tts"""
@@ -271,10 +293,13 @@ class TTSEngine:
             if self.pyttsx_engine is None:
                 self.pyttsx_engine = pyttsx3.init()
             
+            self._is_speaking = True
             self.pyttsx_engine.say(text)
             self.pyttsx_engine.runAndWait()
         except Exception as e:
             console.print(f"[red]Error with pyttsx3: {e}[/red]")
+        finally:
+            self._is_speaking = False
     
     def _play_audio(self, file_path: str):
         """Play audio file using pygame"""
@@ -283,14 +308,22 @@ class TTSEngine:
                 pygame.mixer.init()
             pygame.mixer.music.load(file_path)
             pygame.mixer.music.play()
+            self._is_speaking = True
             
             # Run speaking animation for exact audio playback duration unless cancelled
-            ui.animate_speaking(lambda: pygame.mixer.music.get_busy() and not self.is_cancelled)
+            while pygame.mixer.music.get_busy() and not self.is_cancelled:
+                time.sleep(0.05)
+                ui.animate_speaking(lambda: pygame.mixer.music.get_busy() and not self.is_cancelled)
             
+            if self.is_cancelled and pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+                
             pygame.mixer.music.unload()
                 
         except Exception as e:
             console.print(f"[red]Error playing audio: {e}[/red]")
+        finally:
+            self._is_speaking = False
     
     async def speak_acknowledgment(self):
         """Speak a short acknowledgment phrase"""
@@ -494,6 +527,11 @@ class VoiceManager:
         self.transcription_callback = None
         self.response_callback = None
     
+    @property
+    def is_speaking(self) -> bool:
+        """Check if TTS audio is actively playing"""
+        return self.tts.is_speaking
+
     def stop_speaking(self):
         """Stop current speech playback immediately"""
         self.tts.stop_speaking()
