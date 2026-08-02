@@ -48,10 +48,11 @@ class FileReadTool(Tool):
             if not path.is_file():
                 return f"Error: '{filepath}' is not a file"
             
+            resolved_path = path.resolve()
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            return f"Contents of {filepath}:\n{content}"
+            return f"Contents of file '{filepath}' (resolved path: {resolved_path}):\n{content}"
         except Exception as e:
             return f"Error reading file: {str(e)}"
 
@@ -67,6 +68,7 @@ class FileWriteTool(Tool):
         """Write content to file"""
         try:
             path = Path(filepath)
+            resolved_path = path.resolve()
             
             # Check if file exists and ask for confirmation
             if path.exists() and confirm and self.confirm_dangerous:
@@ -79,7 +81,7 @@ class FileWriteTool(Tool):
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            return f"Successfully wrote to '{filepath}'"
+            return f"Successfully wrote to file '{filepath}' at resolved path: {resolved_path} (Written content: '{content}')"
         except Exception as e:
             return f"Error writing file: {str(e)}"
 
@@ -190,10 +192,10 @@ class ShellCommandTool(Tool):
             if self.logger:
                 self.logger.log(command, approved=True, result=str(result.returncode))
             
-            return output if output else "Command executed successfully (no output)"
+            return f"Executed shell command '{command}' (Exit code: {result.returncode}):\n{output}" if output else f"Executed shell command '{command}' (Exit code: {result.returncode}, no output)"
             
         except subprocess.TimeoutExpired:
-            return "Error: Command timed out"
+            return f"Error: Command '{command}' timed out"
         except Exception as e:
             if self.logger:
                 self.logger.log(command, approved=False, result=str(e))
@@ -211,10 +213,11 @@ class DirectoryTool(Tool):
         """Create or delete directory"""
         try:
             dir_path = Path(path)
+            resolved_path = dir_path.resolve()
             
             if action == "create":
                 dir_path.mkdir(parents=True, exist_ok=True)
-                return f"Created directory: {path}"
+                return f"Created directory '{path}' successfully at resolved path: {resolved_path}"
             
             elif action == "delete":
                 if confirm and self.confirm_dangerous:
@@ -222,7 +225,7 @@ class DirectoryTool(Tool):
                         return "Operation cancelled by user"
                 
                 shutil.rmtree(dir_path)
-                return f"Deleted directory: {path}"
+                return f"Deleted directory '{path}' at resolved path: {resolved_path}"
             
             else:
                 return f"Unknown action: {action}. Use 'create' or 'delete'"

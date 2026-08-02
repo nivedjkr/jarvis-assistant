@@ -470,6 +470,9 @@ class JARVISCLI:
         # Check for natural language tool commands
         tool_response = await self._check_tool_commands(user_input)
         if tool_response:
+            # Synchronize structured tool execution record into LLM context history
+            self.api_client.add_message("user", user_input)
+            self.api_client.add_message("assistant", f"[RECORDED TOOL EXECUTION RESULT]\nCommand: {user_input}\nResult: {tool_response}")
             return tool_response
 
         # Otherwise, send to AI
