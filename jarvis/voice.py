@@ -113,6 +113,25 @@ class STTEngine:
             return ""
 
 
+def _clean_text_for_speech(text: str) -> str:
+    """Clean markdown, code blocks, URLs, and rich tags for clear TTS vocalization"""
+    if not text:
+        return ""
+    # Remove code blocks ```...```
+    cleaned = re.sub(r'```[\s\S]*?```', ' code block omitted ', text)
+    # Remove inline backticks `code`
+    cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
+    # Remove markdown headers #, ##, etc.
+    cleaned = re.sub(r'#+\s*', '', cleaned)
+    # Remove URLs
+    cleaned = re.sub(r'https?://\S+', '', cleaned)
+    # Remove rich formatting tags like [bold cyan], [/bold cyan]
+    cleaned = re.sub(r'\[/?[a-zA-Z0-9_:\s]+\]', '', cleaned)
+    # Clean up whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
+
 class TTSEngine:
     """Text-to-Speech engine using edge-tts with pyttsx3 fallback"""
     
@@ -171,25 +190,6 @@ class TTSEngine:
                 sentence_callback(sentence)
             await self.speak(sentence)
     
-def _clean_text_for_speech(text: str) -> str:
-    """Clean markdown, code blocks, URLs, and rich tags for clear TTS vocalization"""
-    if not text:
-        return ""
-    # Remove code blocks ```...```
-    cleaned = re.sub(r'```[\s\S]*?```', ' code block omitted ', text)
-    # Remove inline backticks `code`
-    cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
-    # Remove markdown headers #, ##, etc.
-    cleaned = re.sub(r'#+\s*', '', cleaned)
-    # Remove URLs
-    cleaned = re.sub(r'https?://\S+', '', cleaned)
-    # Remove rich formatting tags like [bold cyan], [/bold cyan]
-    cleaned = re.sub(r'\[/?[a-zA-Z0-9_:\s]+\]', '', cleaned)
-    # Clean up whitespace
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    return cleaned
-
-
     async def speak(self, text: str):
         """
         Speak text using configured TTS engine
