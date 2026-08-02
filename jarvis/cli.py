@@ -5,6 +5,7 @@ JARVIS CLI - Main entry point for the terminal AI assistant
 import asyncio
 import sys
 import subprocess
+import json
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -62,6 +63,7 @@ class JARVISCLI:
             tts_engine=self.voice_manager.tts,
             check_interval=60
         )
+        self.proactive_monitor.start()
         
         # Initialize global awareness manager
         self.awareness_manager = GlobalAwarenessManager(
@@ -193,6 +195,11 @@ class JARVISCLI:
                 ("/trade log <ticker> <BUY/SELL> <price> <qty>", "Log a trade to journal"),
                 ("/trade review [ticker]", "View trade journal history")
             ],
+            "DIAGNOSTICS & TRUST": [
+                ("/diagnose", "Check real status of all subsystems (DB, API, audio, threads)"),
+                ("/why", "Show what tool was called and why for the last response"),
+                ("/why <n>", "Show tool details for the nth-previous response")
+            ],
             "GLOBAL AWARENESS": [
                 ("/awareness on|off|topics", "Manage background news monitoring"),
                 ("/news", "Show recent surfaced notable news updates")
@@ -201,7 +208,7 @@ class JARVISCLI:
         
         # Filter categories if requested
         if cat_lower:
-            matched_cats = {k: v for k, v in categories.items() if cat_lower in k.lower() or (cat_lower in ["dev", "swe"] and "DEVELOPER" in k) or (cat_lower in ["study", "flashcards"] and "STUDY" in k)}
+            matched_cats = {k: v for k, v in categories.items() if cat_lower in k.lower() or (cat_lower in ["dev", "swe"] and "DEVELOPER" in k) or (cat_lower in ["study", "flashcards"] and "STUDY" in k) or (cat_lower in ["diagnostics", "trust", "diag"] and "DIAGNOSTICS" in k)}
             if matched_cats:
                 categories = matched_cats
             else:
@@ -577,6 +584,10 @@ class JARVISCLI:
             return f"Displaying help information{' for category ' + cat if cat else ''}, sir."
         elif cmd_lower in ["/whoami", "/recall"]:
             return self.handle_whoami()
+        elif cmd_lower == "/diagnose":
+            return await self.handle_diagnose_command()
+        elif cmd_lower.startswith("/why"):
+            return self.handle_why_command(cmd_raw)
         elif cmd_lower == "/clear":
             console.clear()
             self.show_banner()
@@ -1249,6 +1260,90 @@ class JARVISCLI:
             
         return "Usage: /trade log <ticker> <BUY/SELL> <price> <qty> [reason: text] OR /trade review [ticker]"
 
+    async def handle_diagnose_command(self) -> str:
+        """Perform live self-diagnostic checks of all JARVIS subsystems"""
+        table = Table(title="[bold cyan]JARVIS Subsystem Live Diagnostics[/bold cyan]")
+        table.add_column("Subsystem", style="cyan")
+        table.add_column("Status", style="bold")
+        table.add_column("Detail Message", style="white")
+        
+        # 1. Database
+        db_ok, db_msg = self.memory.test_connection()
+        db_status = "[bold green]✓ OK[/bold green]" if db_ok else "[bold red]✗ FAILED[/bold red]"
+        table.add_row("SQLite Database", db_status, db_msg)
+        
+        # 2. NIM API
+        api_ok, api_msg, _ = await self.api_client.test_connection()
+        api_status = "[bold green]✓ OK[/bold green]" if api_ok else "[bold red]✗ FAILED[/bold red]"
+        table.add_row("NVIDIA NIM API", api_status, api_msg)
+        
+        # 3. Audio/TTS
+        from jarvis.voice import test_tts, test_mic
+        tts_ok, tts_msg = await test_tts()
+        tts_status = "[bold green]✓ OK[/bold green]" if tts_ok else "[bold red]✗ FAILED[/bold red]"
+        table.add_row("Edge-TTS Audio", tts_status, tts_msg)
+        
+        # 4. Audio Input Device (Mic)
+        mic_ok, mic_msg = test_mic()
+        mic_status = "[bold green]✓ OK[/bold green]" if mic_ok else "[bold red]✗ FAILED[/bold red]"
+        table.add_row("Microphone Input", mic_status, mic_msg)
+        
+        # 5. Background Threads (ProactiveMonitor)
+        pm_alive = self.proactive_monitor.thread.is_alive() if (hasattr(self.proactive_monitor, 'thread') and self.proactive_monitor.thread) else False
+        last_ts = getattr(self.proactive_monitor, 'last_check_timestamp', None)
+        if pm_alive and last_ts:
+            seconds_ago = (datetime.now() - last_ts).total_seconds()
+            if seconds_ago <= 120:
+                pm_ok = True
+                pm_msg = f"Thread active (last checked {seconds_ago:.0f}s ago)"
+            else:
+                pm_ok = False
+                pm_msg = f"Thread hung (last checked {seconds_ago:.0f}s ago)"
+        elif pm_alive:
+            pm_ok = True
+            pm_msg = "Thread active (starting up)"
+        else:
+            pm_ok = False
+            pm_msg = "Thread inactive / stopped"
+            
+        pm_status = "[bold green]✓ OK[/bold green]" if pm_ok else "[bold red]✗ FAILED[/bold red]"
+        table.add_row("Proactive Monitor", pm_status, pm_msg)
+        
+        console.print(table)
+        return "Self-diagnostic check complete, sir."
+
+    def handle_why_command(self, cmd_raw: str) -> str:
+        """Explain the tool execution details for recent response"""
+        parts = cmd_raw.strip().split()
+        idx = 0
+        if len(parts) > 1:
+            arg = parts[-1]
+            if arg.isdigit():
+                idx = max(0, int(arg) - 1)
+                
+        transactions = getattr(self.tools, 'last_transactions', [])
+        if not transactions:
+            return "That was a direct response, no tools were used."
+            
+        if idx >= len(transactions):
+            return f"Requested tool transaction #{idx + 1} not found. Only {len(transactions)} tool call(s) logged in session."
+            
+        tx = transactions[idx]
+        kwargs_str = json.dumps(tx['kwargs'], indent=2)
+        res_str = tx['result'][:1500]
+        
+        explanation_text = (
+            f"[bold cyan]Tool Called:[/bold cyan] {tx['tool']}\n"
+            f"[bold cyan]Timestamp:[/bold cyan] {tx['timestamp']}\n"
+            f"[bold cyan]Exact Arguments:[/bold cyan]\n{kwargs_str}\n\n"
+            f"[bold cyan]Raw Execution Result:[/bold cyan]\n{res_str}\n\n"
+            f"[bold yellow]Rationale:[/bold yellow] Executed tool '{tx['tool']}' with provided arguments and supplied raw result to response context."
+        )
+        
+        title = f"[bold cyan]Action Explanation (/why #{idx + 1})[/bold cyan]"
+        console.print(Panel(explanation_text, title=title, border_style="cyan"))
+        return f"Displayed action explanation for tool transaction #{idx + 1} ({tx['tool']})."
+
     async def _check_tool_commands(self, user_input: str) -> Optional[str]:
         """Check if input matches a tool command or protocol trigger"""
         input_lower = user_input.lower()
@@ -1295,10 +1390,13 @@ class JARVISCLI:
                         self.memory.log_task(f"Open website {target}", "completed")
                         return result
                     
-                    cmd, matches = self.app_registry.resolve_app(target)
+                    cmd, matches, matched_key = self.app_registry.resolve_app(target)
                     if cmd or matches or target_lower in ["notepad", "calc", "calculator", "chrome", "vscode", "explorer", "task manager", "settings"]:
                         result = await self.tools.execute_tool("open_application", app_name=target)
                         self.memory.log_task(f"Open application {target}", "completed")
+                        if matched_key:
+                            conf_warn = f"⚠️ [CONFIDENCE WARNING] I matched '{target}' to '{matched_key}' — confirm this is correct?\n"
+                            result = conf_warn + result
                         return result
 
         # Web Search / Browse URL
@@ -1324,9 +1422,11 @@ class JARVISCLI:
         elif any(kw in input_lower for kw in ["read", "cat", "view", "show contents of", "what is in", "what's in"]):
             filename = re.sub(r'^(can\s+you\s+)?(please\s+)?(read|cat|view|show\s+contents\s+of|what\s+is\s+in|what\'s\s+in|display)\s+(the\s+)?(contents\s+of\s+)?(file\s+)?', '', user_input, flags=re.I).strip().rstrip('?.!')
             if filename and len(filename.split()) <= 3:
+                resolved_p = Path(filename).resolve()
+                res_warn = f"⚠️ [PATH RESOLUTION] Resolving '{filename}' to '{resolved_p}' — proceeding.\n"
                 result = await self.tools.execute_tool("read_file", filepath=filename)
                 self.memory.log_task(f"Read file {filename}", "completed")
-                return result
+                return res_warn + result
         
         # List files / directory
         elif "list" in input_lower or "show files" in input_lower or input_lower == "ls" or input_lower.startswith("ls "):

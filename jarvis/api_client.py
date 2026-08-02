@@ -4,6 +4,7 @@ Handles communication with NVIDIA's OpenAI-compatible API
 """
 
 import os
+import time
 from typing import AsyncGenerator, List, Dict, Any
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
@@ -59,9 +60,10 @@ class NIMClient:
                 "Please set it in your .env file or environment."
             )
         
+        self.api_key = api_key
         self.client = AsyncOpenAI(
             base_url=self.config["api"]["base_url"],
-            api_key=api_key
+            api_key=self.api_key
         )
         
         # Conversation history
@@ -127,6 +129,30 @@ class NIMClient:
     def clear_history(self):
         """Clear conversation history"""
         self.messages = []
+
+    async def test_connection(self) -> tuple[bool, str, float]:
+        """Send minimal test request to NIM API endpoint, measure latency, verify API key validity"""
+        start_time = time.time()
+        if not self.api_key or self.api_key == "your_nvidia_nim_api_key_here":
+            return False, "API Key missing or unconfigured", 0.0
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.config["api"]["model"],
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1,
+                stream=False
+            )
+            latency_ms = (time.time() - start_time) * 1000
+            if response and response.choices:
+                return True, f"Reachable ({latency_ms:.0f}ms latency) | API Key valid", latency_ms
+            return False, f"Unexpected empty response ({latency_ms:.0f}ms)", latency_ms
+        except Exception as e:
+            latency_ms = (time.time() - start_time) * 1000
+            err_str = str(e)
+            if "401" in err_str or "403" in err_str or "unauthorized" in err_str.lower() or "authentication" in err_str.lower():
+                return False, f"Auth Error (Invalid API Key): {err_str[:80]}", latency_ms
+            return False, f"Unreachable / Connection Error: {err_str[:80]}", latency_ms
     
     async def chat_stream(self, user_message: str) -> AsyncGenerator[str, None]:
         """Stream chat response from NVIDIA NIM API"""

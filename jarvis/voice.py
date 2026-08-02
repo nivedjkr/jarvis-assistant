@@ -805,6 +805,7 @@ class ProactiveMonitor:
         """Main monitoring loop"""
         while self.running:
             try:
+                self.last_check_timestamp = datetime.now()
                 self._check_reminders()
                 self._check_deadlines()
                 self._check_price_watches()
@@ -870,3 +871,37 @@ class ProactiveMonitor:
             
         except Exception as e:
             console.print(f"[red]Error speaking boot greeting: {e}[/red]")
+
+
+async def test_tts() -> tuple[bool, str]:
+    """Check if edge-tts can generate audio clips"""
+    try:
+        import edge_tts
+        communicate = edge_tts.Communicate("test", "en-US-SteffanNeural")
+        audio_bytes = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_bytes += chunk["data"]
+        if len(audio_bytes) > 0:
+            return True, f"edge-tts online ({len(audio_bytes)} audio bytes generated)"
+        return False, "edge-tts returned 0 audio bytes"
+    except Exception as e:
+        return False, f"TTS clip generation error: {e}"
+
+
+def test_mic() -> tuple[bool, str]:
+    """Check if configured audio input device is detected"""
+    try:
+        import sounddevice as sd
+        devices = sd.query_devices()
+        input_devices = [d for d in devices if d.get('max_input_channels', 0) > 0]
+        if not input_devices:
+            return False, "no input device detected"
+        try:
+            default_in = sd.query_devices(kind='input')
+            dev_name = default_in.get('name', input_devices[0]['name'])
+            return True, f"Detected: {dev_name}"
+        except Exception:
+            return True, f"Detected: {input_devices[0]['name']}"
+    except Exception as e:
+        return False, f"Mic detection error: {e}"

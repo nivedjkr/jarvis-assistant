@@ -305,14 +305,17 @@ class AppLaunchTool(Tool):
         """Launch application by name"""
         target = app_name or name
         try:
-            cmd, matches = self.app_registry.resolve_app(target)
+            cmd, matches, matched_key = self.app_registry.resolve_app(target)
             
             if cmd:
                 if cmd.startswith("start "):
                     os.system(cmd)
                 else:
                     subprocess.Popen(cmd, shell=True)
-                return f"Launched application: '{target}' ({cmd})"
+                msg = f"Launched application: '{matched_key or target}' ({cmd})"
+                if matched_key:
+                    msg = f"⚠️ [CONFIDENCE WARNING] I matched '{target}' to '{matched_key}' — confirm this is correct?\n" + msg
+                return msg
             
             if matches:
                 matches_str = ", ".join(f"'{m}'" for m in matches)
@@ -408,6 +411,7 @@ class ToolRegistry:
         self.confirm_dangerous = confirm_dangerous
         self.logger = logger
         self.app_registry = app_registry or AppRegistry()
+        self.last_transactions: List[Dict[str, Any]] = []
         self._register_default_tools()
     
     def _register_default_tools(self):
@@ -453,4 +457,16 @@ class ToolRegistry:
         
         result = await tool.execute(**kwargs)
         ui.set_state(UIState.IDLE)
+        
+        from datetime import datetime
+        tx = {
+            "tool": tool_name,
+            "kwargs": kwargs,
+            "result": str(result),
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        }
+        self.last_transactions.insert(0, tx)
+        if len(self.last_transactions) > 5:
+            self.last_transactions.pop()
+            
         return result

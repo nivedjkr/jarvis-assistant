@@ -63,30 +63,32 @@ class AppRegistry:
         """Save current apps state to disk"""
         self.save_apps_data(self.apps)
 
-    def resolve_app(self, name: str) -> Tuple[Optional[str], List[str]]:
+    def resolve_app(self, name: str) -> Tuple[Optional[str], List[str], Optional[str]]:
         """
         Resolve application name to launcher command.
-        Returns tuple: (resolved_command, fuzzy_matches_list)
+        Returns tuple: (resolved_command, fuzzy_matches_list, matched_app_name_if_fuzzy)
         """
         name_clean = name.strip().lower()
         
         # 1. Exact match
         if name_clean in self.apps:
-            return self.apps[name_clean], []
+            return self.apps[name_clean], [], None
 
         # 2. Substring match
         substring_matches = [k for k in self.apps.keys() if name_clean in k or k in name_clean]
         if len(substring_matches) == 1:
-            return self.apps[substring_matches[0]], []
+            matched_key = substring_matches[0]
+            return self.apps[matched_key], [], matched_key
 
         # 3. Fuzzy match using difflib
         matches = difflib.get_close_matches(name_clean, self.apps.keys(), n=3, cutoff=0.55)
         if len(matches) == 1:
-            return self.apps[matches[0]], []
+            matched_key = matches[0]
+            return self.apps[matched_key], [], matched_key
         elif len(matches) > 1:
-            return None, matches
+            return None, matches, None
 
-        return None, []
+        return None, [], None
 
     def add_app(self, name: str, command: str) -> bool:
         """Add or update an app mapping"""

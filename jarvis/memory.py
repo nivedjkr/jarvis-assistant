@@ -33,6 +33,17 @@ class Memory:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def test_connection(self) -> tuple[bool, str]:
+        """Test SQLite database connection with a real query"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM profile")
+                count = cursor.fetchone()[0]
+                return True, f"Connected to {self.db_path} ({count} profile records)"
+        except Exception as e:
+            return False, f"Database error: {e}"
     
     def _init_db(self):
         """Initialize database schema"""
