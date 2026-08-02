@@ -26,7 +26,7 @@ personality:
 
 # Voice Settings
 voice:
-  enabled: false
+  enabled: true
   stt_model: "base"  # "base" or "small" for faster-whisper
   tts_engine: "edge"  # "edge" or "pyttsx3"
   tts_voice: "en-GB-RyanNeural"  # Edge TTS voice

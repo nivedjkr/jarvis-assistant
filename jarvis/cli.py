@@ -575,11 +575,11 @@ class JARVISCLI:
                 response_text += chunk
                 status.update(f"[bold cyan]JARVIS:[/bold cyan] {response_text[-50:]}")
         
-        ui.set_state(UIState.IDLE)
-        
         # Speak response if voice mode is enabled
         if self.voice_manager.enabled:
-            asyncio.create_task(self.voice_manager.speak_response(response_text))
+            await self.voice_manager.speak_response(response_text)
+        else:
+            ui.set_state(UIState.IDLE)
         
         return response_text
     
