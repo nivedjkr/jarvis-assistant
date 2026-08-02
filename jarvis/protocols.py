@@ -116,17 +116,23 @@ class ProtocolManager:
         """List all protocols"""
         return list(self.protocols.values())
 
-    def add_protocol(self, name: str, description: str, steps: List[Dict[str, Any]]) -> bool:
+    def add_protocol(self, name: str, description: str, steps: List[Dict[str, Any]], project_path: Optional[str] = None, venv_path: Optional[str] = None) -> bool:
         """Add or overwrite a protocol"""
         key = name.strip().lower()
-        if not key or not steps:
+        if not key:
             return False
         
-        self.protocols[key] = {
+        proto_data = {
             "name": name.strip(),
             "description": description.strip(),
-            "steps": steps
+            "steps": steps or []
         }
+        if project_path:
+            proto_data["project_path"] = project_path
+        if venv_path:
+            proto_data["venv_path"] = venv_path
+
+        self.protocols[key] = proto_data
         self._save_protocols()
         return True
 
@@ -172,7 +178,7 @@ class ProtocolManager:
         proto_name = proto.get("name", name)
         steps = proto.get("steps", [])
 
-        if not steps:
+        if not steps and not proto.get("project_path"):
             return f"Protocol '{proto_name}' has no defined steps."
 
         # Safety Check
@@ -187,6 +193,29 @@ class ProtocolManager:
 
         console.print(f"\n[bold cyan]🚀 Invoking Protocol: '{proto_name}' ({len(steps)} steps)[/bold cyan]")
         step_outputs = []
+
+        # Project-specific handling if project_path defined
+        project_path_str = proto.get("project_path")
+        if project_path_str:
+            p_path = Path(project_path_str).resolve()
+            if p_path.exists():
+                os.chdir(str(p_path))
+                console.print(f"[bold cyan]📁 Switched working directory to project path: {p_path}[/bold cyan]")
+                step_outputs.append(f"Switched directory to: {p_path}")
+                
+                # Check for venv
+                venv_str = proto.get("venv_path")
+                if venv_str and Path(venv_str).exists():
+                    console.print(f"[green]🐍 Virtual environment found: {venv_str}[/green]")
+                    step_outputs.append(f"Activated venv: {venv_str}")
+                
+                # Check for TODO.md
+                todo_path = p_path / "TODO.md"
+                if todo_path.exists():
+                    with open(todo_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        todo_text = f.read()
+                    console.print(Panel(todo_text[:1000], title="[bold cyan]📋 Project TODO.md[/bold cyan]"))
+                    step_outputs.append(f"TODO.md Content:\n{todo_text[:500]}")
 
         for idx, step in enumerate(steps, 1):
             tool_name = step.get("tool", "")

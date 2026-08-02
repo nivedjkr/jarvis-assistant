@@ -729,11 +729,85 @@ class ProactiveMonitor:
             except Exception as e:
                 console.print(f"[red]Error delivering announcement: {e}[/red]")
     
+    def _check_deadlines(self):
+        """Check for due deadlines and escalate alert frequency"""
+        deadlines = self.memory.get_pending_deadlines()
+        now = datetime.now()
+        
+        for d in deadlines:
+            due_date_str = d.get("due_date")
+            if not due_date_str:
+                continue
+            try:
+                due_dt = datetime.fromisoformat(due_date_str)
+                diff_hours = (due_dt - now).total_seconds() / 3600.0
+                last_alerted_str = d.get("last_alerted")
+                last_alerted = datetime.fromisoformat(last_alerted_str) if last_alerted_str else None
+                
+                should_alert = False
+                alert_prefix = ""
+                
+                if 0 <= diff_hours <= 24:
+                    # Final day: alert every 3 hours
+                    if not last_alerted or (now - last_alerted).total_seconds() >= 10800:
+                        should_alert = True
+                        alert_prefix = f"URGENT DEADLINE IN {int(diff_hours)} HOURS:"
+                elif 24 < diff_hours <= 72:
+                    # Within 3 days: alert daily
+                    if not last_alerted or (now - last_alerted).total_seconds() >= 86400:
+                        should_alert = True
+                        alert_prefix = f"DEADLINE APPROACHING ({int(diff_hours / 24)} days away):"
+                        
+                if should_alert:
+                    alert_text = f"{alert_prefix} {d['name']}"
+                    console.print(f"\n[bold red]⚠️  {alert_text}[/bold red]\n")
+                    self.memory.update_deadline_last_alerted(d["id"])
+                    self.announcement_queue.append(alert_text)
+            except ValueError:
+                pass
+
+    def _check_price_watches(self):
+        """Check active stock price watches against live market data using yfinance"""
+        watches = self.memory.get_active_price_watches()
+        if not watches:
+            return
+        
+        try:
+            import yfinance as yf
+            for w in watches:
+                ticker = w["ticker"]
+                condition = w["condition"].lower()
+                target_price = float(w["target_price"])
+                
+                t = yf.Ticker(ticker)
+                live_price = None
+                if hasattr(t, 'fast_info') and 'lastPrice' in t.fast_info:
+                    live_price = t.fast_info['lastPrice']
+                elif hasattr(t, 'info') and 'regularMarketPrice' in t.info:
+                    live_price = t.info.get('regularMarketPrice')
+                    
+                if live_price is not None:
+                    triggered = False
+                    if condition in ["above", ">", ">="] and live_price >= target_price:
+                        triggered = True
+                    elif condition in ["below", "<", "<="] and live_price <= target_price:
+                        triggered = True
+                        
+                    if triggered:
+                        alert_msg = f"{ticker} has crossed {condition} ${target_price:.2f}, currently at ${live_price:.2f}, sir."
+                        console.print(f"\n[bold bright_cyan]📈 MARKET ALERT:[/bold bright_cyan] [bold white]{alert_msg}[/bold white]\n")
+                        self.memory.trigger_price_watch(w["id"])
+                        self.announcement_queue.append(alert_msg)
+        except Exception as e:
+            console.print(f"[dim yellow]Market monitor check warning: {e}[/dim yellow]")
+
     def _monitor_loop(self):
         """Main monitoring loop"""
         while self.running:
             try:
                 self._check_reminders()
+                self._check_deadlines()
+                self._check_price_watches()
                 self._deliver_announcements()
                 time.sleep(self.check_interval)
             except Exception as e:

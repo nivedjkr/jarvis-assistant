@@ -7,6 +7,7 @@ import sys
 import subprocess
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
@@ -588,6 +589,28 @@ class JARVISCLI:
         elif cmd_lower == "/news":
             self.show_news()
             return "Displaying recent surfaced news updates, sir."
+        elif cmd_lower.startswith("/flashcard"):
+            return await self.handle_flashcard_command(cmd_raw)
+        elif cmd_lower == "/review":
+            return await self.handle_review_command()
+        elif cmd_lower.startswith("/deadline"):
+            return await self.handle_deadline_command(cmd_raw)
+        elif cmd_lower == "/deadlines":
+            return self.show_deadlines()
+        elif cmd_lower.startswith("/summarize"):
+            return await self.handle_summarize_pdf_command(cmd_raw)
+        elif cmd_lower.startswith("/explain-error"):
+            return await self.handle_explain_error_command(cmd_raw)
+        elif cmd_lower.startswith("/idea ") or cmd_lower == "/idea":
+            return self.handle_idea_command(cmd_raw)
+        elif cmd_lower.startswith("/ideas"):
+            return self.handle_ideas_command(cmd_raw)
+        elif cmd_lower.startswith("/meeting"):
+            return await self.handle_meeting_command(cmd_raw)
+        elif cmd_lower.startswith("/watch"):
+            return self.handle_watch_command(cmd_raw)
+        elif cmd_lower.startswith("/trade"):
+            return self.handle_trade_command(cmd_raw)
         elif cmd_lower.startswith("/protocol"):
             return await self.handle_protocol_command(cmd_raw)
         else:
@@ -852,9 +875,331 @@ class JARVISCLI:
                 
         return "\n".join(lines)
 
+    async def handle_flashcard_command(self, cmd_raw: str) -> str:
+        """Handle /flashcard [add|from-file] commands"""
+        parts = cmd_raw.strip().split(maxsplit=2)
+        if len(parts) < 2:
+            return "Usage: /flashcard add \"question\" \"answer\" OR /flashcard from-file <path>"
+        
+        subcmd = parts[1].lower()
+        if subcmd == "add" and len(parts) > 2:
+            body = parts[2].strip()
+            q, a = "", ""
+            if "|" in body:
+                q, a = body.split("|", 1)
+            elif '"' in body:
+                matches = re.findall(r'"([^"]*)"', body)
+                if len(matches) >= 2:
+                    q, a = matches[0], matches[1]
+                else:
+                    return 'Usage: /flashcard add "question" "answer"'
+            else:
+                return 'Usage: /flashcard add "question" "answer" or /flashcard add Q | A'
+            
+            card = self.memory.add_flashcard(q, a)
+            return f"Flashcard added (ID: {card['id']}):\nQ: {card['question']}\nA: {card['answer']}"
+        
+        elif subcmd == "from-file" and len(parts) > 2:
+            filepath = parts[2].strip().strip('"\'')
+            path = Path(filepath)
+            if not path.exists():
+                return f"Error: File '{filepath}' not found."
+            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            if not content.strip():
+                return f"Error: File '{filepath}' is empty."
+            
+            prompt = f"Extract all important Q&A flashcard pairs from the following text notes. Return ONLY a valid JSON array of objects with keys 'question' and 'answer':\n\n{content[:4000]}"
+            res_json = ""
+            async for chunk in self.api_client.chat_stream(prompt):
+                res_json += chunk
+            
+            import json
+            try:
+                start_idx = res_json.find('[')
+                end_idx = res_json.rfind(']')
+                if start_idx != -1 and end_idx != -1:
+                    cards = json.loads(res_json[start_idx:end_idx+1])
+                    added_count = 0
+                    for c in cards:
+                        if "question" in c and "answer" in c:
+                            self.memory.add_flashcard(c["question"], c["answer"])
+                            added_count += 1
+                    return f"Extracted and stored {added_count} flashcards into SQLite database from '{filepath}'."
+            except Exception as e:
+                return f"Failed to parse extracted JSON flashcards: {e}\nRaw output: {res_json[:300]}"
+            return "Could not extract flashcards from notes file."
+            
+        return "Usage: /flashcard add \"question\" \"answer\" OR /flashcard from-file <path>"
+
+    async def handle_review_command(self) -> str:
+        """Handle /review interactive quiz mode"""
+        due_cards = self.memory.get_due_flashcards()
+        if not due_cards:
+            return "No flashcards due for review right now, sir! Great job!"
+        
+        card = due_cards[0]
+        console.print(f"\n[bold cyan]📚 FLASHCARD QUIZ (ID: {card['id']})[/bold cyan]")
+        console.print(f"[bold white]Q: {card['question']}[/bold white]\n")
+        await asyncio.to_thread(Prompt.ask, "Press Enter to reveal answer")
+        console.print(f"[bold green]A: {card['answer']}[/bold green]\n")
+        
+        is_correct = await asyncio.to_thread(Confirm.ask, "Did you answer correctly?")
+        self.memory.update_flashcard_review(card['id'], is_correct)
+        
+        next_interval = (card.get("interval_days", 1) or 1) * 2 if is_correct else 1
+        status_msg = f"[green]Correct! Interval pushed to {next_interval} days.[/green]" if is_correct else "[yellow]Incorrect. Reset to 1 day interval.[/yellow]"
+        console.print(status_msg)
+        return f"Reviewed Flashcard #{card['id']}. {len(due_cards) - 1} remaining due."
+
+    async def handle_deadline_command(self, cmd_raw: str) -> str:
+        """Handle /deadline add "name" <date> or /deadlines"""
+        parts = cmd_raw.strip().split(maxsplit=2)
+        if len(parts) < 2:
+            return "Usage: /deadline add \"assignment\" <date>"
+        
+        subcmd = parts[1].lower()
+        if subcmd == "add" and len(parts) > 2:
+            body = parts[2].strip()
+            name = ""
+            date_str = ""
+            if '"' in body:
+                matches = re.findall(r'"([^"]*)"', body)
+                if matches:
+                    name = matches[0]
+                    date_str = body.replace(f'"{name}"', '').strip()
+            if not name:
+                parts_body = body.split(maxsplit=1)
+                name = parts_body[0]
+                date_str = parts_body[1] if len(parts_body) > 1 else ""
+            
+            _, due_at = self.parse_reminder_time(f"remind me in {date_str} to {name}" if date_str else name)
+            deadline = self.memory.add_deadline(name, due_at.isoformat())
+            return f"Deadline added: '{name}' due at {due_at.strftime('%Y-%m-%d %H:%M:%S')}."
+            
+        return "Usage: /deadline add \"assignment\" <date>"
+
+    def show_deadlines(self) -> str:
+        """Display pending deadlines with remaining time"""
+        deadlines = self.memory.get_pending_deadlines()
+        if not deadlines:
+            return "No pending deadlines, sir."
+        
+        now = datetime.now()
+        table = Table(title="[bold cyan]Pending Deadlines[/bold cyan]")
+        table.add_column("ID", style="cyan")
+        table.add_column("Assignment / Event", style="white")
+        table.add_column("Due Datetime", style="yellow")
+        table.add_column("Time Remaining", style="green")
+        
+        lines = ["Pending Deadlines:"]
+        for d in deadlines:
+            due_dt = datetime.fromisoformat(d["due_date"])
+            diff = (due_dt - now).total_seconds()
+            hours = int(diff / 3600)
+            days = int(hours / 24)
+            rem_str = f"{days} days ({hours % 24}h)" if days > 0 else f"{hours} hours ({int((diff % 3600)/60)}m)"
+            if diff < 0:
+                rem_str = "[red]OVERDUE[/red]"
+            table.add_row(str(d["id"]), d["name"], due_dt.strftime("%Y-%m-%d %H:%M"), rem_str)
+            lines.append(f"- '{d['name']}' due at {due_dt.strftime('%Y-%m-%d %H:%M')} ({rem_str})")
+            
+        console.print(table)
+        return "\n".join(lines)
+
+    async def handle_summarize_pdf_command(self, cmd_raw: str) -> str:
+        """Handle /summarize <path.pdf>"""
+        parts = cmd_raw.strip().split(maxsplit=1)
+        if len(parts) < 2:
+            return "Usage: /summarize <path.pdf>"
+        
+        filepath = parts[1].strip().strip('"\'')
+        extracted_text = await self.tools.execute_tool("summarize_pdf", filepath=filepath)
+        if extracted_text.startswith("Error:"):
+            return extracted_text
+        
+        prompt = f"You are an academic paper summarizer. Summarize the following REAL extracted paper text into structured bullet points with sections: 1. Core Claim / Objective, 2. Methodology / Approach, 3. Key Results / Findings:\n\n{extracted_text[:4000]}"
+        
+        summary = ""
+        async for chunk in self.api_client.chat_stream(prompt):
+            summary += chunk
+        return summary
+
+    async def handle_explain_error_command(self, cmd_raw: str) -> str:
+        """Handle /explain-error [error_text] command"""
+        parts = cmd_raw.strip().split(maxsplit=1)
+        error_text = parts[1].strip() if len(parts) > 1 else getattr(self, "last_failed_command_output", "")
+        
+        if not error_text:
+            return "Please provide error text to explain (e.g. /explain-error <pasted error>) or run a command first that produces an error."
+        
+        prompt = f"Explain the following REAL software error in plain language, identify the likely root cause, and provide clear step-by-step fix suggestions:\n\n{error_text[:4000]}"
+        explanation = ""
+        async for chunk in self.api_client.chat_stream(prompt):
+            explanation += chunk
+        return explanation
+
+    def handle_idea_command(self, cmd_raw: str) -> str:
+        """Handle /idea <text> command"""
+        parts = cmd_raw.strip().split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            return "Usage: /idea <your idea or decision text>"
+        
+        idea_text = parts[1].strip()
+        idea = self.memory.add_idea(idea_text)
+        return f"Idea logged (ID: {idea['id']}): '{idea['title']}'."
+
+    def handle_ideas_command(self, cmd_raw: str) -> str:
+        """Handle /ideas [list|search <keyword>] command"""
+        parts = cmd_raw.strip().split(maxsplit=2)
+        subcmd = parts[1].lower() if len(parts) > 1 else "list"
+        
+        if subcmd in ["list", "all"]:
+            ideas = self.memory.get_ideas()
+            if not ideas:
+                return "No stored ideas found in database, sir."
+            table = Table(title="[bold cyan]Idea & Decision Journal[/bold cyan]")
+            table.add_column("ID", style="cyan")
+            table.add_column("Title", style="white")
+            table.add_column("Created At", style="yellow")
+            for i in ideas:
+                table.add_row(str(i["id"]), i["title"], i.get("created_at", "")[:16])
+            console.print(table)
+            return f"Found {len(ideas)} logged ideas."
+            
+        elif subcmd in ["search", "find"] and len(parts) > 2:
+            kw = parts[2].strip()
+            results = self.memory.search_ideas(kw)
+            if not results:
+                return f"No ideas matching '{kw}' found."
+            lines = [f"Search Results for '{kw}':"]
+            for r in results:
+                lines.append(f"- ID {r['id']}: [{r.get('created_at','')[:10]}] {r['title']}\n  {r['content']}")
+            return "\n".join(lines)
+            
+        return "Usage: /ideas list OR /ideas search <keyword>"
+
+    async def handle_meeting_command(self, cmd_raw: str) -> str:
+        """Handle /meeting prep <person/topic>"""
+        parts = cmd_raw.strip().split(maxsplit=2)
+        if len(parts) < 3 or parts[1].lower() != "prep":
+            return "Usage: /meeting prep <person/topic>"
+            
+        target = parts[2].strip()
+        # Query stored facts, notes, profile, ideas
+        facts = self.memory.search_facts(target)
+        notes = [n for n in self.memory.get_notes() if target.lower() in n.get("text", "").lower()]
+        ideas = self.memory.search_ideas(target)
+        
+        context_parts = []
+        if facts:
+            context_parts.append("Stored Facts:\n" + "\n".join(f"- {f['content']}" for f in facts))
+        if notes:
+            context_parts.append("Stored Notes:\n" + "\n".join(f"- {n['text']}" for n in notes))
+        if ideas:
+            context_parts.append("Stored Ideas:\n" + "\n".join(f"- {i['title']}: {i['content']}" for i in ideas))
+            
+        if not context_parts:
+            return f"No stored facts, notes, or ideas found for '{target}'. Add facts with 'save fact:' or notes before meeting prep."
+            
+        raw_briefing = "\n\n".join(context_parts)
+        prompt = f"You are JARVIS preparing a meeting briefing for '{target}'. Synthesize the following REAL stored memory facts into a structured briefing with sections: 1. Background & Context, 2. Key Facts / Notes, 3. Related Ideas / Action Items. Base your briefing ONLY on the provided stored data:\n\n{raw_briefing}"
+        
+        briefing = ""
+        async for chunk in self.api_client.chat_stream(prompt):
+            briefing += chunk
+        return briefing
+
+    def handle_watch_command(self, cmd_raw: str) -> str:
+        """Handle /watch <ticker> <above|below> <price>"""
+        parts = cmd_raw.strip().split()
+        if len(parts) < 4:
+            return "Usage: /watch <ticker> <above|below> <target_price> (e.g. /watch AAPL above 200)"
+        
+        ticker = parts[1].upper()
+        condition = parts[2].lower()
+        if condition not in ["above", "below", ">", "<", ">=", "<="]:
+            return "Error: Condition must be 'above' or 'below'"
+        try:
+            target_price = float(parts[3])
+        except ValueError:
+            return "Error: Target price must be a valid number"
+            
+        watch = self.memory.add_price_watch(ticker, condition, target_price)
+        return f"Price watch set for {ticker} when price moves {condition} ${target_price:.2f} (Watch ID: {watch['id']})."
+
+    def handle_trade_command(self, cmd_raw: str) -> str:
+        """Handle /trade [log|review] commands"""
+        parts = cmd_raw.strip().split(maxsplit=2)
+        if len(parts) < 2:
+            return "Usage: /trade log <ticker> <buy/sell> <price> <qty> reason: <text> OR /trade review [ticker]"
+            
+        subcmd = parts[1].lower()
+        if subcmd == "log" and len(parts) > 2:
+            body = parts[2].strip()
+            reason = ""
+            if "reason:" in body.lower():
+                r_idx = body.lower().index("reason:")
+                reason = body[r_idx + 7:].strip()
+                body = body[:r_idx].strip()
+                
+            tokens = body.split()
+            if len(tokens) < 4:
+                return "Usage: /trade log <ticker> <BUY/SELL> <price> <quantity> [reason: text]"
+                
+            ticker = tokens[0].upper()
+            action = tokens[1].upper()
+            if action not in ["BUY", "SELL"]:
+                return "Error: Action must be BUY or SELL"
+            try:
+                price = float(tokens[2])
+                qty = float(tokens[3])
+            except ValueError:
+                return "Error: Price and quantity must be valid numbers"
+                
+            trade = self.memory.add_trade(ticker, action, price, qty, reason)
+            return f"Trade logged (ID: {trade['id']}): {action} {qty} {ticker} @ ${price:.2f}."
+            
+        elif subcmd in ["review", "list"]:
+            ticker_filter = parts[2].strip() if len(parts) > 2 else None
+            trades = self.memory.get_trades(ticker_filter)
+            if not trades:
+                return f"No logged trades found{' for ' + ticker_filter if ticker_filter else ''}, sir."
+                
+            table = Table(title=f"[bold cyan]Trade Journal{' (' + ticker_filter.upper() + ')' if ticker_filter else ''}[/bold cyan]")
+            table.add_column("ID", style="cyan")
+            table.add_column("Timestamp", style="yellow")
+            table.add_column("Action", style="green")
+            table.add_column("Ticker", style="white")
+            table.add_column("Price", style="white")
+            table.add_column("Qty", style="white")
+            table.add_column("Reason", style="dim white")
+            
+            for t in trades:
+                act_str = f"[bold green]BUY[/bold green]" if t["action"] == "BUY" else f"[bold red]SELL[/bold red]"
+                table.add_row(
+                    str(t["id"]),
+                    t.get("timestamp", "")[:16],
+                    act_str,
+                    t["ticker"],
+                    f"${t['price']:.2f}",
+                    str(t["quantity"]),
+                    t.get("reason", "")
+                )
+            console.print(table)
+            return f"Retrieved {len(trades)} trade journal entries."
+            
+        return "Usage: /trade log <ticker> <BUY/SELL> <price> <qty> [reason: text] OR /trade review [ticker]"
+
     async def _check_tool_commands(self, user_input: str) -> Optional[str]:
         """Check if input matches a tool command or protocol trigger"""
         input_lower = user_input.lower()
+        
+        # Git Status Natural Language Matching
+        if "git status" in input_lower or "what's my git status" in input_lower or "what branch am i on" in input_lower:
+            result = await self.tools.execute_tool("git_status", directory=".")
+            self.memory.log_task("Check git status", "completed")
+            return result
         
         # Natural Language Protocol Triggers
         if hasattr(self, 'protocol_manager'):

@@ -103,6 +103,69 @@ class Memory:
                 )
             """)
             
+            # Flashcards table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS flashcards (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    question TEXT,
+                    answer TEXT,
+                    category TEXT DEFAULT 'general',
+                    last_reviewed TIMESTAMP,
+                    next_review TIMESTAMP,
+                    interval_days INTEGER DEFAULT 1,
+                    created_at TIMESTAMP
+                )
+            """)
+
+            # Deadlines table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS deadlines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT,
+                    due_date TIMESTAMP,
+                    status TEXT DEFAULT 'pending',
+                    last_alerted TIMESTAMP,
+                    created_at TIMESTAMP
+                )
+            """)
+
+            # Ideas table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ideas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT,
+                    content TEXT,
+                    category TEXT DEFAULT 'general',
+                    created_at TIMESTAMP
+                )
+            """)
+
+            # Price watch table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS price_watch (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT,
+                    condition TEXT,
+                    target_price REAL,
+                    status TEXT DEFAULT 'active',
+                    created_at TIMESTAMP,
+                    triggered_at TIMESTAMP
+                )
+            """)
+
+            # Trades table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT,
+                    action TEXT,
+                    price REAL,
+                    quantity REAL,
+                    reason TEXT,
+                    timestamp TIMESTAMP
+                )
+            """)
+            
             conn.commit()
     
     def _migrate_legacy_json(self):
@@ -390,6 +453,217 @@ class Memory:
                 "SELECT * FROM task_history ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
             return [dict(row) for row in reversed(rows)]
+
+    # --- Flashcards Methods ---
+
+    def add_flashcard(self, question: str, answer: str, category: str = "general") -> Dict:
+        """Add a flashcard to SQLite database"""
+        now = datetime.now()
+        now_iso = now.isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO flashcards (question, answer, category, next_review, interval_days, created_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+            """, (question.strip(), answer.strip(), category.strip().lower(), now_iso, now_iso))
+            card_id = cursor.lastrowid
+            conn.commit()
+            return {
+                "id": card_id,
+                "question": question,
+                "answer": answer,
+                "category": category,
+                "next_review": now_iso,
+                "interval_days": 1
+            }
+
+    def get_due_flashcards(self, category: Optional[str] = None) -> List[Dict]:
+        """Get flashcards due for review"""
+        now_iso = datetime.now().isoformat()
+        with self._get_connection() as conn:
+            if category:
+                rows = conn.execute(
+                    "SELECT * FROM flashcards WHERE (next_review <= ? OR next_review IS NULL) AND LOWER(category) = LOWER(?) ORDER BY id ASC",
+                    (now_iso, category)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM flashcards WHERE next_review <= ? OR next_review IS NULL ORDER BY id ASC",
+                    (now_iso,)
+                ).fetchall()
+            return [dict(row) for row in rows]
+
+    def update_flashcard_review(self, card_id: int, correct: bool):
+        """Update flashcard spaced repetition interval"""
+        from datetime import timedelta
+        now = datetime.now()
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM flashcards WHERE id = ?", (card_id,)).fetchone()
+            if not row:
+                return
+            card = dict(row)
+            current_interval = card.get("interval_days", 1) or 1
+            if correct:
+                new_interval = current_interval * 2
+            else:
+                new_interval = 1
+            next_review = (now + timedelta(days=new_interval)).isoformat()
+            conn.execute("""
+                UPDATE flashcards
+                SET last_reviewed = ?, next_review = ?, interval_days = ?
+                WHERE id = ?
+            """, (now.isoformat(), next_review, new_interval, card_id))
+            conn.commit()
+
+    # --- Deadlines Methods ---
+
+    def add_deadline(self, name: str, due_date_iso: str) -> Dict:
+        """Add a deadline to SQLite database"""
+        now_iso = datetime.now().isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO deadlines (name, due_date, status, created_at)
+                VALUES (?, ?, 'pending', ?)
+            """, (name.strip(), due_date_iso, now_iso))
+            deadline_id = cursor.lastrowid
+            conn.commit()
+            return {
+                "id": deadline_id,
+                "name": name,
+                "due_date": due_date_iso,
+                "status": "pending"
+            }
+
+    def get_pending_deadlines(self) -> List[Dict]:
+        """Get pending deadlines ordered by due date"""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM deadlines WHERE status = 'pending' ORDER BY due_date ASC").fetchall()
+            return [dict(row) for row in rows]
+
+    def update_deadline_last_alerted(self, deadline_id: int):
+        """Update deadline last_alerted timestamp"""
+        now_iso = datetime.now().isoformat()
+        with self._get_connection() as conn:
+            conn.execute("UPDATE deadlines SET last_alerted = ? WHERE id = ?", (now_iso, deadline_id))
+            conn.commit()
+
+    def complete_deadline(self, deadline_id: int):
+        """Mark deadline completed"""
+        with self._get_connection() as conn:
+            conn.execute("UPDATE deadlines SET status = 'completed' WHERE id = ?", (deadline_id,))
+            conn.commit()
+
+    # --- Ideas Methods ---
+
+    def add_idea(self, content: str, title: str = "", category: str = "general") -> Dict:
+        """Add an idea/decision to SQLite database"""
+        now_iso = datetime.now().isoformat()
+        if not title:
+            words = content.strip().split()
+            title = " ".join(words[:5]) + "..." if len(words) > 5 else content.strip()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO ideas (title, content, category, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (title, content.strip(), category.strip(), now_iso))
+            idea_id = cursor.lastrowid
+            conn.commit()
+            return {
+                "id": idea_id,
+                "title": title,
+                "content": content,
+                "category": category,
+                "created_at": now_iso
+            }
+
+    def get_ideas(self, category: Optional[str] = None) -> List[Dict]:
+        """Get all ideas"""
+        with self._get_connection() as conn:
+            if category:
+                rows = conn.execute("SELECT * FROM ideas WHERE category = ? ORDER BY id DESC", (category,)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM ideas ORDER BY id DESC").fetchall()
+            return [dict(row) for row in rows]
+
+    def search_ideas(self, keyword: str) -> List[Dict]:
+        """Search ideas matching keyword"""
+        kw = f"%{keyword.strip()}%"
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM ideas WHERE title LIKE ? OR content LIKE ? ORDER BY id DESC", (kw, kw)).fetchall()
+            return [dict(row) for row in rows]
+
+    # --- Price Watch Methods ---
+
+    def add_price_watch(self, ticker: str, condition: str, target_price: float) -> Dict:
+        """Add price watch alert"""
+        now_iso = datetime.now().isoformat()
+        ticker = ticker.strip().upper()
+        condition = condition.strip().lower()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO price_watch (ticker, condition, target_price, status, created_at)
+                VALUES (?, ?, ?, 'active', ?)
+            """, (ticker, condition, target_price, now_iso))
+            watch_id = cursor.lastrowid
+            conn.commit()
+            return {
+                "id": watch_id,
+                "ticker": ticker,
+                "condition": condition,
+                "target_price": target_price,
+                "status": "active",
+                "created_at": now_iso
+            }
+
+    def get_active_price_watches(self) -> List[Dict]:
+        """Get active price watches"""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM price_watch WHERE status = 'active' ORDER BY id ASC").fetchall()
+            return [dict(row) for row in rows]
+
+    def trigger_price_watch(self, watch_id: int):
+        """Mark price watch triggered"""
+        now_iso = datetime.now().isoformat()
+        with self._get_connection() as conn:
+            conn.execute("UPDATE price_watch SET status = 'triggered', triggered_at = ? WHERE id = ?", (now_iso, watch_id))
+            conn.commit()
+
+    # --- Trades Methods ---
+
+    def add_trade(self, ticker: str, action: str, price: float, quantity: float, reason: str = "") -> Dict:
+        """Log a trade"""
+        now_iso = datetime.now().isoformat()
+        ticker = ticker.strip().upper()
+        action = action.strip().upper()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO trades (ticker, action, price, quantity, reason, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (ticker, action, price, quantity, reason.strip(), now_iso))
+            trade_id = cursor.lastrowid
+            conn.commit()
+            return {
+                "id": trade_id,
+                "ticker": ticker,
+                "action": action,
+                "price": price,
+                "quantity": quantity,
+                "reason": reason,
+                "timestamp": now_iso
+            }
+
+    def get_trades(self, ticker: Optional[str] = None) -> List[Dict]:
+        """Get trade journal logs"""
+        with self._get_connection() as conn:
+            if ticker:
+                rows = conn.execute("SELECT * FROM trades WHERE UPPER(ticker) = UPPER(?) ORDER BY id DESC", (ticker,)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM trades ORDER BY id DESC").fetchall()
+            return [dict(row) for row in rows]
 
 
 class CommandLogger:

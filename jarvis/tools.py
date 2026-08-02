@@ -235,6 +235,65 @@ class DirectoryTool(Tool):
             return f"Error with directory operation: {str(e)}"
 
 
+class PDFSummarizeTool(Tool):
+    """Tool to extract text from a PDF file for summarization"""
+
+    def __init__(self, api_client=None):
+        super().__init__("summarize_pdf", "Extract text from a PDF file and summarize paper findings")
+        self.api_client = api_client
+
+    async def execute(self, filepath: str) -> str:
+        """Extract text from PDF and return raw extracted text with paper structure summary"""
+        try:
+            path = Path(filepath)
+            if not path.exists():
+                return f"Error: PDF file '{filepath}' not found"
+            if not path.is_file():
+                return f"Error: '{filepath}' is not a file"
+
+            resolved_path = path.resolve()
+            import pypdf
+            reader = pypdf.PdfReader(str(resolved_path))
+            pages_text = []
+            for idx, page in enumerate(reader.pages):
+                text = page.extract_text()
+                if text:
+                    pages_text.append(text)
+
+            full_text = "\n".join(pages_text).strip()
+            if not full_text:
+                return f"Error: Could not extract text from PDF '{filepath}' (file may be scanned image or empty)."
+
+            console.print(f"[dim cyan][PDF EXTRACTED TEXT] Path: '{resolved_path}' | Pages: {len(reader.pages)} | Characters: {len(full_text)}[/dim cyan]", highlight=False)
+            
+            return f"Raw Extracted PDF Content from '{filepath}' ({len(reader.pages)} pages):\n\n{full_text[:3000]}"
+        except Exception as e:
+            return f"Error extracting text from PDF '{filepath}': {str(e)}"
+
+
+class GitStatusTool(Tool):
+    """Tool to execute git status, git branch, and git log -1"""
+
+    def __init__(self):
+        super().__init__("git_status", "Get real git status, current branch, and recent commit log")
+
+    async def execute(self, directory: str = ".") -> str:
+        """Execute real git status commands via subprocess"""
+        try:
+            cwd = str(Path(directory).resolve())
+            status_res = subprocess.run("git status", shell=True, capture_output=True, text=True, cwd=cwd)
+            branch_res = subprocess.run("git branch --show-current", shell=True, capture_output=True, text=True, cwd=cwd)
+            log_res = subprocess.run("git log -1 --oneline", shell=True, capture_output=True, text=True, cwd=cwd)
+
+            output = f"Git Status in '{cwd}':\n"
+            output += f"Branch: {branch_res.stdout.strip() if branch_res.stdout else 'Unknown'}\n"
+            output += f"Recent Commit: {log_res.stdout.strip() if log_res.stdout else 'None'}\n\n"
+            output += f"Status Output:\n{status_res.stdout if status_res.stdout else status_res.stderr}"
+            return output
+        except Exception as e:
+            return f"Error running git commands: {str(e)}"
+
+
 class AppLaunchTool(Tool):
     """Tool to launch software applications"""
     
@@ -362,6 +421,8 @@ class ToolRegistry:
         self.register(AppLaunchTool(self.app_registry))
         self.register(URLOpenTool())
         self.register(WebsiteOpenTool())
+        self.register(PDFSummarizeTool())
+        self.register(GitStatusTool())
     
     def register(self, tool: Tool):
         """Register a new tool"""
