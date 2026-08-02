@@ -257,7 +257,15 @@ class TTSEngine:
     
     async def speak_acknowledgment(self):
         """Speak a short acknowledgment phrase"""
-        acknowledgments = ["On it.", "Working on it.", "Right away.", "Got it."]
+        acknowledgments = [
+            "On it, sir.",
+            "Working on it, sir.",
+            "Right away, sir.",
+            "At your service, sir.",
+            "Executing now, sir.",
+            "Consider it done, sir.",
+            "Processing request, sir."
+        ]
         import random
         phrase = random.choice(acknowledgments)
         await self.speak(phrase)
@@ -666,12 +674,24 @@ class ProactiveMonitor:
                 status_parts.append(f"{len(pending_reminders)} reminders pending")
             if tasks:
                 status_parts.append(f"{len(tasks)} recent tasks")
+            status_str = ", ".join(status_parts) if status_parts else ""
             
-            if status_parts:
-                status = ", ".join(status_parts)
-                greeting_text = f"{greeting}, {user_title}. How may I assist you today? You have {status}."
-            else:
-                greeting_text = f"{greeting}, {user_title}. How may I assist you today?"
+            greeting_phrases = [
+                f"{greeting}, {user_title}. At your service. How may I assist you today?",
+                f"At your service, {user_title}. All core systems online and operational. How may I assist you?",
+                f"{greeting}, {user_title}. Systems loaded, coffee is virtual, and I am ready when you are.",
+                f"Greetings, {user_title}. I have scanned all neural pathways, and I am 100% operational.",
+                f"Online and standing by, {user_title}. Shall we conquer your task list today?",
+                f"{greeting}, {user_title}. Tactical HUD online. At your service, sir.",
+                f"Greetings, {user_title}. Ready to assist. Just say the word.",
+                f"At your service, {user_title}. How may I help you today?",
+                f"{greeting}, {user_title}. System diagnostics clean. Standing by for instructions."
+            ]
+            
+            import random
+            greeting_text = random.choice(greeting_phrases)
+            if status_str:
+                greeting_text += f" Note: You have {status_str}."
             
             from jarvis.ui import ui
             ui.render_response(greeting_text)
