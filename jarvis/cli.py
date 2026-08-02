@@ -21,6 +21,8 @@ from jarvis.memory import Memory, CommandLogger
 from jarvis.tools import ToolRegistry, WebsiteOpenTool
 from jarvis.apps import AppRegistry
 from jarvis.voice import VoiceManager, ProactiveMonitor
+from jarvis.awareness import GlobalAwarenessManager
+from jarvis.protocols import ProtocolManager
 from jarvis.ui import ui, UIState
 
 
@@ -58,6 +60,16 @@ class JARVISCLI:
             tts_engine=self.voice_manager.tts,
             check_interval=60
         )
+        
+        # Initialize global awareness manager
+        self.awareness_manager = GlobalAwarenessManager(
+            config=self.config,
+            api_client=self.api_client,
+            proactive_monitor=self.proactive_monitor
+        )
+        
+        # Initialize protocol manager
+        self.protocol_manager = ProtocolManager(data_dir="jarvis/data")
         
         # Session state
         self.running = True
@@ -130,6 +142,15 @@ class JARVISCLI:
   [bold]/removeapp <name>[/bold]   - Remove a registered app
   [bold]/voice on[/bold]          - Enable voice mode
   [bold]/voice off[/bold]         - Disable voice mode
+  [bold]/awareness on|off[/bold]   - Enable/disable global news monitoring
+  [bold]/awareness topics[/bold]   - List/add/remove watched news topics
+  [bold]/news[/bold]               - Show recent surfaced notable news updates
+  [bold]/protocol list[/bold]       - Show available macro protocols
+  [bold]/protocol run <name>[/bold]  - Execute a macro protocol
+  [bold]/protocol create <name>[/bold] - Interactively build a new macro protocol
+  [bold]/protocol delete <name>[/bold] - Delete a macro protocol
+  [bold]/speak on|off[/bold]     - Enable/disable output response speech
+  [bold]/mute[/bold]             - Stop currently playing speech immediately
 
 [bold cyan]Natural Language Commands:[/bold cyan]
 
@@ -372,30 +393,112 @@ class JARVISCLI:
             role_color = "cyan" if msg["role"] == "user" else "green"
             console.print(f"[{role_color}]{msg['role'].upper()}:[/{role_color}] {msg['content']}\n")
     
-    async def process_command(self, user_input: str) -> Optional[str]:
-        """Process user input and return response"""
+    def _split_instructions(self, user_input: str) -> list:
+        """
+        Split a compound user input into individual actionable instructions.
+        E.g. "open notepad and create a folder called test and remind me to call mom"
+        -> ["open notepad", "create a folder called test", "remind me to call mom"]
+        """
+        text = user_input.strip()
+        if not text:
+            return []
+            
+        # Split on explicit newlines and semicolons first
+        raw_parts = re.split(r'[\n;]+', text)
+        
+        action_keywords = (
+            "open", "launch", "start", "run", "browse", "search", "create", "make",
+            "read", "list", "delete", "execute", "remind", "note:", "remember",
+            "forget", "tell", "explain", "what", "how", "show", "display", "give", "write",
+            "addapp", "removeapp", "/help", "/clear", "/exit", "/history", "/tools",
+            "/reminders", "/notes", "/tasks", "/profile", "/apps", "/facts", "/remember",
+            "/forget", "/voice"
+        )
+        
+        instructions = []
+        
+        for part in raw_parts:
+            part = part.strip()
+            if not part:
+                continue
+                
+            # Split candidate conjunctions/separators: " and then ", ", then ", " then ", ", and ", " and ", " also ", " plus ", ", "
+            pattern = r'(?:\s*,\s*then\s+|\s+and\s+then\s+|\s+then\s+|\s*,\s*and\s+|\s+and\s+|\s+also\s+|\s+plus\s+|\s*,\s*)'
+            tokens = re.split(pattern, part, flags=re.IGNORECASE)
+            
+            if len(tokens) <= 1:
+                instructions.append(part)
+            else:
+                current_inst = tokens[0].strip()
+                for next_token in tokens[1:]:
+                    next_token_clean = next_token.strip()
+                    first_word = next_token_clean.split()[0].lower() if next_token_clean.split() else ""
+                    
+                    if first_word in action_keywords or ":" in first_word or next_token_clean.lower().startswith("note:"):
+                        if current_inst:
+                            instructions.append(current_inst)
+                        current_inst = next_token_clean
+                    else:
+                        current_inst += f", {next_token_clean}"
+                if current_inst:
+                    instructions.append(current_inst)
+                    
+        return instructions if instructions else [text]
+
+    async def process_single_command(self, user_input: str) -> Optional[str]:
+        """Process a single instruction input and return response"""
         user_input = user_input.strip()
+        if not user_input:
+            return None
         
         # Handle slash commands
         if user_input.startswith("/"):
-            return self._handle_slash_command(user_input)
-        
-        # Add to command history
-        self.command_history.append(user_input)
-        
+            return await self._handle_slash_command(user_input)
+
         # Check for coding tasks and delegate to Claude Code
         if self._is_coding_task(user_input):
             return await self._delegate_to_claude_code(user_input)
-        
+
         # Check for natural language tool commands
         tool_response = await self._check_tool_commands(user_input)
         if tool_response:
             return tool_response
-        
+
         # Otherwise, send to AI
         return await self._get_ai_response(user_input)
-    
-    def _handle_slash_command(self, command: str) -> str:
+
+    async def process_command(self, user_input: str) -> Optional[str]:
+        """Process user input (single or multiple instructions) and return response"""
+        user_input = user_input.strip()
+        if not user_input:
+            return None
+
+        # Add to command history
+        self.command_history.append(user_input)
+
+        # Handle single slash commands directly
+        if user_input.startswith("/"):
+            return await self._handle_slash_command(user_input)
+
+        instructions = self._split_instructions(user_input)
+
+        if len(instructions) <= 1:
+            target_inst = instructions[0] if instructions else user_input
+            return await self.process_single_command(target_inst)
+
+        # Process multiple instructions sequentially
+        console.print(f"[dim cyan]Processing {len(instructions)} instructions...[/dim cyan]")
+        results = []
+        for idx, inst in enumerate(instructions, 1):
+            res = await self.process_single_command(inst)
+            if res:
+                results.append(f"{idx}. {res.strip()}")
+
+        if results:
+            return "\n".join(results)
+        return "All instructions executed."
+
+    async def _handle_slash_command(self, command: str) -> str:
         """Handle slash commands"""
         cmd_raw = command.strip()
         cmd_lower = cmd_raw.lower()
@@ -458,35 +561,262 @@ class JARVISCLI:
         elif cmd_lower == "/voice off":
             self.voice_manager.disable()
             return "Voice mode disabled."
+        elif cmd_lower == "/speak on":
+            self.voice_manager.speak_responses = True
+            return "Output-only response speech enabled, sir."
+        elif cmd_lower == "/speak off":
+            self.voice_manager.speak_responses = False
+            self.voice_manager.stop_speaking()
+            return "Output-only response speech disabled, sir."
+        elif cmd_lower in ["/mute", "/stop"]:
+            self.voice_manager.stop_speaking()
+            return "Muted active speech playback, sir."
+        elif cmd_lower.startswith("/awareness"):
+            return self.handle_awareness_command(cmd_raw)
+        elif cmd_lower == "/news":
+            self.show_news()
+            return "Displaying recent surfaced news updates, sir."
+        elif cmd_lower.startswith("/protocol"):
+            return await self.handle_protocol_command(cmd_raw)
         else:
             return f"Unknown command: {command}. Type /help for available commands."
+
+    def show_protocols(self):
+        """Display registered protocols"""
+        protos = self.protocol_manager.list_protocols()
+        
+        table = Table(title="[bold cyan]Available JARVIS Protocols[/bold cyan]")
+        table.add_column("Protocol Name", style="cyan")
+        table.add_column("Description", style="white")
+        table.add_column("Steps Count", style="yellow")
+        table.add_column("Safety Level", style="green")
+        
+        for p in protos:
+            dangerous = self.protocol_manager.is_dangerous(p)
+            safety = "[red]⚠️ Requires Confirmation[/red]" if dangerous else "[green]✓ Standard[/green]"
+            table.add_row(
+                p.get("name", ""),
+                p.get("description", ""),
+                str(len(p.get("steps", []))),
+                safety
+            )
+            
+        console.print(table)
+
+    async def handle_protocol_command(self, command_str: str) -> str:
+        """Handle /protocol [list|run|create|delete] commands"""
+        parts = command_str.strip().split(maxsplit=2)
+        subcmd = parts[1].lower() if len(parts) > 1 else "list"
+        
+        if subcmd == "list":
+            self.show_protocols()
+            return "Displaying available JARVIS protocols, sir."
+            
+        elif subcmd in ["run", "execute", "invoke"]:
+            if len(parts) < 3:
+                return "Usage: /protocol run <protocol_name>"
+            p_name = parts[2].strip()
+            return await self.protocol_manager.execute_protocol(
+                name=p_name,
+                tools=self.tools,
+                voice_manager=self.voice_manager,
+                memory=self.memory
+            )
+            
+        elif subcmd in ["create", "add"]:
+            if len(parts) < 3:
+                return "Usage: /protocol create <protocol_name>"
+            p_name = parts[2].strip()
+            
+            console.print(f"[cyan]Creating protocol '[bold]{p_name}[/bold]'...[/cyan]")
+            desc = await asyncio.to_thread(Prompt.ask, "Enter protocol description", default=f"Custom macro protocol: {p_name}")
+            
+            steps = []
+            console.print("\n[yellow]Add steps (e.g. 'open vscode', 'open github', 'create folder test')[/yellow]")
+            console.print("[dim]Type 'done' or 'finish' when complete.[/dim]\n")
+            
+            step_idx = 1
+            while True:
+                step_input = await asyncio.to_thread(Prompt.ask, f"Step {step_idx} (command or 'done')")
+                step_clean = step_input.strip()
+                if not step_clean or step_clean.lower() in ["done", "finish", "exit", "stop"]:
+                    break
+                
+                tool_name = "shell_command"
+                kwargs = {"command": step_clean}
+                
+                inp_lower = step_clean.lower()
+                if inp_lower.startswith("open ") or inp_lower.startswith("launch "):
+                    target = step_clean.split(maxsplit=1)[1].strip() if len(step_clean.split()) > 1 else ""
+                    if any(site in target.lower() for site in ["youtube", "github", "gmail", "google"]):
+                        tool_name = "open_website"
+                        kwargs = {"site_name": target}
+                    else:
+                        tool_name = "open_application"
+                        kwargs = {"app_name": target}
+                elif inp_lower.startswith("create folder ") or inp_lower.startswith("make folder "):
+                    folder = step_clean.split()[-1]
+                    tool_name = "directory"
+                    kwargs = {"action": "create", "path": folder}
+                
+                steps.append({
+                    "tool": tool_name,
+                    "kwargs": kwargs,
+                    "description": step_clean
+                })
+                step_idx += 1
+                
+            if not steps:
+                return "Protocol creation cancelled (no steps added)."
+                
+            added = self.protocol_manager.add_protocol(p_name, desc, steps)
+            if added:
+                return f"Protocol '[cyan]{p_name}[/cyan]' created with {len(steps)} steps, sir."
+            else:
+                return "Error creating protocol."
+                
+        elif subcmd in ["delete", "remove"]:
+            if len(parts) < 3:
+                return "Usage: /protocol delete <protocol_name>"
+            p_name = parts[2].strip()
+            deleted = self.protocol_manager.delete_protocol(p_name)
+            if deleted:
+                return f"Protocol '[cyan]{p_name}[/cyan]' deleted successfully, sir."
+            else:
+                return f"Protocol '{p_name}' not found."
+                
+        else:
+            return "Usage: /protocol [list|run <name>|create <name>|delete <name>]"
+
+    def show_news(self):
+        """Display recent surfaced news items"""
+        news_items = self.awareness_manager.get_surfaced_news(limit=15)
+        
+        if not news_items:
+            console.print("[yellow]No surfaced news items yet. Background monitoring is running.[/yellow]")
+            return
+        
+        table = Table(title="[bold cyan]Surfaced News Updates[/bold cyan]")
+        table.add_column("Topic", style="cyan")
+        table.add_column("Headline", style="white")
+        table.add_column("Score", style="yellow")
+        table.add_column("Time", style="dim")
+        table.add_column("Link / URL", style="blue")
+        
+        for item in news_items:
+            table.add_row(
+                item.get("topic", "General"),
+                item.get("headline", ""),
+                str(item.get("score", "-")),
+                item.get("timestamp", "")[:16].replace("T", " "),
+                item.get("link", "")
+            )
+        
+        console.print(table)
+
+    def handle_awareness_command(self, command_str: str) -> str:
+        """Handle /awareness [on|off|topics|add|remove|check] commands"""
+        parts = command_str.strip().split(maxsplit=2)
+        subcmd = parts[1].lower() if len(parts) > 1 else "topics"
+        
+        if subcmd == "on":
+            self.awareness_manager.set_enabled(True)
+            return "Global Awareness background monitor enabled, sir."
+        elif subcmd == "off":
+            self.awareness_manager.set_enabled(False)
+            return "Global Awareness background monitor disabled, sir."
+        elif subcmd == "check":
+            asyncio.create_task(self.awareness_manager.check_news())
+            return "Triggered immediate Global Awareness news check in background, sir."
+        elif subcmd in ["topics", "topic"]:
+            if len(parts) > 2:
+                sub_parts = parts[2].split(maxsplit=1)
+                action = sub_parts[0].lower()
+                topic_val = sub_parts[1] if len(sub_parts) > 1 else ""
+                
+                if action == "add" and topic_val:
+                    added = self.awareness_manager.add_topic(topic_val)
+                    if added:
+                        return f"Added watched topic: '[cyan]{topic_val}[/cyan]', sir."
+                    else:
+                        return f"Topic '[cyan]{topic_val}[/cyan]' is already being watched."
+                elif action in ["remove", "delete"] and topic_val:
+                    removed = self.awareness_manager.remove_topic(topic_val)
+                    if removed:
+                        return f"Removed watched topic: '[cyan]{topic_val}[/cyan]', sir."
+                    else:
+                        return f"Topic '[cyan]{topic_val}[/cyan]' was not found."
+            
+            topics = self.awareness_manager.get_topics()
+            status_str = "Enabled" if self.awareness_manager.enabled else "Disabled"
+            console.print(f"[bold cyan]Global Awareness Watched Topics[/bold cyan] ({status_str}):")
+            for idx, t in enumerate(topics, 1):
+                console.print(f"  {idx}. [white]{t}[/white]")
+            console.print("[dim]\nUse '/awareness topics add <topic>' or '/awareness topics remove <topic>' to edit.[/dim]")
+            return "Displaying watched news topics, sir."
+        elif subcmd == "add" and len(parts) > 2:
+            topic_val = parts[2]
+            added = self.awareness_manager.add_topic(topic_val)
+            if added:
+                return f"Added watched topic: '[cyan]{topic_val}[/cyan]', sir."
+            else:
+                return f"Topic '[cyan]{topic_val}[/cyan]' is already being watched."
+        elif subcmd in ["remove", "delete"] and len(parts) > 2:
+            topic_val = parts[2]
+            removed = self.awareness_manager.remove_topic(topic_val)
+            if removed:
+                return f"Removed watched topic: '[cyan]{topic_val}[/cyan]', sir."
+            else:
+                return f"Topic '[cyan]{topic_val}[/cyan]' was not found."
+        else:
+            return "Usage: /awareness [on|off|topics|add <topic>|remove <topic>|check]"
     
     async def _check_tool_commands(self, user_input: str) -> Optional[str]:
-        """Check if input matches a tool command"""
+        """Check if input matches a tool command or protocol trigger"""
         input_lower = user_input.lower()
         
+        # Natural Language Protocol Triggers
+        if hasattr(self, 'protocol_manager'):
+            for proto in self.protocol_manager.list_protocols():
+                p_name = proto["name"].lower()
+                triggers = [
+                    f"activate {p_name} protocol",
+                    f"activate {p_name}",
+                    f"run {p_name} protocol",
+                    f"run protocol {p_name}",
+                    f"execute {p_name} protocol",
+                    f"invoke {p_name} protocol",
+                    f"start {p_name} protocol",
+                    f"protocol {p_name}",
+                    f"{p_name} protocol"
+                ]
+                if any(trig == input_lower or trig in input_lower for trig in triggers):
+                    return await self.protocol_manager.execute_protocol(
+                        name=p_name,
+                        tools=self.tools,
+                        voice_manager=self.voice_manager,
+                        memory=self.memory
+                    )
+        
         # Open Application or Website
-        if any(input_lower.startswith(prefix) for prefix in ["open ", "launch ", "start ", "run "]):
-            words = user_input.split(maxsplit=1)
-            if len(words) > 1:
-                target = words[1].strip()
+        for prefix in ["open ", "launch ", "start ", "run "]:
+            if input_lower.startswith(prefix):
+                target = user_input[len(prefix):].strip()
                 target_lower = target.lower()
                 
-                # Exclude folder/directory commands
-                if not ("folder" in target_lower or "directory" in target_lower or "file" in target_lower):
-                    # Check website aliases first if website mentioned
+                # Exclude folder/directory/file commands
+                if not ("folder" in target_lower or "directory" in target_lower or "file" in target_lower or "command" in target_lower):
                     if target_lower in WebsiteOpenTool.SITE_ALIASES or any(site in target_lower for site in ["youtube", "github", "gmail", "google", "reddit", "twitter"]):
                         result = await self.tools.execute_tool("open_website", site_name=target)
                         self.memory.log_task(f"Open website {target}", "completed")
                         return result
                     
-                    # Try app launch
                     cmd, matches = self.app_registry.resolve_app(target)
                     if cmd or matches or target_lower in ["notepad", "calc", "calculator", "chrome", "vscode", "explorer", "task manager", "settings"]:
                         result = await self.tools.execute_tool("open_application", app_name=target)
                         self.memory.log_task(f"Open application {target}", "completed")
                         return result
-        
+
         # Web Search / Browse URL
         if "browse to" in input_lower or "search google for" in input_lower or input_lower.startswith("search web for"):
             for prefix in ["browse to", "search google for", "search web for"]:
@@ -498,17 +828,17 @@ class JARVISCLI:
                         return result
 
         # Create folder/directory
-        if "create" in input_lower and ("folder" in input_lower or "directory" in input_lower):
-            words = user_input.split()
-            folder_name = words[-1] if words else "new_folder"
+        if ("create" in input_lower or "make" in input_lower) and ("folder" in input_lower or "directory" in input_lower):
+            folder_name = re.sub(r'^(create|make)\s+(a\s+)?(folder|directory)(\s+(called|named))?\s*', '', user_input, flags=re.I).strip()
+            if not folder_name:
+                folder_name = "new_folder"
             result = await self.tools.execute_tool("directory", action="create", path=folder_name)
             self.memory.log_task(f"Create folder {folder_name}", "completed")
             return result
         
         # Read file
-        elif "read" in input_lower and "file" in input_lower:
-            words = user_input.split()
-            filename = words[-1] if words else ""
+        elif ("read" in input_lower or "view" in input_lower or "cat" in input_lower) and "file" in input_lower:
+            filename = re.sub(r'^(read|view|cat)\s+(the\s+)?(contents\s+of\s+)?(file\s+)?', '', user_input, flags=re.I).strip()
             if filename:
                 result = await self.tools.execute_tool("read_file", filepath=filename)
                 self.memory.log_task(f"Read file {filename}", "completed")
@@ -531,8 +861,9 @@ class JARVISCLI:
         
         # Search files
         elif "search" in input_lower and not ("google" in input_lower or "web" in input_lower):
-            words = user_input.split()
-            pattern = words[-1] if words else "*"
+            pattern = re.sub(r'^(search|find)\s+(for\s+)?(files?\s*)?(matching\s+)?', '', user_input, flags=re.I).strip()
+            if not pattern:
+                pattern = "*"
             result = await self.tools.execute_tool("search_files", pattern=pattern)
             self.memory.log_task(f"Search for {pattern}", "completed")
             return result
@@ -552,16 +883,17 @@ class JARVISCLI:
         
         # Add reminder
         elif "remind" in input_lower:
-            if "to" in input_lower:
-                reminder_text = input_lower.split("to")[-1].strip()
+            reminder_text = re.sub(r'^(remind\s+(me\s+)?(to\s+)?|set\s+a\s+reminder\s+(to\s+)?)', '', user_input, flags=re.I).strip()
+            if reminder_text:
                 reminder = self.memory.add_reminder(reminder_text)
                 return f"Reminder added: {reminder_text}"
         
         # Add note
-        elif input_lower.startswith("note:"):
-            note_text = user_input[5:].strip()
-            self.memory.add_note(note_text)
-            return f"Note saved: {note_text}"
+        elif input_lower.startswith("note:") or input_lower.startswith("save note:") or input_lower.startswith("add note:"):
+            note_text = re.sub(r'^(note:|save\s+note:?|add\s+note:?)\s*', '', user_input, flags=re.I).strip()
+            if note_text:
+                self.memory.add_note(note_text)
+                return f"Note saved: {note_text}"
         
         return None
     
@@ -685,8 +1017,9 @@ class JARVISCLI:
         """Main REPL loop"""
         self.show_banner()
         
-        # Start proactive monitor
+        # Start proactive monitor & awareness manager
         self.proactive_monitor.start()
+        self.awareness_manager.start()
         
         # Boot greeting if enabled
         personality_config = self.config.get("personality", {})
@@ -714,6 +1047,9 @@ class JARVISCLI:
                 if not user_input:
                     continue
                 
+                # Stop previous speech immediately when a new message is received
+                self.voice_manager.stop_speaking()
+                
                 # Set busy state
                 self.is_busy = True
                 self.proactive_monitor.set_busy(True)
@@ -725,11 +1061,11 @@ class JARVISCLI:
                     # Display response using HUD UI panel
                     ui.render_response(response)
                     
-                    # Speak response out loud every time
-                    if self.voice_manager.enabled:
-                        await self.voice_manager.speak_response(response)
-                    else:
-                        ui.set_state(UIState.IDLE)
+                    # Speak response out loud in background (non-blocking) if enabled
+                    if self.voice_manager.speak_responses or self.voice_manager.enabled:
+                        asyncio.create_task(self.voice_manager.speak_response(response))
+                    
+                    ui.set_state(UIState.IDLE)
                     
                     # Log conversation turn & auto-extract durable facts if not a slash command
                     if not user_input.startswith("/"):
@@ -756,6 +1092,7 @@ class JARVISCLI:
         
         # Cleanup
         self.proactive_monitor.stop()
+        self.awareness_manager.stop()
         if self.voice_manager.enabled:
             self.voice_manager.disable()
         

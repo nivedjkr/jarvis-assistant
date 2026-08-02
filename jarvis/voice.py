@@ -113,14 +113,22 @@ class STTEngine:
             return ""
 
 
-def _clean_text_for_speech(text: str) -> str:
+def _clean_text_for_speech(text: str, speak_code_blocks: bool = False) -> str:
     """Clean markdown, code blocks, URLs, and rich tags for clear TTS vocalization"""
     if not text:
         return ""
-    # Remove code blocks ```...```
-    cleaned = re.sub(r'```[\s\S]*?```', ' code block omitted ', text)
+    
+    # Handle code blocks
+    if not speak_code_blocks:
+        cleaned = re.sub(r'```[\s\S]*?```', ' code block omitted ', text)
+    else:
+        cleaned = re.sub(r'```[a-zA-Z0-9_-]*\n?', ' ', text)
+        cleaned = cleaned.replace('```', ' ')
+
     # Remove inline backticks `code`
     cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
+    # Remove markdown bold/italics
+    cleaned = re.sub(r'[*_]{1,3}([^*_]+)[*_]{1,3}', r'\1', cleaned)
     # Remove markdown headers #, ##, etc.
     cleaned = re.sub(r'#+\s*', '', cleaned)
     # Remove URLs
@@ -129,6 +137,12 @@ def _clean_text_for_speech(text: str) -> str:
     cleaned = re.sub(r'\[/?[a-zA-Z0-9_:\s]+\]', '', cleaned)
     # Clean up whitespace
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    
+    # Content filtering: If text is excessively long technical output (> 350 chars), summarize for speech
+    if len(cleaned) > 350 and any(kw in cleaned.lower() for kw in ["file", "directory", "code", "output", "[dir]", "[file]", "path", "contents of"]):
+        first_sentence = cleaned.split('.')[0] if '.' in cleaned else cleaned[:100]
+        cleaned = f"{first_sentence}. Detailed response printed in terminal."
+
     return cleaned
 
 
@@ -146,8 +160,19 @@ class TTSEngine:
         self.engine_type = engine
         self.voice = voice
         self.pyttsx_engine = None
+        self.is_cancelled = False
         self._initialize()
     
+    def stop_speaking(self):
+        """Stop audio playback immediately and cancel remaining speech queue"""
+        self.is_cancelled = True
+        try:
+            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+                pygame.mixer.music.unload()
+        except Exception:
+            pass
+
     def _initialize(self):
         """Initialize the TTS engine"""
         if self.engine_type == "pyttsx3":
@@ -175,36 +200,47 @@ class TTSEngine:
         sentences = re.split(r'(?<=[.!?])\s+', text)
         return [s.strip() for s in sentences if s.strip()]
     
-    async def speak_stream(self, text: str, sentence_callback: Optional[Callable] = None):
+    async def speak_stream(self, text: str, sentence_callback: Optional[Callable] = None, speak_code_blocks: bool = False):
         """
-        Stream TTS output sentence by sentence
+        Stream TTS output sentence by sentence, checking cancellation between sentences
         
         Args:
             text: Text to speak
             sentence_callback: Optional callback for each sentence
+            speak_code_blocks: Whether to speak code blocks aloud
         """
+        self.is_cancelled = False
         sentences = self._split_sentences(text)
         
         for sentence in sentences:
+            if self.is_cancelled:
+                break
             if sentence_callback:
                 sentence_callback(sentence)
-            await self.speak(sentence)
+            await self.speak(sentence, speak_code_blocks=speak_code_blocks)
     
-    async def speak(self, text: str):
+    async def speak(self, text: str, speak_code_blocks: bool = False):
         """
         Speak text using configured TTS engine
         
         Args:
             text: Text to speak
+            speak_code_blocks: Whether to speak code blocks aloud
         """
-        clean_text = _clean_text_for_speech(text)
+        if self.is_cancelled:
+            return
+
+        clean_text = _clean_text_for_speech(text, speak_code_blocks=speak_code_blocks)
         if not clean_text:
             return
         
-        if self.engine_type == "edge":
-            await self._speak_edge(clean_text)
-        else:
-            self._speak_pyttsx(clean_text)
+        try:
+            if self.engine_type == "edge":
+                await self._speak_edge(clean_text)
+            else:
+                self._speak_pyttsx(clean_text)
+        except Exception as e:
+            console.print(f"[dim yellow]TTS error: {e}[/dim yellow]")
     
     async def _speak_edge(self, text: str):
         """Speak using edge-tts"""
@@ -218,7 +254,8 @@ class TTSEngine:
             await communicate.save(temp_path)
             
             # Play using pygame
-            self._play_audio(temp_path)
+            if not self.is_cancelled:
+                self._play_audio(temp_path)
             
             # Clean up
             os.unlink(temp_path)
@@ -247,8 +284,8 @@ class TTSEngine:
             pygame.mixer.music.load(file_path)
             pygame.mixer.music.play()
             
-            # Run speaking animation for exact audio playback duration
-            ui.animate_speaking(lambda: pygame.mixer.music.get_busy())
+            # Run speaking animation for exact audio playback duration unless cancelled
+            ui.animate_speaking(lambda: pygame.mixer.music.get_busy() and not self.is_cancelled)
             
             pygame.mixer.music.unload()
                 
@@ -433,6 +470,9 @@ class VoiceManager:
         # Initialize components
         voice_config = config.get("voice", {})
         
+        self.speak_responses = voice_config.get("speak_responses", True)
+        self.speak_code_blocks = voice_config.get("speak_code_blocks", False)
+
         self.stt = STTEngine(
             model_size=voice_config.get("stt_model", "base"),
             device="cpu"
@@ -454,6 +494,10 @@ class VoiceManager:
         self.transcription_callback = None
         self.response_callback = None
     
+    def stop_speaking(self):
+        """Stop current speech playback immediately"""
+        self.tts.stop_speaking()
+
     def set_callbacks(self, on_transcription: Callable, on_response: Callable):
         """
         Set callbacks for transcription and response
@@ -524,22 +568,26 @@ class VoiceManager:
     
     async def speak_response(self, text: str):
         """
-        Speak a response using streaming TTS
+        Speak a response using non-blocking/streaming TTS
         
         Args:
             text: Text to speak
         """
-        if not self.enabled:
+        if not self.speak_responses:
             return
         
-        await self.tts.speak_stream(
-            text,
-            sentence_callback=self.response_callback
-        )
+        try:
+            await self.tts.speak_stream(
+                text,
+                sentence_callback=self.response_callback,
+                speak_code_blocks=self.speak_code_blocks
+            )
+        except Exception as e:
+            console.print(f"[dim yellow]TTS warning: {e}[/dim yellow]")
     
     async def speak_acknowledgment(self):
         """Speak a short acknowledgment"""
-        if self.enabled:
+        if self.enabled or self.speak_responses:
             await self.tts.speak_acknowledgment()
 
 
