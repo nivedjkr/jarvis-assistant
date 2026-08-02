@@ -33,6 +33,8 @@ jarvis_memory.json
 jarvis_commands.log
 jarvis/data/
 *.db
+credentials.json
+google_token.json
 
 # IDE
 .vscode/

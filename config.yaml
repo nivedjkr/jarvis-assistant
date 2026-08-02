@@ -48,3 +48,9 @@ awareness:
   check_interval_hours: 3
   significance_threshold: 7
 
+# Location Settings
+location:
+  city: "Kerala"
+  country: "India"
+
+

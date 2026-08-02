@@ -281,6 +281,33 @@ If the model fails to respond or you get a 404 error:
 4. Check if your API key has access to the model at [build.nvidia.com](https://build.nvidia.com/)
 5. Verify the API endpoint is correct: `https://integrate.api.nvidia.com/v1`
 
+## Real-Time Monitoring & Integrations Setup
+
+### 1. System Resource Monitoring & NVIDIA GPU Setup
+- Uses `psutil` for real CPU, RAM, disk, and network stats.
+- GPU monitoring uses `pynvml` / `nvidia-smi`. If no NVIDIA GPU is present, GPU monitoring degrades gracefully and skips silently without error.
+
+### 2. OpenWeatherMap API Setup
+- Sign up for a free API key at [openweathermap.org/api](https://openweathermap.org/api).
+- Add your key to `.env`:
+  ```
+  OPENWEATHER_API_KEY=your_actual_openweather_key
+  ```
+- Configure your city and country in `config.yaml`:
+  ```yaml
+  location:
+    city: "Kerala"
+    country: "India"
+  ```
+
+### 3. Google Calendar & Gmail OAuth2 Setup
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a new project and enable **Google Calendar API** and **Gmail API**.
+3. Configure the **OAuth consent screen** (User Type: External, add test users).
+4. Create **OAuth 2.0 Client ID** credentials (Application type: Desktop app).
+5. Download `credentials.json` and place it in your workspace root or `jarvis/data/credentials.json`.
+6. On running `/calendar` or `/email` for the first time, a browser window will open to authorize access. The token will be saved to `jarvis/data/google_token.json`.
+
 ## License
 
 MIT License - Feel free to use and modify as needed.

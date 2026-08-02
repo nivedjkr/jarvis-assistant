@@ -11,7 +11,7 @@ import os
 import re
 import time
 from datetime import datetime
-from typing import Optional, AsyncGenerator, Callable
+from typing import Optional, AsyncGenerator, Callable, Dict, Any, List, Tuple
 from pathlib import Path
 
 import sounddevice as sd
@@ -24,6 +24,11 @@ from pynput import keyboard
 from rich.console import Console
 
 from jarvis.ui import ui, UIState
+from jarvis.system_monitor import SystemMonitor
+from jarvis.weather import WeatherManager
+from jarvis.google_auth import GoogleAuthManager
+from jarvis.calendar_service import CalendarService
+from jarvis.email_service import EmailService
 
 
 console = Console()
@@ -630,26 +635,44 @@ class VoiceManager:
 
 
 class ProactiveMonitor:
-    """Background thread for proactive reminder monitoring"""
+    """Background thread for proactive monitoring (reminders, system, weather, market, calendar, email)"""
     
-    def __init__(self, memory, tts_engine, check_interval: int = 2):
+    def __init__(self, memory, tts_engine, check_interval: int = 2, config: Optional[Dict[str, Any]] = None, api_client: Optional[Any] = None):
         """
         Initialize proactive monitor
-        
-        Args:
-            memory: Memory instance for accessing reminders
-            tts_engine: TTSEngine instance for speaking reminders
-            check_interval: Seconds between reminder checks
         """
         self.memory = memory
         self.tts = tts_engine
         self.check_interval = check_interval
+        self.config = config or {}
+        self.api_client = api_client
         self.running = False
         self.thread = None
         self.is_busy = False
         self.announcement_queue = []
         self.delivered_reminders = set()
-    
+        self.last_check_timestamp: Optional[datetime] = None
+
+        # Feature Managers
+        self.system_monitor = SystemMonitor()
+        self.weather_manager = WeatherManager(self.config)
+        self.google_auth = GoogleAuthManager()
+        self.calendar_service = CalendarService(self.google_auth)
+        self.email_service = EmailService(self.google_auth, api_client=self.api_client)
+
+        # Loop Timestamps
+        now_ts = time.time()
+        self._last_sys_check: float = now_ts
+        self._last_price_check: float = now_ts
+        self._last_weather_check: float = now_ts
+        self._last_cal_check: float = now_ts
+        self._last_email_check: float = now_ts
+        self._boot_sys_alert_suppressed: bool = True
+
+        # Rolling 10-minute price history: {ticker: [(timestamp, price)]}
+        self._price_history: Dict[str, List[Tuple[float, float]]] = {}
+        self._alerted_pct_windows: set = set()
+
     def set_busy(self, busy: bool):
         """Set busy state (when JARVIS is mid-conversation/recording/speaking)"""
         self.is_busy = busy
@@ -688,7 +711,6 @@ class ProactiveMonitor:
             if reminder_id in self.delivered_reminders:
                 continue
             
-            # Check if reminder is due (has due_date and it's passed)
             due_date = reminder.get("due_date")
             if due_date:
                 try:
@@ -698,33 +720,27 @@ class ProactiveMonitor:
                         reminder_text = reminder["text"]
                         phrase = self._get_reminder_phrases(reminder_text)
                         
-                        # Print unprompted to console HUD
                         console.print(f"\n[bold bright_cyan]⏰ PROACTIVE REMINDER:[/bold bright_cyan] [bold white]{reminder_text}[/bold white]\n")
                         
                         self.delivered_reminders.add(reminder_id)
                         self.memory.complete_reminder(reminder_id)
-                        
-                        # Queue for TTS delivery
                         self.announcement_queue.append(phrase)
                 except ValueError:
                     pass
 
-        # Log monitor cycle for transparency
         now_str = current_time.strftime("%H:%M:%S")
         if pending or due_count > 0:
             console.print(f"[dim cyan][MONITOR {now_str}][/dim cyan] Checked {len(pending)} pending reminders ({due_count} due).", highlight=False)
     
     def _queue_announcement(self, text: str):
         """Queue an announcement"""
-        phrase = self._get_reminder_phrases(text)
-        self.announcement_queue.append(phrase)
+        self.announcement_queue.append(text)
     
     def _deliver_announcements(self):
         """Deliver queued announcements when not busy"""
         while self.announcement_queue and not self.is_busy:
             phrase = self.announcement_queue.pop(0)
             try:
-                # Speak the announcement
                 asyncio.run(self.tts.speak(phrase))
             except Exception as e:
                 console.print(f"[red]Error delivering announcement: {e}[/red]")
@@ -748,12 +764,10 @@ class ProactiveMonitor:
                 alert_prefix = ""
                 
                 if 0 <= diff_hours <= 24:
-                    # Final day: alert every 3 hours
                     if not last_alerted or (now - last_alerted).total_seconds() >= 10800:
                         should_alert = True
                         alert_prefix = f"URGENT DEADLINE IN {int(diff_hours)} HOURS:"
                 elif 24 < diff_hours <= 72:
-                    # Within 3 days: alert daily
                     if not last_alerted or (now - last_alerted).total_seconds() >= 86400:
                         should_alert = True
                         alert_prefix = f"DEADLINE APPROACHING ({int(diff_hours / 24)} days away):"
@@ -766,12 +780,67 @@ class ProactiveMonitor:
             except ValueError:
                 pass
 
+    def _check_system_resources(self):
+        """Check system resource thresholds every 30 seconds"""
+        now_ts = time.time()
+        if now_ts - self._last_sys_check < 30.0:
+            return
+        self._last_sys_check = now_ts
+
+        try:
+            alerts = self.system_monitor.evaluate_resource_anomalies()
+            if self._boot_sys_alert_suppressed:
+                # Suppress system resource alert popups/speech during the initial boot check
+                self._boot_sys_alert_suppressed = False
+                return
+
+            for alert in alerts:
+                console.print(f"\n[bold red]💻 SYSTEM MONITOR ALERT:[/bold red] [bold white]{alert['message']}[/bold white]\n")
+                self.announcement_queue.append(alert["message"])
+        except Exception as e:
+            console.print(f"[dim yellow]System monitor evaluation warning: {e}[/dim yellow]")
+
+    def _check_weather(self):
+        """Check weather conditions every 30 minutes (1800s)"""
+        now_ts = time.time()
+        if now_ts - self._last_weather_check < 1800.0:
+            return
+        self._last_weather_check = now_ts
+
+        try:
+            alert = self.weather_manager.evaluate_weather_alerts()
+            if alert:
+                console.print(f"\n[bold cyan]🌧️ WEATHER ALERT:[/bold cyan] [bold white]{alert}[/bold white]\n")
+                self.announcement_queue.append(alert)
+        except Exception as e:
+            console.print(f"[dim yellow]Weather monitor evaluation warning: {e}[/dim yellow]")
+
+    def _fetch_ticker_news_summary(self, symbol: str) -> str:
+        """Fetch recent headline context for a ticker using yfinance"""
+        try:
+            import yfinance as yf
+            t = yf.Ticker(symbol)
+            news = getattr(t, 'news', [])
+            if news and isinstance(news, list):
+                first = news[0]
+                headline = first.get("title") or (first.get("content", {}).get("title") if isinstance(first.get("content"), dict) else None)
+                if headline:
+                    return headline.strip()
+        except Exception:
+            pass
+        return ""
+
     def _check_price_watches(self):
-        """Check active stock price watches against live market data using yfinance"""
+        """Check active stock price watches every 30 seconds with rolling window % change and news context"""
+        now_ts = time.time()
+        if now_ts - self._last_price_check < 30.0:
+            return
+        self._last_price_check = now_ts
+
         watches = self.memory.get_active_price_watches()
         if not watches:
             return
-        
+
         try:
             import yfinance as yf
             for w in watches:
@@ -782,24 +851,87 @@ class ProactiveMonitor:
                 t = yf.Ticker(ticker)
                 live_price = None
                 if hasattr(t, 'fast_info') and 'lastPrice' in t.fast_info:
-                    live_price = t.fast_info['lastPrice']
-                elif hasattr(t, 'info') and 'regularMarketPrice' in t.info:
-                    live_price = t.info.get('regularMarketPrice')
+                    live_price = float(t.fast_info['lastPrice'])
+                elif hasattr(t, 'info') and 'regularMarketPrice' in t.info and t.info.get('regularMarketPrice') is not None:
+                    live_price = float(t.info.get('regularMarketPrice'))
                     
                 if live_price is not None:
-                    triggered = False
+                    # Update rolling 10-minute history
+                    if ticker not in self._price_history:
+                        self._price_history[ticker] = []
+                    self._price_history[ticker].append((now_ts, live_price))
+                    # Prune history older than 10 mins (600s)
+                    self._price_history[ticker] = [(ts, p) for ts, p in self._price_history[ticker] if now_ts - ts <= 600.0]
+
+                    # 1. Check static threshold
+                    triggered_static = False
                     if condition in ["above", ">", ">="] and live_price >= target_price:
-                        triggered = True
+                        triggered_static = True
                     elif condition in ["below", "<", "<="] and live_price <= target_price:
-                        triggered = True
+                        triggered_static = True
+
+                    # 2. Check rolling window % change (>= 2%)
+                    pct_move_str = ""
+                    direction_str = ""
+                    triggered_pct = False
+                    if len(self._price_history[ticker]) >= 2:
+                        first_ts, first_p = self._price_history[ticker][0]
+                        if first_p > 0:
+                            pct_change = ((live_price - first_p) / first_p) * 100.0
+                            if abs(pct_change) >= 2.0:
+                                direction_str = "up" if pct_change > 0 else "down"
+                                pct_move_str = f"{direction_str} {abs(pct_change):.1f}% in the last 10 minutes"
+                                window_key = (ticker, int(now_ts // 600))
+                                if window_key not in self._alerted_pct_windows:
+                                    self._alerted_pct_windows.add(window_key)
+                                    triggered_pct = True
+
+                    if triggered_static or triggered_pct:
+                        news_headline = self._fetch_ticker_news_summary(ticker)
+                        news_part = f" — recent headline: {news_headline}" if news_headline else ""
                         
-                    if triggered:
-                        alert_msg = f"{ticker} has crossed {condition} ${target_price:.2f}, currently at ${live_price:.2f}, sir."
+                        if triggered_static and not pct_move_str:
+                            direction = "up" if live_price >= target_price else "down"
+                            alert_msg = f"{ticker} at ${live_price:.2f}, {direction} (crossed {condition} ${target_price:.2f}), sir{news_part}"
+                        else:
+                            alert_msg = f"{ticker} at ${live_price:.2f}, {pct_move_str}, sir{news_part}"
+
                         console.print(f"\n[bold bright_cyan]📈 MARKET ALERT:[/bold bright_cyan] [bold white]{alert_msg}[/bold white]\n")
-                        self.memory.trigger_price_watch(w["id"])
+                        if triggered_static:
+                            self.memory.trigger_price_watch(w["id"])
                         self.announcement_queue.append(alert_msg)
         except Exception as e:
             console.print(f"[dim yellow]Market monitor check warning: {e}[/dim yellow]")
+
+    def _check_calendar(self):
+        """Check Google Calendar upcoming events every minute (60s)"""
+        now_ts = time.time()
+        if now_ts - self._last_cal_check < 60.0:
+            return
+        self._last_cal_check = now_ts
+
+        try:
+            alerts = self.calendar_service.evaluate_upcoming_alerts()
+            for alert in alerts:
+                console.print(f"\n[bold bright_cyan]📅 CALENDAR ALERT:[/bold bright_cyan] [bold white]{alert}[/bold white]\n")
+                self.announcement_queue.append(alert)
+        except Exception as e:
+            console.print(f"[dim yellow]Calendar monitor evaluation warning: {e}[/dim yellow]")
+
+    def _check_email(self):
+        """Check Gmail inbox unread triage every 5 minutes (300s)"""
+        now_ts = time.time()
+        if now_ts - self._last_email_check < 300.0:
+            return
+        self._last_email_check = now_ts
+
+        try:
+            urgent_emails = self.email_service.evaluate_new_unread_emails()
+            for item in urgent_emails:
+                console.print(f"\n[bold bright_yellow]✉️  URGENT EMAIL:[/bold bright_yellow] [bold white]From: {item['sender']} — Subject: {item['subject']}[/bold white]\n")
+                self.announcement_queue.append(item["spoken_phrase"])
+        except Exception as e:
+            console.print(f"[dim yellow]Email triage evaluation warning: {e}[/dim yellow]")
 
     def _monitor_loop(self):
         """Main monitoring loop"""
@@ -808,7 +940,11 @@ class ProactiveMonitor:
                 self.last_check_timestamp = datetime.now()
                 self._check_reminders()
                 self._check_deadlines()
+                self._check_system_resources()
+                self._check_weather()
                 self._check_price_watches()
+                self._check_calendar()
+                self._check_email()
                 self._deliver_announcements()
                 time.sleep(self.check_interval)
             except Exception as e:
@@ -820,6 +956,14 @@ class ProactiveMonitor:
         if self.running:
             return
         
+        now_ts = time.time()
+        self._last_sys_check = now_ts
+        self._last_price_check = now_ts
+        self._last_weather_check = now_ts
+        self._last_cal_check = now_ts
+        self._last_email_check = now_ts
+        self._boot_sys_alert_suppressed = True
+
         self.running = True
         self.thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.thread.start()
@@ -834,36 +978,27 @@ class ProactiveMonitor:
         console.print("[dim]Proactive monitor stopped[/dim]")
     
     async def speak_boot_greeting(self, user_title: str = "sir"):
-        """Speak boot greeting with status summary"""
+        """Speak boot greeting enriched with real calendar event count and randomized status phrases"""
         try:
             greeting = self._get_time_greeting()
             
-            # Get status summary
-            reminders = self.memory.get_reminders()
-            pending_reminders = [r for r in reminders if not r["completed"]]
-            tasks = self.memory.get_recent_tasks(5)
-            
-            status_parts = []
-            if pending_reminders:
-                status_parts.append(f"{len(pending_reminders)} reminders pending")
-            if tasks:
-                status_parts.append(f"{len(tasks)} recent tasks")
-            status_str = ", ".join(status_parts) if status_parts else ""
-            
-            greeting_phrases = [
-                f"{greeting}, {user_title}. At your service. How may I assist you today?",
-                f"At your service, {user_title}. All core systems online and operational. How may I assist you?",
-                f"{greeting}, {user_title}. Systems loaded, coffee is virtual, and I am ready when you are.",
-                f"Greetings, {user_title}. I have scanned all neural pathways, and I am 100% operational.",
-                f"Online and standing by, {user_title}. Shall we conquer your task list today?",
-                f"{greeting}, {user_title}. Tactical HUD online. At your service, sir.",
-                f"Greetings, {user_title}. Ready to assist. Just say the word.",
-                f"At your service, {user_title}. How may I help you today?",
-                f"{greeting}, {user_title}. System diagnostics clean. Standing by for instructions."
-            ]
-            
+            # Real calendar summary
+            cal_summary = self.calendar_service.get_today_summary()
+            cal_phrase = f" {cal_summary}" if cal_summary else ""
+
             import random
-            greeting_text = random.choice(greeting_phrases)
+            random_closings = [
+                "At your service, sir.",
+                "Standing by for instructions.",
+                "All systems operational and ready.",
+                "Ready for your command.",
+                "At your service.",
+                "Online and ready for your command.",
+                "All systems nominal and standing by."
+            ]
+            closing = random.choice(random_closings)
+
+            greeting_text = f"{greeting}, {user_title}.{cal_phrase} {closing}".strip()
             
             from jarvis.ui import ui
             ui.render_response(greeting_text)

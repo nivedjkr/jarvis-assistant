@@ -203,6 +203,28 @@ class JARVISCLI:
             "GLOBAL AWARENESS": [
                 ("/awareness on|off|topics", "Manage background news monitoring"),
                 ("/news", "Show recent surfaced notable news updates")
+            ],
+            "SYSTEM MONITORING": [
+                ("/system", "Real-time snapshot of CPU, RAM, GPU, disk, and network"),
+                ("/system log", "Show recent system resource anomaly logs")
+            ],
+            "WEATHER": [
+                ("/weather", "Current conditions and today's forecast for configured city"),
+                ("/weather tomorrow", "Tomorrow's weather forecast")
+            ],
+            "GOOGLE CALENDAR": [
+                ("/calendar today", "List today's scheduled calendar events"),
+                ("/calendar tomorrow", "List tomorrow's scheduled calendar events"),
+                ("/calendar next", "Show next upcoming calendar event")
+            ],
+            "EMAIL TRIAGE": [
+                ("/email", "Show last 5 unread inbox messages"),
+                ("/email read <n>", "Read the nth unread email body"),
+                ("/email summary", "LLM briefing summary of all unread emails")
+            ],
+            "DUCKDUCKGO WEB SEARCH": [
+                ("/search <query>", "Perform real-time DuckDuckGo web search"),
+                ("/search ddg <query>", "DuckDuckGo web search with AI voice response")
             ]
         }
         
@@ -682,6 +704,76 @@ class JARVISCLI:
             return self.handle_trade_command(cmd_raw)
         elif cmd_lower.startswith("/protocol"):
             return await self.handle_protocol_command(cmd_raw)
+        elif cmd_lower.startswith("/system"):
+            parts = cmd_raw.split(maxsplit=1)
+            sub = parts[1].lower() if len(parts) > 1 else ""
+            if sub == "log":
+                anomalies = self.proactive_monitor.system_monitor.get_recent_anomalies()
+                if not anomalies:
+                    return "No recent system resource anomalies recorded, sir."
+                lines = ["=== Recent System Resource Anomalies ==="]
+                for a in anomalies:
+                    lines.append(f"[{a['timestamp']}] [{a['level'].upper()}] {a['message']}")
+                return "\n".join(lines)
+            else:
+                snap = self.proactive_monitor.system_monitor.get_system_snapshot()
+                lines = [
+                    "=== Real-Time System Telemetry ===",
+                    f"CPU Usage: {snap['cpu_pct']:.1f}%",
+                    f"RAM Usage: {snap['ram_pct']:.1f}% ({snap['ram_used_gb']} GB / {snap['ram_total_gb']} GB)",
+                ]
+                if snap['gpu']:
+                    gpu = snap['gpu']
+                    lines.append(f"GPU ({gpu['name']}): {gpu['gpu_util_pct']:.1f}% Util | Temp: {gpu['temp_c']:.0f}°C | VRAM: {gpu['mem_used_mb']:.0f} MB / {gpu['mem_total_mb']:.0f} MB ({gpu['mem_util_pct']:.1f}%)")
+                else:
+                    lines.append("GPU: N/A (No NVIDIA GPU detected)")
+                lines.append(f"Network Status: {'Online' if snap['network_online'] else 'Offline'}")
+                lines.append("Drive Storage:")
+                for d in snap['disks']:
+                    warn_tag = " ⚠️ [LOW DISK SPACE]" if d.get('percent_used', 0) > 90.0 else ""
+                    lines.append(f"  - {d['mountpoint']} {d['percent_used']}% used ({d['free_gb']} GB free / {d['total_gb']} GB total){warn_tag}")
+                return "\n".join(lines)
+        elif cmd_lower.startswith("/weather"):
+            is_tomorrow = "tomorrow" in cmd_lower
+            return self.proactive_monitor.weather_manager.format_weather_command(is_tomorrow=is_tomorrow)
+        elif cmd_lower.startswith("/calendar"):
+            parts = cmd_raw.split(maxsplit=1)
+            sub = parts[1].lower() if len(parts) > 1 else "today"
+            mode = "today"
+            if "tomorrow" in sub:
+                mode = "tomorrow"
+            elif "next" in sub:
+                mode = "next"
+            return self.proactive_monitor.calendar_service.format_calendar_command(mode=mode)
+        elif cmd_lower.startswith("/email"):
+            parts = cmd_raw.split(maxsplit=2)
+            sub = parts[1].lower() if len(parts) > 1 else ""
+            if sub == "summary":
+                return self.proactive_monitor.email_service.generate_email_summary_briefing()
+            elif sub == "read":
+                try:
+                    idx = int(parts[2]) if len(parts) > 2 else 1
+                except ValueError:
+                    idx = 1
+                return self.proactive_monitor.email_service.read_email_body_by_index(idx)
+            else:
+                return self.proactive_monitor.email_service.format_unread_list()
+        elif cmd_lower.startswith("/search"):
+            parts = cmd_raw.split(maxsplit=1)
+            query = parts[1].strip() if len(parts) > 1 else ""
+            if not query:
+                return "Usage: /search <query>"
+            if query.lower().startswith("ddg "):
+                query = query[4:].strip()
+            
+            res = await self.tools.execute_tool("duckduckgo_search", query=query)
+            try:
+                if hasattr(self.proactive_monitor, "tts") and self.proactive_monitor.tts:
+                    speak_msg = f"Sir, I have retrieved search results for '{query}'."
+                    await self.proactive_monitor.tts.speak(speak_msg)
+            except Exception:
+                pass
+            return res
         else:
             return f"Unknown command: {command}. Type /help for available commands."
 
@@ -1309,6 +1401,23 @@ class JARVISCLI:
         pm_status = "[bold green]✓ OK[/bold green]" if pm_ok else "[bold red]✗ FAILED[/bold red]"
         table.add_row("Proactive Monitor", pm_status, pm_msg)
         
+        # 6. System Resource Telemetry
+        sys_snap = self.proactive_monitor.system_monitor.get_system_snapshot()
+        sys_msg = f"CPU: {sys_snap['cpu_pct']:.1f}% | RAM: {sys_snap['ram_pct']:.1f}% | GPU: {'Online' if sys_snap['gpu'] else 'N/A'} | Network: {'Online' if sys_snap['network_online'] else 'Offline'}"
+        table.add_row("System Resource Monitor", "[bold green]✓ OK[/bold green]", sys_msg)
+
+        # 7. Weather API Status
+        weather_ok = self.proactive_monitor.weather_manager._is_configured()
+        weather_msg = f"City: {self.proactive_monitor.weather_manager.city} ({self.proactive_monitor.weather_manager.country}) | API Key configured" if weather_ok else "OPENWEATHER_API_KEY missing/unconfigured in .env"
+        weather_status = "[bold green]✓ OK[/bold green]" if weather_ok else "[bold yellow]⚠ UNCONFIGURED[/bold yellow]"
+        table.add_row("Weather API", weather_status, weather_msg)
+
+        # 8. Google OAuth2 (Calendar & Gmail)
+        g_auth_ok = self.proactive_monitor.google_auth.is_authenticated()
+        g_msg = "Authenticated (token valid)" if g_auth_ok else "Not authenticated (run Google OAuth setup or check credentials.json)"
+        g_status = "[bold green]✓ OK[/bold green]" if g_auth_ok else "[bold yellow]⚠ UNAUTHENTICATED[/bold yellow]"
+        table.add_row("Google Sync (Calendar/Gmail)", g_status, g_msg)
+
         console.print(table)
         return "Self-diagnostic check complete, sir."
 
@@ -1399,9 +1508,23 @@ class JARVISCLI:
                             result = conf_warn + result
                         return result
 
-        # Web Search / Browse URL
-        if "browse to" in input_lower or "search google for" in input_lower or input_lower.startswith("search web for"):
-            for prefix in ["browse to", "search google for", "search web for"]:
+        # Web Search / Browse URL / DuckDuckGo Search
+        if any(kw in input_lower for kw in ["duckduckgo", "ddg", "search web for", "web search for"]):
+            for prefix in ["search duckduckgo for", "duckduckgo search for", "search ddg for", "ddg search for", "search web for", "web search for", "duckduckgo", "ddg"]:
+                if prefix in input_lower:
+                    query = user_input[input_lower.index(prefix) + len(prefix):].strip().lstrip("for").strip()
+                    if query:
+                        result = await self.tools.execute_tool("duckduckgo_search", query=query)
+                        self.memory.log_task(f"DuckDuckGo Search {query}", "completed")
+                        try:
+                            if hasattr(self.proactive_monitor, "tts") and self.proactive_monitor.tts:
+                                await self.proactive_monitor.tts.speak(f"Sir, retrieved DuckDuckGo search results for '{query}'.")
+                        except Exception:
+                            pass
+                        return result
+
+        if "browse to" in input_lower or "search google for" in input_lower:
+            for prefix in ["browse to", "search google for"]:
                 if prefix in input_lower:
                     query = user_input[input_lower.index(prefix) + len(prefix):].strip()
                     if query:

@@ -403,6 +403,73 @@ class WebsiteOpenTool(Tool):
             return f"Error opening website '{site_name}': {str(e)}"
 
 
+class DuckDuckGoSearchTool(Tool):
+    """Tool to perform real-time web searches using DuckDuckGo."""
+    
+    def __init__(self):
+        super().__init__("duckduckgo_search", "Perform real-time DuckDuckGo web search")
+        
+    async def execute(self, query: str, max_results: int = 5) -> str:
+        """Execute web query and return formatted search results."""
+        target = query.strip()
+        if not target:
+            return "Error: No search query provided"
+            
+        results = None
+        try:
+            try:
+                from ddgs import DDGS
+                results = list(DDGS().text(target, max_results=max_results))
+            except Exception:
+                from duckduckgo_search import DDGS
+                results = list(DDGS().text(target, max_results=max_results))
+        except Exception as pkg_err:
+            console.print(f"[dim yellow]DuckDuckGo package search fallback: {pkg_err}[/dim yellow]")
+
+        if results:
+            formatted = [f"=== DuckDuckGo Search Results for '{target}' ==="]
+            for idx, r in enumerate(results, start=1):
+                title = r.get("title", "No Title")
+                href = r.get("href", "")
+                body = r.get("body", "No Snippet")
+                formatted.append(f"{idx}. {title}\n   URL: {href}\n   Snippet: {body}")
+            return "\n".join(formatted)
+
+        try:
+            import json
+            import urllib.request
+            params = urllib.parse.urlencode({
+                "q": target,
+                "format": "json",
+                "no_html": "1",
+                "skip_disambig": "1"
+            })
+            url = f"https://api.duckduckgo.com/?{params}"
+            req = urllib.request.Request(url, headers={"User-Agent": "JARVIS-Assistant/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                abstract = data.get("AbstractText", "")
+                related = data.get("RelatedTopics", [])
+
+                lines = [f"=== DuckDuckGo Instant Answer for '{target}' ==="]
+                if abstract:
+                    lines.append(f"Abstract: {abstract}")
+                    source = data.get("AbstractURL", "")
+                    if source:
+                        lines.append(f"Source: {source}")
+                elif related:
+                    lines.append("Related Topics:")
+                    for item in related[:max_results]:
+                        if isinstance(item, dict) and "Text" in item:
+                            lines.append(f"• {item['Text']}")
+
+                if len(lines) > 1:
+                    return "\n".join(lines)
+                return f"No DuckDuckGo results found for '{target}'."
+        except Exception as e:
+            return f"Error executing DuckDuckGo search for '{target}': {str(e)}"
+
+
 class ToolRegistry:
     """Registry for all available tools"""
     
@@ -425,6 +492,7 @@ class ToolRegistry:
         self.register(AppLaunchTool(self.app_registry))
         self.register(URLOpenTool())
         self.register(WebsiteOpenTool())
+        self.register(DuckDuckGoSearchTool())
         self.register(PDFSummarizeTool())
         self.register(GitStatusTool())
     
