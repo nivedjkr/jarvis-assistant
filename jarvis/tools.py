@@ -52,6 +52,7 @@ class FileReadTool(Tool):
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
+            console.print(f"[dim cyan][RAW DISK READ] Path: '{resolved_path}' | Bytes: {len(content)}[/dim cyan]", highlight=False)
             return f"Contents of file '{filepath}' (resolved path: {resolved_path}):\n{content}"
         except Exception as e:
             return f"Error reading file: {str(e)}"

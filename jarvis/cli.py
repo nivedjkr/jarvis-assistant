@@ -918,31 +918,33 @@ class JARVISCLI:
             return result
         
         # Read file
-        elif ("read" in input_lower or "view" in input_lower or "cat" in input_lower) and "file" in input_lower:
-            filename = re.sub(r'^(read|view|cat)\s+(the\s+)?(contents\s+of\s+)?(file\s+)?', '', user_input, flags=re.I).strip()
-            if filename:
+        elif any(kw in input_lower for kw in ["read", "cat", "view", "show contents of", "what is in", "what's in"]):
+            filename = re.sub(r'^(can\s+you\s+)?(please\s+)?(read|cat|view|show\s+contents\s+of|what\s+is\s+in|what\'s\s+in|display)\s+(the\s+)?(contents\s+of\s+)?(file\s+)?', '', user_input, flags=re.I).strip().rstrip('?.!')
+            if filename and len(filename.split()) <= 3:
                 result = await self.tools.execute_tool("read_file", filepath=filename)
                 self.memory.log_task(f"Read file {filename}", "completed")
                 return result
         
-        # List files
-        elif "list" in input_lower and ("file" in input_lower or "directory" in input_lower):
+        # List files / directory
+        elif "list" in input_lower or "show files" in input_lower or input_lower == "ls" or input_lower.startswith("ls "):
             directory = "."
             words = user_input.split()
             if "in" in words:
                 try:
                     idx = words.index("in")
                     if idx + 1 < len(words):
-                        directory = words[idx + 1]
+                        directory = words[idx + 1].rstrip('?.!')
                 except ValueError:
                     pass
+            elif len(words) > 1 and words[0] == "ls":
+                directory = words[1].rstrip('?.!')
             result = await self.tools.execute_tool("list_files", directory=directory)
             self.memory.log_task(f"List files in {directory}", "completed")
             return result
         
         # Search files
-        elif "search" in input_lower and not ("google" in input_lower or "web" in input_lower):
-            pattern = re.sub(r'^(search|find)\s+(for\s+)?(files?\s*)?(matching\s+)?', '', user_input, flags=re.I).strip()
+        elif ("search" in input_lower or "find" in input_lower) and ("file" in input_lower or "files" in input_lower or "matching" in input_lower) and not ("google" in input_lower or "web" in input_lower):
+            pattern = re.sub(r'^(search|find)\s+(for\s+)?(files?\s*)?(matching\s+)?', '', user_input, flags=re.I).strip().rstrip('?.!')
             if not pattern:
                 pattern = "*"
             result = await self.tools.execute_tool("search_files", pattern=pattern)
