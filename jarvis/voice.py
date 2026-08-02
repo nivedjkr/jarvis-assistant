@@ -669,10 +669,12 @@ class ProactiveMonitor:
             
             if status_parts:
                 status = ", ".join(status_parts)
-                greeting_text = f"{greeting}, {user_title}. {status}."
+                greeting_text = f"{greeting}, {user_title}. How may I assist you today? You have {status}."
             else:
-                greeting_text = f"{greeting}, {user_title}. All systems nominal."
+                greeting_text = f"{greeting}, {user_title}. How may I assist you today?"
             
+            from jarvis.ui import ui
+            ui.render_response(greeting_text)
             await self.tts.speak(greeting_text)
             
         except Exception as e:
