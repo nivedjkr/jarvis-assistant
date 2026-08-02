@@ -130,57 +130,111 @@ class JARVISCLI:
         """Display startup banner"""
         ui.show_banner()
     
-    def show_help(self):
-        """Display help information"""
-        help_text = """
-[bold cyan]Available Commands:[/bold cyan]
+    def show_help(self, category_filter: Optional[str] = None):
+        """Display help information, organized into categories and optionally filtered"""
+        cat_lower = category_filter.strip().lower() if category_filter else None
+        
+        categories = {
+            "CORE": [
+                ("/help [category]", "Show help message (optionally by category)"),
+                ("/clear", "Clear the screen"),
+                ("/exit", "Exit JARVIS"),
+                ("/history", "Show conversation history"),
+                ("/tools", "List available tools")
+            ],
+            "VOICE": [
+                ("/speak on|off", "Toggle spoken response output"),
+                ("/mute (or /stop)", "Stop active speech playback immediately"),
+                ("/voice on|off", "Enable or disable voice input mode")
+            ],
+            "MEMORY": [
+                ("/remember <fact>", "Save a fact manually"),
+                ("/forget <keyword>", "Search and remove a stored fact"),
+                ("/profile", "Show stored profile and memory stats"),
+                ("/facts [category]", "List facts in a category"),
+                ("/notes", "Show saved notes"),
+                ("/tasks", "Show recent task execution history"),
+                ("/whoami (or /recall)", "Summarize profile facts JARVIS knows about you")
+            ],
+            "REMINDERS & DEADLINES": [
+                ("/reminders", "Show current pending reminders"),
+                ("/deadline add \"<name>\" <date>", "Add a deadline"),
+                ("/deadlines", "List upcoming deadlines with remaining time")
+            ],
+            "APPS & SYSTEM": [
+                ("/apps", "List registered software applications"),
+                ("/addapp <name> <path>", "Register a new custom app path/exe"),
+                ("/removeapp <name>", "Remove a registered application launcher")
+            ],
+            "PROTOCOLS": [
+                ("/protocol list", "Show all macro protocols"),
+                ("/protocol run <name>", "Execute a macro protocol or project"),
+                ("/protocol create <name>", "Build a new macro protocol"),
+                ("/protocol delete <name>", "Delete a macro protocol")
+            ],
+            "STUDY TOOLS": [
+                ("/flashcard add \"<q>\" \"<a>\"", "Add a flashcard to database"),
+                ("/flashcard from-file <path>", "Generate flashcards from notes file"),
+                ("/review", "Start interactive flashcard quiz session"),
+                ("/summarize <path.pdf>", "Extract and summarize an academic PDF")
+            ],
+            "DEVELOPER": [
+                ("/explain-error [error]", "Explain traceback error and fix steps"),
+                ("\"what's my git status\"", "Show real git status, branch, and recent commit")
+            ],
+            "IDEAS & NOTES": [
+                ("/idea <text>", "Save a business/project idea"),
+                ("/ideas list", "List all saved ideas"),
+                ("/ideas search <term>", "Search saved ideas"),
+                ("/meeting prep <person/topic>", "Briefing from stored memory facts")
+            ],
+            "TRADING": [
+                ("/watch <ticker> <condition> <price>", "Add stock price alert (e.g. /watch AAPL above 200)"),
+                ("/trade log <ticker> <BUY/SELL> <price> <qty>", "Log a trade to journal"),
+                ("/trade review [ticker]", "View trade journal history")
+            ],
+            "GLOBAL AWARENESS": [
+                ("/awareness on|off|topics", "Manage background news monitoring"),
+                ("/news", "Show recent surfaced notable news updates")
+            ]
+        }
+        
+        # Filter categories if requested
+        if cat_lower:
+            matched_cats = {k: v for k, v in categories.items() if cat_lower in k.lower() or (cat_lower in ["dev", "swe"] and "DEVELOPER" in k) or (cat_lower in ["study", "flashcards"] and "STUDY" in k)}
+            if matched_cats:
+                categories = matched_cats
+            else:
+                console.print(f"[yellow]Unknown category '{category_filter}'. Available categories: {', '.join(categories.keys())}[/yellow]")
+                return
 
-  [bold]/help[/bold]              - Show this help message
-  [bold]/clear[/bold]             - Clear the screen
-  [bold]/exit[/bold]              - Exit JARVIS
-  [bold]/history[/bold]           - Show conversation history
-  [bold]/tools[/bold]             - List available tools
-  [bold]/reminders[/bold]         - Show your reminders
-  [bold]/notes[/bold]             - Show your notes
-  [bold]/tasks[/bold]             - Show recent task history
-  [bold]/remember <fact>[/bold]    - Manually save a fact about yourself
-  [bold]/forget <keyword>[/bold]   - Search and delete facts matching keyword
-  [bold]/profile[/bold]           - Show current user profile and memory stats
-  [bold]/facts [category][/bold]  - List stored facts (optionally by category)
-  [bold]/apps[/bold]              - List registered software applications
-  [bold]/addapp <name> <cmd>[/bold]- Register a custom app command or exe path
-  [bold]/removeapp <name>[/bold]   - Remove a registered app
-  [bold]/voice on[/bold]          - Enable voice mode
-  [bold]/voice off[/bold]         - Disable voice mode
-  [bold]/awareness on|off[/bold]   - Enable/disable global news monitoring
-  [bold]/awareness topics[/bold]   - List/add/remove watched news topics
-  [bold]/news[/bold]               - Show recent surfaced notable news updates
-  [bold]/protocol list[/bold]       - Show available macro protocols
-  [bold]/protocol run <name>[/bold]  - Execute a macro protocol
-  [bold]/protocol create <name>[/bold] - Interactively build a new macro protocol
-  [bold]/protocol delete <name>[/bold] - Delete a macro protocol
-  [bold]/speak on|off[/bold]     - Enable/disable output response speech
-  [bold]/mute[/bold]             - Stop currently playing speech immediately
+        output_lines = []
+        for cat_name, cmds in categories.items():
+            output_lines.append(f"[bold yellow]=== {cat_name} ===[/bold yellow]")
+            for cmd, desc in cmds:
+                output_lines.append(f"  [bold bright_cyan]{cmd:<38}[/bold bright_cyan] - [white]{desc}[/white]")
+            output_lines.append("")
 
-[bold cyan]Natural Language Commands:[/bold cyan]
+        output_lines.append("[dim]Tip: Use '/help <category>' (e.g. '/help trading' or '/help study') to view a specific category.[/dim]")
+        
+        title_str = f"[bold bright_cyan]JARVIS Commands Help ({cat_lower.upper() if cat_lower else 'ALL'})[/bold bright_cyan]"
+        console.print(Panel("\n".join(output_lines), title=title_str, border_style="bright_cyan"))
 
-  "Open notepad" / "Launch chrome"  - Open installed software
-  "Open youtube" / "Go to github"    - Open common website
-  "Browse to X" / "Search google for X" - Open URL or search
-  "Create a folder called X"         - Create directory
-  "Read file X"                       - Read file contents
-  "List files in X"                   - List directory contents
-  "Search for X"                      - Search for files
-  "Run command X"                     - Execute shell command
-  "Remind me to X"                    - Add a reminder
-  "Note: X"                           - Add a note
-
-[bold cyan]Tips:[/bold cyan]
-  - JARVIS maintains long-term persistent memory across sessions
-  - Dangerous commands require confirmation
-  - All commands are logged for safety
-"""
-        console.print(Panel(help_text, title="[bold cyan]Help[/bold cyan]", border_style="cyan"))
+    def handle_whoami(self) -> str:
+        """Summarize user profile and stored facts"""
+        profile = self.memory.get_profile()
+        facts = self.memory.get_facts()
+        
+        lines = ["User Profile Summary:"]
+        for k, v in profile.items():
+            lines.append(f"- {k.replace('_', ' ').title()}: {v}")
+            
+        if facts:
+            lines.append(f"\nStored Facts ({len(facts)} items):")
+            for f in facts[:10]:
+                lines.append(f"- [{f.get('category','general')}] {f['content']}")
+                
+        return "\n".join(lines)
 
     def show_apps(self):
         """Display registered application launchers"""
@@ -516,9 +570,13 @@ class JARVISCLI:
         cmd_raw = command.strip()
         cmd_lower = cmd_raw.lower()
         
-        if cmd_lower == "/help":
-            self.show_help()
-            return "Here are the available commands and natural language options, sir."
+        if cmd_lower.startswith("/help"):
+            parts = cmd_raw.split(maxsplit=1)
+            cat = parts[1] if len(parts) > 1 else None
+            self.show_help(cat)
+            return f"Displaying help information{' for category ' + cat if cat else ''}, sir."
+        elif cmd_lower in ["/whoami", "/recall"]:
+            return self.handle_whoami()
         elif cmd_lower == "/clear":
             console.clear()
             self.show_banner()
