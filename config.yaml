@@ -1,0 +1,37 @@
+# JARVIS Configuration
+
+# NVIDIA NIM API Settings
+api:
+  base_url: "https://integrate.api.nvidia.com/v1"
+  model: "meta/llama-3.1-8b-instruct"
+  temperature: 0.7
+  max_tokens: 1000
+  stream: true
+
+# Memory Settings
+memory:
+  file: "jarvis/data/jarvis.db"
+  log_file: "jarvis_commands.log"
+
+# Tool Settings
+tools:
+  confirm_dangerous: true
+  log_commands: true
+
+# Personality Settings
+personality:
+  user_title: "sir"  # How JARVIS addresses the user (sir, ma'am, etc.)
+  response_style: "concise"  # concise, detailed
+  enable_boot_greeting: true  # Speak greeting on startup
+
+# Voice Settings
+voice:
+  enabled: false
+  stt_model: "base"  # "base" or "small" for faster-whisper
+  tts_engine: "edge"  # "edge" or "pyttsx3"
+  tts_voice: "en-GB-RyanNeural"  # Edge TTS voice
+  push_to_talk_key: "space"  # Key for push-to-talk
+  input_device: null  # Input device ID (null for default, or integer)
+  wake_word_enabled: false  # Enable wake word detection
+  silence_threshold: 0.5  # Silence detection threshold (0-1)
+  auto_stop_recording: true  # Auto-stop on silence
