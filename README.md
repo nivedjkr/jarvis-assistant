@@ -1,128 +1,190 @@
-# JARVIS - Your Terminal AI Assistant
+# JARVIS - Autonomous AI Assistant & Intelligence System
 
-A powerful CLI-based AI assistant that runs in your terminal, powered by NVIDIA NIM API. JARVIS can help you with file operations, system commands, and general tasks through natural language.
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
+[![Electron](https://img.shields.io/badge/Electron-29%2B-47848F.svg)](https://www.electronjs.org/)
+[![React](https://img.shields.io/badge/React-18-61DAFB.svg)](https://reactjs.org/)
+[![NVIDIA NIM](https://img.shields.io/badge/NVIDIA-NIM%20API-76B900.svg)](https://build.nvidia.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Features
+An Iron-Man-inspired, dual-interface (Desktop GUI + Terminal CLI) AI assistant packed with real-time proactive system awareness, voice synthesis, autonomous tool execution, project intelligence, and Google Workspace integrations.
 
-- 🤖 **AI-Powered**: Uses NVIDIA NIM API with Llama 3.1 405B model
-- 💬 **Interactive Chat**: Natural conversation with streaming responses
-- 🎙️ **Voice Mode**: Speech-to-text and text-to-speech for hands-free interaction
-- 🛠️ **Tool System**: File operations, shell commands, directory management
-- 📝 **Memory System**: Reminders, notes, and task history
-- 🎨 **Beautiful UI**: Rich terminal formatting with colors and panels
-- 🔒 **Safe Operations**: Confirmation prompts for dangerous commands
-- 📊 **Command Logging**: All commands logged for safety and audit
+---
 
-## Installation
+## ✨ Features at a Glance
+
+### 🧠 Advanced Multi-Model AI Engine
+- **NVIDIA NIM API Integration**: Powered by state-of-the-art LLMs including `meta/llama-3.1-405b-instruct`, `70b`, `8b`, `mistralai/mistral-large`, and `google/gemma-7b`.
+- **Streaming & Dynamic Fallback**: Real-time token streaming with automatic fallback strategies for maximum reliability.
+
+### 🖥️ Dual Modern Interfaces
+- **Electron + React Desktop GUI**: Sleek visual interface featuring glassmorphic controls, dark mode aesthetic, animated status monitors, and WebSocket communication.
+- **Rich Terminal CLI**: Interactive CLI rendered with panels, custom color themes, boot animations, command history, and dynamic live spinners.
+
+### 🎙️ Full Voice Interaction Subsystem
+- **Offline Speech-to-Text (STT)**: Fast, local transcription powered by `faster-whisper`.
+- **Dual Text-to-Speech (TTS)**: Online high-definition natural voice synthesis via `edge-tts` (e.g. Iron-Man British voice `en-GB-RyanNeural`) with offline fallback via `pyttsx3`.
+- **Push-to-Talk & Streaming Speech**: Hold spacebar for hands-free audio recording with instant speech playback.
+
+### ⚡ Autonomous Tool Execution
+- **File System & Shell Tools**: Read/write files, create directories, run system shell commands, inspect search paths.
+- **Application Control**: Launch system applications (`apps.py`) and perform desktop workflows.
+- **Safety First**: Configurable confirmation prompts for potentially destructive commands with complete command audit logs (`jarvis_commands.log`).
+
+### 👁️ Proactive System & Workspace Awareness
+- **Resource Monitoring**: Real-time tracking of CPU, RAM, Disk space, Network I/O, and NVIDIA GPU metrics via `psutil` and `pynvml`.
+- **Proactive Alerts & Boot Greetings**: Intelligent system state notifications (disk pressure, battery, memory load) and dynamic context-aware greetings.
+
+### 📁 Project & Code Intelligence
+- **Codebase Indexing**: Automated project context injection, workspace structure parsing, and git status tracking.
+- **Self-Learning Project Memory**: Remembers past architectural decisions, pending tasks, and repository-specific patterns.
+
+### 📅 Integrations & Services
+- **Google Workspace**: Google Calendar (`calendar_service.py`) and Gmail (`email_service.py`) with seamless OAuth2 authentication (`google_auth.py`).
+- **Weather Forecasting**: Live OpenWeatherMap data with location-based alerts (`weather.py`).
+- **Web Search**: Real-time DuckDuckGo web searching for up-to-date information.
+
+### 🛡️ Trust & Diagnostics
+- **Self-Diagnostics (`/diagnose`)**: On-demand system self-test verifying API access, voice engines, memory storage, and environment health.
+- **Action Reasoning (`/why`)**: Explains the logic behind JARVIS's recent actions and decisions.
+- **Confidence-Flagged Outputs**: Indicates response confidence levels for critical operations.
+
+---
+
+## 🏗️ Architecture Overview
+
+```mermaid
+flowchart TD
+    subgraph UI ["User Interfaces"]
+        GUI["Electron + React Desktop App"]
+        CLI["Rich Terminal CLI"]
+    end
+
+    subgraph Core ["JARVIS Core System"]
+        API["API Server (jarvis/api.py)"]
+        Client["NVIDIA NIM Client (api_client.py)"]
+        Awareness["Awareness Engine (awareness.py)"]
+        Memory["Memory System (memory.py)"]
+        Project["Project Intelligence (projects.py)"]
+    end
+
+    subgraph Services ["External Services & Tools"]
+        Tools["Tool Registry & Execution"]
+        Voice["STT / TTS Engine (voice.py)"]
+        Google["Google Calendar & Gmail Services"]
+        Weather["OpenWeatherMap & Web Search"]
+        SysMon["System & GPU Monitor (psutil/pynvml)"]
+    end
+
+    GUI <-->|REST / WebSocket| API
+    CLI <--> Core
+    API <--> Core
+    Core --> Services
+```
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
+- **Python**: Version `3.8` or higher
+- **Node.js**: Version `18` or higher (required for Desktop GUI)
+- **NVIDIA NIM API Key**: Free API key from [build.nvidia.com](https://build.nvidia.com/)
 
-- Python 3.8 or higher
-- NVIDIA NIM API key (free from [build.nvidia.com](https://build.nvidia.com/))
+### 1. Clone & Virtual Environment Setup
 
-### Setup
+```bash
+# Clone repository
+git clone https://github.com/nivedjkr/jarvis-assistant.git
+cd jarvis-assistant
 
-1. **Clone or download the project**
+# Create virtual environment
+python -m venv venv
 
-2. **Create a virtual environment**
-   ```bash
-   python -m venv venv
-   ```
+# Activate virtual environment
+# On Windows:
+venv\Scripts\activate
+# On Linux/macOS:
+source venv/bin/activate
+```
 
-3. **Activate the virtual environment**
+### 2. Install Python Dependencies
 
-   Windows:
-   ```bash
-   venv\Scripts\activate
-   ```
+```bash
+pip install -r requirements.txt
+```
 
-   Linux/Mac:
-   ```bash
-   source venv/bin/activate
-   ```
+### 3. Configure Environment Variables
 
-4. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+Copy `.env.example` to `.env` and fill in your keys:
 
-5. **Set up your API key**
+```bash
+cp .env.example .env
+```
 
-   Copy `.env.example` to `.env`:
-   ```bash
-   copy .env.example .env
-   ```
+Edit `.env`:
+```env
+NVIDIA_NIM_API_KEY=your_nvidia_nim_api_key
+OPENWEATHER_API_KEY=your_openweather_api_key  # Optional
+```
 
-   Edit `.env` and add your NVIDIA NIM API key:
-   ```
-   NVIDIA_NIM_API_KEY=your_actual_api_key_here
-   ```
+---
 
-## Usage
+## 💻 Running JARVIS
 
-### Start JARVIS
+### Option A: Terminal CLI Mode
+
+Run the rich interactive terminal interface:
 
 ```bash
 python -m jarvis.cli
 ```
 
-Or directly:
-```bash
-python jarvis/cli.py
-```
+### Option B: Desktop GUI Mode
 
-### Available Commands
+1. **Start the API Server Backend**:
+   ```bash
+   python jarvis/api.py
+   ```
 
-#### Slash Commands
+2. **Launch the Desktop Application**:
+   ```bash
+   cd jarvis-desktop
+   npm install
+   npm run dev
+   ```
 
-- `/help` - Show help message
-- `/clear` - Clear the screen
-- `/exit` - Exit JARVIS
-- `/history` - Show conversation history
-- `/tools` - List available tools
-- `/reminders` - Show your reminders
-- `/notes` - Show your notes
-- `/tasks` - Show recent task history
-- `/voice on` - Enable voice mode (push-to-talk)
-- `/voice off` - Disable voice mode
+---
 
-#### Natural Language Commands
+## 🎮 Command Cheat Sheet
 
-- "Create a folder called X" - Create directory
-- "Read file X" - Read file contents
-- "List files in X" - List directory contents
-- "Search for X" - Search for files
-- "Run command X" - Execute shell command
-- "Remind me to X" - Add a reminder
-- "Note: X" - Add a note
+### ⌨️ Terminal Slash Commands
 
-#### Examples
+| Command | Description |
+| :--- | :--- |
+| `/help [category]` | View categorized help and command documentation |
+| `/clear` | Clear terminal output |
+| `/history` | Show session conversation history |
+| `/tools` | List all available autonomous tools |
+| `/reminders` | View scheduled reminders |
+| `/notes` | View saved notes |
+| `/tasks` | View recent task history |
+| `/voice on/off` | Enable or disable interactive voice mode |
+| `/diagnose` | Run full system self-diagnostic checks |
+| `/why` | Display rationale for JARVIS's latest action |
+| `/exit` | Gracefully exit JARVIS |
 
-```
-You: Create a folder called my_project
-JARVIS: Created directory: my_project
+### 🗣️ Voice Mode Controls
 
-You: Read file README.md
-JARVIS: Contents of README.md: ...
+- **Enable**: Type `/voice on` in CLI.
+- **Record**: Hold down **Spacebar** while speaking.
+- **Send**: Release **Spacebar** to transcribe and execute.
+- **Disable**: Type `/voice off`.
 
-You: List files in .
-JARVIS: [DIR] jarvis
-[FILE] README.md
-[FILE] requirements.txt
+---
 
-You: Run command dir
-JARVIS: (directory listing)
+## ⚙️ Configuration Reference
 
-You: Remind me to update the documentation
-JARVIS: Reminder added: to update the documentation
-
-You: Note: Remember to check the logs
-JARVIS: Note saved: Remember to check the logs
-```
-
-## Configuration
-
-Edit `config.yaml` to customize JARVIS:
+Customize your experience in `config.yaml`:
 
 ```yaml
 api:
@@ -142,180 +204,96 @@ tools:
 
 voice:
   enabled: false
-  stt_model: "base"  # "base" or "small" for faster-whisper
-  tts_engine: "edge"  # "edge" or "pyttsx3"
-  tts_voice: "en-GB-RyanNeural"  # Edge TTS voice
-  push_to_talk_key: "space"  # Key for push-to-talk
-  wake_word_enabled: false  # Enable wake word detection
-  silence_threshold: 0.5  # Silence detection threshold (0-1)
-  auto_stop_recording: true  # Auto-stop on silence
+  stt_model: "base"           # "base" or "small" for faster-whisper
+  tts_engine: "edge"           # "edge" (online) or "pyttsx3" (offline)
+  tts_voice: "en-GB-RyanNeural"# Natural British accent
+  push_to_talk_key: "space"
+  auto_stop_recording: true
+
+location:
+  city: "Kerala"
+  country: "India"
 ```
-
-### Available NVIDIA NIM Models
-
-- `meta/llama-3.1-8b-instruct` (default, most available)
-- `meta/llama-3.1-70b-instruct`
-- `mistralai/mistral-large`
-- `google/gemma-7b`
-
-## Project Structure
-
-```
-JARVIS/
-├── jarvis/
-│   ├── __init__.py
-│   ├── cli.py           # Main CLI application
-│   ├── api_client.py    # NVIDIA NIM API client
-│   ├── tools.py         # Tool system and implementations
-│   ├── memory.py        # Memory and logging system
-│   └── voice.py         # Voice I/O (STT/TTS) module
-├── config.yaml          # Configuration file
-├── requirements.txt     # Python dependencies
-├── .env.example        # Environment variables template
-└── README.md           # This file
-```
-
-## Safety Features
-
-- **Confirmation Prompts**: Dangerous commands require user confirmation
-- **Command Logging**: All executed commands are logged to `jarvis_commands.log`
-- **Memory Persistence**: Reminders, notes, and task history saved across sessions
-- **Error Handling**: Graceful error handling with clear messages
-
-## Adding Custom Tools
-
-To add a new tool, create a class inheriting from `Tool` in `tools.py`:
-
-```python
-class MyCustomTool(Tool):
-    def __init__(self):
-        super().__init__("my_tool", "Description of my tool")
-    
-    async def execute(self, **kwargs) -> str:
-        # Your tool logic here
-        return "Result"
-```
-
-Then register it in the `ToolRegistry`:
-
-```python
-self.register(MyCustomTool())
-```
-
-## Voice Mode
-
-JARVIS now supports voice interaction for an Iron-Man-style experience!
-
-### Enabling Voice Mode
-
-1. Type `/voice on` to enable voice mode
-2. Hold the **spacebar** to record your voice
-3. Release to transcribe and send to JARVIS
-4. JARVIS will respond both visually and with speech
-5. Type `/voice off` to disable voice mode
-
-### Voice Features
-
-- **Speech-to-Text**: Uses `faster-whisper` for accurate transcription
-- **Text-to-Speech**: Uses `edge-tts` for natural-sounding speech
-- **Push-to-Talk**: Hold spacebar to record (configurable)
-- **Streaming TTS**: Speaks responses as they're generated
-- **Mixed Input**: Type or talk - both work in voice mode
-
-### Voice Configuration
-
-Edit `config.yaml` to customize voice settings:
-
-- `stt_model`: "base" (faster) or "small" (more accurate)
-- `tts_engine`: "edge" (online, better quality) or "pyttsx3" (offline)
-- `tts_voice`: Edge TTS voice name (e.g., "en-GB-RyanNeural")
-- `push_to_talk_key`: Key for push-to-talk (default: space)
-
-### Troubleshooting Voice Issues
-
-**Microphone not working:**
-- Ensure your microphone is connected and recognized by your system
-- Check that no other application is using the microphone
-- Try running with administrator privileges
-
-**STT errors:**
-- First run will download the Whisper model (may take a few minutes)
-- Ensure you have enough disk space (~150MB for base model)
-- Try switching between "base" and "small" models
-
-**TTS not speaking:**
-- Check your internet connection (edge-tts requires internet)
-- If offline, switch `tts_engine` to "pyttsx3" in config.yaml
-- Ensure your system audio is working
-
-**Keyboard listener issues:**
-- On Windows, may need administrator privileges
-- On Linux, may need to add user to input group
-- Try a different key in config.yaml if spacebar doesn't work
-
-## Troubleshooting
-
-### API Key Issues
-
-If you get an error about the API key:
-1. Ensure you've set `NVIDIA_NIM_API_KEY` in your `.env` file
-2. Make sure the `.env` file is in the same directory as `cli.py`
-3. Verify your API key is valid at [build.nvidia.com](https://build.nvidia.com/)
-
-### Import Errors
-
-If you get import errors:
-1. Make sure you've activated your virtual environment
-2. Run `pip install -r requirements.txt` again
-3. Ensure you're running from the project root directory
-
-### Model Errors
-
-If the model fails to respond or you get a 404 error:
-1. Check your internet connection
-2. Verify the model name in `config.yaml` is correct
-3. Try switching to a different model:
-   - `meta/llama-3.1-8b-instruct` (recommended)
-   - `meta/llama-3.1-70b-instruct`
-   - `mistralai/mistral-large`
-4. Check if your API key has access to the model at [build.nvidia.com](https://build.nvidia.com/)
-5. Verify the API endpoint is correct: `https://integrate.api.nvidia.com/v1`
-
-## Real-Time Monitoring & Integrations Setup
-
-### 1. System Resource Monitoring & NVIDIA GPU Setup
-- Uses `psutil` for real CPU, RAM, disk, and network stats.
-- GPU monitoring uses `pynvml` / `nvidia-smi`. If no NVIDIA GPU is present, GPU monitoring degrades gracefully and skips silently without error.
-
-### 2. OpenWeatherMap API Setup
-- Sign up for a free API key at [openweathermap.org/api](https://openweathermap.org/api).
-- Add your key to `.env`:
-  ```
-  OPENWEATHER_API_KEY=your_actual_openweather_key
-  ```
-- Configure your city and country in `config.yaml`:
-  ```yaml
-  location:
-    city: "Kerala"
-    country: "India"
-  ```
-
-### 3. Google Calendar & Gmail OAuth2 Setup
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project and enable **Google Calendar API** and **Gmail API**.
-3. Configure the **OAuth consent screen** (User Type: External, add test users).
-4. Create **OAuth 2.0 Client ID** credentials (Application type: Desktop app).
-5. Download `credentials.json` and place it in your workspace root or `jarvis/data/credentials.json`.
-6. On running `/calendar` or `/email` for the first time, a browser window will open to authorize access. The token will be saved to `jarvis/data/google_token.json`.
-
-## License
-
-MIT License - Feel free to use and modify as needed.
-
-## Contributing
-
-Contributions are welcome! Feel free to submit issues or pull requests.
 
 ---
 
-**Built with ❤️ using NVIDIA NIM API**
+## 🔌 Integrations Setup Guide
+
+### 1. Google Workspace (Calendar & Gmail)
+1. Navigate to [Google Cloud Console](https://console.cloud.google.com/).
+2. Enable **Google Calendar API** and **Gmail API**.
+3. Download OAuth 2.0 Client credentials file as `credentials.json` and place it in `jarvis/data/credentials.json`.
+4. Upon executing calendar/email features, OAuth authorization will prompt in your browser and save token state automatically.
+
+### 2. OpenWeatherMap
+1. Obtain an API key from [openweathermap.org](https://openweathermap.org/api).
+2. Set `OPENWEATHER_API_KEY` in `.env`.
+3. Set your preferred city/country in `config.yaml`.
+
+### 3. GPU Monitoring
+- Real-time GPU stats utilize `pynvml` / `nvidia-smi`.
+- Non-NVIDIA or integrated graphics systems automatically fallback cleanly without warnings.
+
+---
+
+## 📂 Repository Structure
+
+```
+JARVIS/
+├── jarvis/                     # Python Core Subsystem
+│   ├── api.py                  # REST & WebSocket API Server
+│   ├── api_client.py           # NVIDIA NIM API Client
+│   ├── apps.py                 # System Application Manager
+│   ├── awareness.py            # Proactive Context & Alert Engine
+│   ├── calendar_service.py     # Google Calendar Integration
+│   ├── cli.py                  # Rich Terminal Interface
+│   ├── email_service.py        # Gmail OAuth Integration
+│   ├── google_auth.py          # Unified OAuth Handler
+│   ├── memory.py               # Long-Term Storage & Logs
+│   ├── projects.py             # Project & Codebase Intelligence
+│   ├── system_monitor.py       # CPU / RAM / Disk / GPU Monitoring
+│   ├── tools.py                # Autonomous Tool Engine
+│   ├── ui.py                   # Terminal Styling & Panels
+│   ├── voice.py                # STT & TTS Voice Engine
+│   └── weather.py              # OpenWeatherMap Integration
+├── jarvis-desktop/             # Electron + React GUI
+│   ├── electron/               # Electron Main Process
+│   ├── src/                    # React Components & CSS
+│   └── package.json            # Desktop Node Dependencies
+├── config.yaml                 # System Configuration
+├── requirements.txt            # Python Dependencies
+├── .env.example               # Environment Variables Template
+└── README.md                  # Project Documentation
+```
+
+---
+
+## 🛡️ Safety & Auditing
+
+- **Command Safety Rules**: Dangerous shell commands require explicit confirmation prior to execution.
+- **Audit Trails**: Every command execution is timestamped and logged to `jarvis_commands.log`.
+- **Isolated Credentials**: Sensitive tokens are preserved in local ignored storage (`jarvis/data/`).
+
+---
+
+## 🤝 Contributing
+
+Contributions are greatly appreciated! Feel free to open issues or submit pull requests.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+Distributed under the **MIT License**. See `LICENSE` for more information.
+
+---
+
+<p align="center">
+  <b>Built with ❤️ using NVIDIA NIM API</b>
+</p>
