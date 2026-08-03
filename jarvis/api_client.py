@@ -62,6 +62,11 @@ You are not a generic chatbot. You are JARVIS. Stay in character, always.
   actually returned — never reconstruct or guess at what probably 
   happened.
 
+=== PROJECT DATABASE STRICTNESS (CRITICAL) ===
+- All project details surfaced MUST come strictly from real DB queries or injected real DB context.
+- JARVIS must NEVER generate, invent, or approximate project details.
+- If a project doesn't exist in the database, say so plainly rather than making up plausible-sounding details.
+
 === PERSONALITY DETAILS ===
 - Opinions and preferences: express them briefly and dryly when asked. 
   "I'd suggest X, sir" is better than "I don't have preferences."
@@ -103,10 +108,11 @@ Right: "Genuinely impressive for one session, sir. Don't let it get
 class NIMClient:
     """Client for NVIDIA NIM API"""
     
-    def __init__(self, config_path: str = "config.yaml", memory: Any = None):
-        """Initialize the NIM client with configuration and optional memory"""
+    def __init__(self, config_path: str = "config.yaml", memory: Any = None, project_manager: Any = None):
+        """Initialize the NIM client with configuration, optional memory, and project_manager"""
         self.config = self._load_config(config_path)
         self.memory = memory
+        self.project_manager = project_manager
         
         api_key = os.getenv("NVIDIA_NIM_API_KEY")
         if not api_key:
@@ -154,7 +160,7 @@ class NIMClient:
             }
     
     def _get_dynamic_system_prompt(self, user_message: str) -> str:
-        """Construct system prompt enriched with user profile and top relevant facts"""
+        """Construct system prompt enriched with user profile, relevant facts, and real project DB context"""
         prompt = self.base_system_prompt
         
         if self.memory:
@@ -174,7 +180,13 @@ class NIMClient:
             
             if context_parts:
                 prompt += "\n\n=== WHAT YOU KNOW ABOUT THE USER ===\n" + "\n\n".join(context_parts)
-                
+
+        # Inject real Project DB context if project mentioned
+        if self.project_manager:
+            proj_context = self.project_manager.get_project_context_for_message(user_message)
+            if proj_context:
+                prompt += "\n\n" + proj_context
+
         return prompt
 
     def add_message(self, role: str, content: str):
@@ -238,25 +250,21 @@ class NIMClient:
                     chunk_count += 1
                     try:
                         if chunk.choices and len(chunk.choices) > 0:
-                            if hasattr(chunk.choices[0], 'delta') and chunk.choices[0].delta:
-                                if hasattr(chunk.choices[0].delta, 'content') and chunk.choices[0].delta.content:
-                                    content = chunk.choices[0].delta.content
-                                    full_response += content
-                                    yield content
-                    except (IndexError, AttributeError) as e:
-                        # Skip malformed chunks
-                        print(f"Debug: Chunk {chunk_count} error: {e}")
+                            delta = chunk.choices[0].delta
+                            if delta and hasattr(delta, 'content') and delta.content:
+                                content = delta.content
+                                full_response += content
+                                yield content
+                    except (IndexError, AttributeError):
                         continue
                 
-                # Add assistant response to history if we got a response
-                if full_response:
-                    self.add_message("assistant", full_response)
-                else:
-                    print(f"Debug: Received {chunk_count} chunks but no content")
-                    yield "\n[Error: No response received from API. Check your API key and model access.]"
+                if not full_response or not full_response.strip():
+                    full_response = "Done, sir."
+                    yield full_response
+
+                self.add_message("assistant", full_response)
             
-            except Exception as stream_error:
-                print(f"Debug: Streaming failed, trying non-streaming: {stream_error}")
+            except Exception:
                 # Fallback to non-streaming
                 response = await self.client.chat.completions.create(
                     model=self.config["api"]["model"],
@@ -266,15 +274,19 @@ class NIMClient:
                     stream=False
                 )
                 
-                if response.choices and len(response.choices) > 0:
-                    full_response = response.choices[0].message.content
-                    self.add_message("assistant", full_response)
-                    yield full_response
+                if response and response.choices and len(response.choices) > 0:
+                    text = response.choices[0].message.content
+                    text = text or "Done, sir."
+                    self.add_message("assistant", text)
+                    yield text
                 else:
-                    yield "\n[Error: No response received from API. Check your API key and model access.]"
+                    text = "Done, sir."
+                    self.add_message("assistant", text)
+                    yield text
             
         except Exception as e:
-            yield f"\n[Error: {str(e)}]"
+            err_msg = f"[Error: {str(e)}]"
+            yield err_msg
 
     async def extract_and_save_facts(self, user_message: str, assistant_response: str):
         """

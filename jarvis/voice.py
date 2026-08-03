@@ -637,7 +637,7 @@ class VoiceManager:
 class ProactiveMonitor:
     """Background thread for proactive monitoring (reminders, system, weather, market, calendar, email)"""
     
-    def __init__(self, memory, tts_engine, check_interval: int = 2, config: Optional[Dict[str, Any]] = None, api_client: Optional[Any] = None):
+    def __init__(self, memory, tts_engine, check_interval: int = 2, config: Optional[Dict[str, Any]] = None, api_client: Optional[Any] = None, project_manager: Optional[Any] = None):
         """
         Initialize proactive monitor
         """
@@ -646,11 +646,20 @@ class ProactiveMonitor:
         self.check_interval = check_interval
         self.config = config or {}
         self.api_client = api_client
+        if project_manager:
+            self.project_manager = project_manager
+        else:
+            from jarvis.projects import ProjectManager
+            self.project_manager = ProjectManager()
+
         self.running = False
         self.thread = None
         self.is_busy = False
         self.announcement_queue = []
         self.delivered_reminders = set()
+        self.alerted_overdue_tasks = set()
+        self.alerted_stale_projects = set()
+        self.last_weekly_review_date = None
         self.last_check_timestamp: Optional[datetime] = None
 
         # Feature Managers
@@ -667,6 +676,7 @@ class ProactiveMonitor:
         self._last_weather_check: float = now_ts
         self._last_cal_check: float = now_ts
         self._last_email_check: float = now_ts
+        self._last_project_check: float = now_ts
         self._boot_sys_alert_suppressed: bool = True
 
         # Rolling 10-minute price history: {ticker: [(timestamp, price)]}
@@ -933,6 +943,55 @@ class ProactiveMonitor:
         except Exception as e:
             console.print(f"[dim yellow]Email triage evaluation warning: {e}[/dim yellow]")
 
+    def _check_projects(self):
+        """Check active projects daily for overdue tasks, approaching deadlines, and stale activity"""
+        now_ts = time.time()
+        if now_ts - self._last_project_check < 600.0:
+            return
+        self._last_project_check = now_ts
+
+        try:
+            # 1. Overdue tasks alert
+            overdue_tasks = self.project_manager.get_overdue_tasks()
+            for t in overdue_tasks:
+                task_id = t["id"]
+                if task_id not in self.alerted_overdue_tasks:
+                    self.alerted_overdue_tasks.add(task_id)
+                    alert_text = f"Sir, task '{t['title']}' in '{t['project_name']}' is overdue since {t['due_date']}."
+                    console.print(f"\n[bold red]⚠️ PROJECT OVERDUE TASK:[/bold red] [bold white]{alert_text}[/bold white]\n")
+                    self.announcement_queue.append(alert_text)
+
+            # 2. Approaching deadlines alert (within 7 days)
+            approaching = self.project_manager.get_approaching_deadlines(7)
+            for p in approaching:
+                try:
+                    deadline_dt = datetime.fromisoformat(p["deadline"])
+                    days_left = (deadline_dt.date() - date.today()).days
+                    if days_left >= 0:
+                        alert_text = f"Sir, '{p['name']}' deadline is in {days_left} days."
+                        console.print(f"\n[bold yellow]📅 PROJECT DEADLINE APPROACHING:[/bold yellow] [bold white]{alert_text}[/bold white]\n")
+                except ValueError:
+                    pass
+
+            # 3. Stale projects alert (no updates in 14+ days)
+            stale = self.project_manager.get_stale_projects(14)
+            for p in stale:
+                if p["id"] not in self.alerted_stale_projects:
+                    self.alerted_stale_projects.add(p["id"])
+                    alert_text = f"Sir, '{p['name']}' hasn't had any activity in 14 days. Still active?"
+                    console.print(f"\n[bold cyan]💤 STALE PROJECT FLAG:[/bold cyan] [bold white]{alert_text}[/bold white]\n")
+
+            # 4. Weekly Review on Mondays
+            today = date.today()
+            if today.weekday() == 0 and self.last_weekly_review_date != today:
+                self.last_weekly_review_date = today
+                res = self.project_manager.generate_weekly_project_review()
+                spoken_summary = res["spoken_summary"]
+                console.print(f"\n[bold bright_cyan]📊 WEEKLY PROJECT REVIEW:[/bold bright_cyan] [bold white]{spoken_summary}[/bold white]\n")
+                self.announcement_queue.append(spoken_summary)
+        except Exception as e:
+            console.print(f"[dim yellow]Project monitor check warning: {e}[/dim yellow]")
+
     def _monitor_loop(self):
         """Main monitoring loop"""
         while self.running:
@@ -945,6 +1004,7 @@ class ProactiveMonitor:
                 self._check_price_watches()
                 self._check_calendar()
                 self._check_email()
+                self._check_projects()
                 self._deliver_announcements()
                 time.sleep(self.check_interval)
             except Exception as e:

@@ -14,16 +14,53 @@ DEFAULT_APPS = {
     "notepad": "notepad.exe",
     "calculator": "calc.exe",
     "calc": "calc.exe",
-    "chrome": "chrome.exe",
     "vscode": "code",
     "vs code": "code",
     "code": "code",
     "visual studio code": "code",
+    "chrome": "chrome.exe",
+    "google chrome": "chrome.exe",
     "explorer": "explorer.exe",
     "file explorer": "explorer.exe",
     "task manager": "taskmgr.exe",
+    "terminal": "wt.exe",
+    "windows terminal": "wt.exe",
+    "spotify": "spotify.exe",
+    "discord": "discord.exe",
+    "telegram": "telegram.exe",
+    "word": "winword.exe",
+    "excel": "excel.exe",
+    "powerpoint": "powerpnt.exe",
+    "paint": "mspaint.exe",
+    "cmd": "cmd.exe",
+    "command prompt": "cmd.exe",
+    "powershell": "powershell.exe",
     "settings": "start ms-settings:",
-    "edge": "msedge.exe",
+    "edge": "msedge.exe"
+}
+
+DEFAULT_PROCESS_NAMES = {
+    "vscode": "Code.exe",
+    "vs code": "Code.exe",
+    "code": "Code.exe",
+    "visual studio code": "Code.exe",
+    "chrome": "chrome.exe",
+    "google chrome": "chrome.exe",
+    "notepad": "notepad.exe",
+    "calculator": "calc.exe",
+    "calc": "calc.exe",
+    "spotify": "Spotify.exe",
+    "discord": "Discord.exe",
+    "telegram": "Telegram.exe",
+    "word": "WINWORD.EXE",
+    "excel": "EXCEL.EXE",
+    "powerpoint": "POWERPNT.EXE",
+    "explorer": "explorer.exe",
+    "file explorer": "explorer.exe",
+    "paint": "mspaint.exe",
+    "task manager": "taskmgr.exe",
+    "terminal": "WindowsTerminal.exe",
+    "windows terminal": "WindowsTerminal.exe",
     "cmd": "cmd.exe",
     "command prompt": "cmd.exe",
     "powershell": "powershell.exe"
@@ -41,18 +78,18 @@ class AppRegistry:
 
     def load_apps(self) -> Dict[str, str]:
         """Load apps dictionary from JSON file or initialize default"""
+        merged = DEFAULT_APPS.copy()
         if os.path.exists(self.json_path):
             try:
                 with open(self.json_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     if isinstance(data, dict):
-                        return data
+                        merged.update(data)
             except (json.JSONDecodeError, IOError):
                 pass
 
-        # Write default apps if missing or invalid
-        self.save_apps_data(DEFAULT_APPS)
-        return DEFAULT_APPS.copy()
+        self.save_apps_data(merged)
+        return merged
 
     def save_apps_data(self, data: Dict[str, str]):
         """Save dictionary to JSON file"""
@@ -112,3 +149,24 @@ class AppRegistry:
     def list_apps(self) -> Dict[str, str]:
         """Return dict of registered apps"""
         return self.apps.copy()
+
+    def resolve_process_name(self, name: str) -> str:
+        """
+        Resolve application name or alias to executable process name for psutil verification/kill.
+        """
+        name_clean = name.strip().lower()
+        if name_clean in DEFAULT_PROCESS_NAMES:
+            return DEFAULT_PROCESS_NAMES[name_clean]
+
+        cmd, matches, matched_key = self.resolve_app(name_clean)
+        if matched_key and matched_key in DEFAULT_PROCESS_NAMES:
+            return DEFAULT_PROCESS_NAMES[matched_key]
+
+        if cmd:
+            clean_cmd = cmd.replace("start ", "").strip()
+            binary = os.path.basename(clean_cmd).split()[0]
+            if not binary.endswith(".exe") and "." not in binary:
+                binary += ".exe"
+            return binary
+
+        return name_clean if name_clean.endswith(".exe") else f"{name_clean}.exe"

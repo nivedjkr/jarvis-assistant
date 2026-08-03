@@ -21,6 +21,7 @@ import yaml
 
 from jarvis.api_client import NIMClient
 from jarvis.memory import Memory, CommandLogger
+from jarvis.projects import ProjectManager
 from jarvis.tools import ToolRegistry, WebsiteOpenTool
 from jarvis.apps import AppRegistry
 from jarvis.voice import VoiceManager, ProactiveMonitor
@@ -41,7 +42,8 @@ class JARVISCLI:
         
         # Initialize components
         self.memory = Memory(self.config["memory"]["file"])
-        self.api_client = NIMClient(config_path, memory=self.memory)
+        self.project_manager = ProjectManager()
+        self.api_client = NIMClient(config_path, memory=self.memory, project_manager=self.project_manager)
         self.logger = CommandLogger(self.config["memory"]["log_file"])
         self.app_registry = AppRegistry()
         self.tools = ToolRegistry(
@@ -61,7 +63,9 @@ class JARVISCLI:
         self.proactive_monitor = ProactiveMonitor(
             memory=self.memory,
             tts_engine=self.voice_manager.tts,
-            check_interval=60
+            check_interval=60,
+            api_client=self.api_client,
+            project_manager=self.project_manager
         )
         self.proactive_monitor.start()
         
@@ -225,12 +229,26 @@ class JARVISCLI:
             "DUCKDUCKGO WEB SEARCH": [
                 ("/search <query>", "Perform real-time DuckDuckGo web search"),
                 ("/search ddg <query>", "DuckDuckGo web search with AI voice response")
+            ],
+            "PROJECTS": [
+                ("/projects", "List all active projects with status and task count"),
+                ("/projects all", "Include paused and completed projects"),
+                ("/projects <name>", "Full briefing on one project"),
+                ("/projects add", "Guided flow to create new project"),
+                ("/task add <project> <task>", "Quick add a task"),
+                ("/task done <project> <task>", "Mark a task complete"),
+                ("/task list <project>", "List tasks for a project"),
+                ("/tasks overdue", "All overdue tasks across all projects"),
+                ("/decide <project> <decision>", "Log a project decision"),
+                ("/note <project> <text>", "Add a note to a project"),
+                ("/timeline <project>", "Show project timeline"),
+                ("/milestone <project> <event>", "Add milestone to timeline")
             ]
         }
         
         # Filter categories if requested
         if cat_lower:
-            matched_cats = {k: v for k, v in categories.items() if cat_lower in k.lower() or (cat_lower in ["dev", "swe"] and "DEVELOPER" in k) or (cat_lower in ["study", "flashcards"] and "STUDY" in k) or (cat_lower in ["diagnostics", "trust", "diag"] and "DIAGNOSTICS" in k)}
+            matched_cats = {k: v for k, v in categories.items() if cat_lower in k.lower() or (cat_lower in ["projects", "project", "task", "tasks"] and "PROJECTS" in k) or (cat_lower in ["dev", "swe"] and "DEVELOPER" in k) or (cat_lower in ["study", "flashcards"] and "STUDY" in k) or (cat_lower in ["diagnostics", "trust", "diag"] and "DIAGNOSTICS" in k)}
             if matched_cats:
                 categories = matched_cats
             else:
@@ -558,7 +576,19 @@ class JARVISCLI:
             # Synchronize structured tool execution record into LLM context history
             self.api_client.add_message("user", user_input)
             self.api_client.add_message("assistant", f"[RECORDED TOOL EXECUTION RESULT]\nCommand: {user_input}\nResult: {tool_response}")
-            return tool_response
+            try:
+                confirm_prompt = (
+                    f"The user requested: '{user_input}'.\n"
+                    f"The tool executed and returned this exact result:\n{tool_response}\n\n"
+                    "Relay this result to the user as JARVIS in 1-2 concise sentences. "
+                    "You MUST include the exact file contents, paths, or data returned by the tool."
+                )
+                final_text = await self._get_ai_response(confirm_prompt)
+                if final_text and final_text.strip():
+                    return final_text
+            except Exception:
+                pass
+            return tool_response or "Done, sir."
 
         # Otherwise, send to AI
         return await self._get_ai_response(user_input)
@@ -702,6 +732,20 @@ class JARVISCLI:
             return self.handle_watch_command(cmd_raw)
         elif cmd_lower.startswith("/trade"):
             return self.handle_trade_command(cmd_raw)
+        elif cmd_lower.startswith("/projects"):
+            return await self.handle_projects_command(cmd_raw)
+        elif cmd_lower.startswith("/tasks overdue") or cmd_lower == "/tasks overdue":
+            return await self.handle_tasks_overdue_command()
+        elif cmd_lower.startswith("/task"):
+            return await self.handle_task_command(cmd_raw)
+        elif cmd_lower.startswith("/decide"):
+            return self.handle_decide_command(cmd_raw)
+        elif cmd_lower.startswith("/note "):
+            return self.handle_project_note_command(cmd_raw)
+        elif cmd_lower.startswith("/timeline"):
+            return self.handle_timeline_command(cmd_raw)
+        elif cmd_lower.startswith("/milestone"):
+            return self.handle_milestone_command(cmd_raw)
         elif cmd_lower.startswith("/protocol"):
             return await self.handle_protocol_command(cmd_raw)
         elif cmd_lower.startswith("/system"):
@@ -774,6 +818,20 @@ class JARVISCLI:
             except Exception:
                 pass
             return res
+        elif cmd_lower.startswith(("/open", "/launch")):
+            parts = cmd_raw.split(maxsplit=1)
+            app = parts[1].strip() if len(parts) > 1 else ""
+            if not app:
+                return "Usage: /open <app_name>"
+            return await self.tools.execute_tool("open_application", app_name=app)
+        elif cmd_lower.startswith(("/close", "/kill")):
+            parts = cmd_raw.split(maxsplit=1)
+            app = parts[1].strip() if len(parts) > 1 else ""
+            if not app:
+                return "Usage: /close <app_name>"
+            confirm = "confirm" in cmd_lower or "force" in cmd_lower
+            clean_app = app.replace("confirm", "").replace("force", "").strip()
+            return await self.tools.execute_tool("close_application", app_name=clean_app or app, confirm=confirm)
         else:
             return f"Unknown command: {command}. Type /help for available commands."
 
@@ -1453,9 +1511,254 @@ class JARVISCLI:
         console.print(Panel(explanation_text, title=title, border_style="cyan"))
         return f"Displayed action explanation for tool transaction #{idx + 1} ({tx['tool']})."
 
+    async def handle_projects_command(self, cmd_raw: str) -> str:
+        parts = cmd_raw.split(maxsplit=1)
+        sub = parts[1].strip() if len(parts) > 1 else ""
+
+        if not sub:
+            return await self.tools.execute_tool("project_tool", action="list", status="active")
+        elif sub.lower() == "all":
+            return await self.tools.execute_tool("project_tool", action="list")
+        elif sub.lower() == "add":
+            return await self.handle_project_add_guided()
+        else:
+            return await self.tools.execute_tool("project_tool", action="get", name_or_id=sub)
+
+    async def handle_project_add_guided(self) -> str:
+        console.print("[bold cyan]=== Guided Project Creation ===[/bold cyan]")
+        from rich.prompt import Prompt
+        import asyncio
+
+        name = await asyncio.to_thread(Prompt.ask, "Project Name")
+        if not name:
+            return "Project creation cancelled: Name cannot be empty."
+
+        desc = await asyncio.to_thread(Prompt.ask, "Description (optional)", default="")
+        category = await asyncio.to_thread(Prompt.ask, "Category (personal/client/startup/study/trading/other)", default="personal")
+        tech_stack = await asyncio.to_thread(Prompt.ask, "Tech Stack (e.g. Python, React, SQLite)", default="")
+        deadline = await asyncio.to_thread(Prompt.ask, "Deadline (YYYY-MM-DD, optional)", default="")
+        repo_url = await asyncio.to_thread(Prompt.ask, "Repo URL (optional)", default="")
+        priority_str = await asyncio.to_thread(Prompt.ask, "Priority (1-5)", default="3")
+
+        try:
+            priority = int(priority_str)
+        except ValueError:
+            priority = 3
+
+        p_id = self.project_manager.create_project(
+            name=name,
+            description=desc,
+            category=category,
+            tech_stack=tech_stack,
+            deadline=deadline,
+            repo_url=repo_url,
+            priority=priority
+        )
+
+        if p_id:
+            msg = f"Project '{name}' successfully created with ID {p_id}, sir."
+            try:
+                if hasattr(self.proactive_monitor, "tts") and self.proactive_monitor.tts:
+                    await self.proactive_monitor.tts.speak(msg)
+            except Exception:
+                pass
+            return msg
+        else:
+            return f"Failed to create project '{name}'. A project with that name already exists."
+
+    async def handle_task_command(self, cmd_raw: str) -> str:
+        parts = cmd_raw.split(maxsplit=3)
+        if len(parts) < 2:
+            return "Usage: /task add <project> <task> | /task done <project> <task> | /task list <project>"
+
+        sub = parts[1].lower()
+        if sub == "list" and len(parts) >= 3:
+            project_name = parts[2]
+            p = self.project_manager.get_project(project_name)
+            if not p:
+                return f"Project '{project_name}' not found in database."
+            tasks = p.get("tasks", [])
+            if not tasks:
+                return f"No tasks found for project '{p['name']}'."
+            lines = [f"=== Tasks for {p['name']} ==="]
+            for t in tasks:
+                due = f" (Due: {t['due_date']})" if t.get("due_date") else ""
+                lines.append(f"  - [{t['status'].upper()}] #{t['id']} {t['title']}{due}")
+            return "\n".join(lines)
+
+        elif sub == "add" and len(parts) >= 4:
+            project_name = parts[2]
+            task_title = parts[3]
+            p_id = self.project_manager.resolve_project_id(project_name)
+            if not p_id:
+                return f"Project '{project_name}' not found in database."
+            t_id = self.project_manager.add_task(project_id=p_id, title=task_title)
+            return f"Added task '{task_title}' to project '{project_name}' (Task #{t_id})."
+
+        elif sub == "done" and len(parts) >= 4:
+            project_name = parts[2]
+            task_query = parts[3]
+            p_id = self.project_manager.resolve_project_id(project_name)
+            if not p_id:
+                return f"Project '{project_name}' not found in database."
+            task = self.project_manager.find_task_by_title(p_id, task_query)
+            if not task:
+                if task_query.isdigit():
+                    t_id = int(task_query)
+                else:
+                    return f"Task matching '{task_query}' not found in project '{project_name}'."
+            else:
+                t_id = task["id"]
+
+            ok = self.project_manager.update_task(task_id=t_id, status="done")
+            if ok:
+                return f"Marked task #{t_id} as DONE in project '{project_name}', sir."
+            return f"Failed to update task #{t_id}."
+
+        return "Usage: /task add <project> <task> | /task done <project> <task> | /task list <project>"
+
+    async def handle_tasks_overdue_command(self) -> str:
+        return await self.tools.execute_tool("project_tool", action="overdue")
+
+    def handle_decide_command(self, cmd_raw: str) -> str:
+        parts = cmd_raw.split(maxsplit=2)
+        if len(parts) < 3:
+            return "Usage: /decide <project> <decision text>"
+        project_name = parts[1]
+        decision_text = parts[2]
+        p_id = self.project_manager.resolve_project_id(project_name)
+        if not p_id:
+            return f"Project '{project_name}' not found in database."
+        dec_id = self.project_manager.add_decision(project_id=p_id, decision=decision_text)
+        return f"Logged decision for project '{project_name}': '{decision_text}' (ID #{dec_id})."
+
+    def handle_project_note_command(self, cmd_raw: str) -> str:
+        parts = cmd_raw.split(maxsplit=2)
+        if len(parts) < 3:
+            return "Usage: /note <project> <note text>"
+        project_name = parts[1]
+        note_text = parts[2]
+        p_id = self.project_manager.resolve_project_id(project_name)
+        if not p_id:
+            return f"Project '{project_name}' not found in database."
+        n_id = self.project_manager.add_note(project_id=p_id, content=note_text)
+        return f"Added note to project '{project_name}': '{note_text}' (ID #{n_id})."
+
+    def handle_timeline_command(self, cmd_raw: str) -> str:
+        parts = cmd_raw.split(maxsplit=1)
+        if len(parts) < 2:
+            return "Usage: /timeline <project>"
+        project_name = parts[1]
+        p_id = self.project_manager.resolve_project_id(project_name)
+        if not p_id:
+            return f"Project '{project_name}' not found in database."
+        timeline = self.project_manager.get_project_timeline(p_id)
+        if not timeline:
+            return f"No timeline events recorded for project '{project_name}'."
+        lines = [f"=== Timeline for {project_name} ==="]
+        for tm in timeline:
+            lines.append(f"• [{tm.get('date', 'N/A')}] [{tm.get('type', 'update').upper()}] {tm['event']}")
+        return "\n".join(lines)
+
+    def handle_milestone_command(self, cmd_raw: str) -> str:
+        parts = cmd_raw.split(maxsplit=2)
+        if len(parts) < 3:
+            return "Usage: /milestone <project> <event text>"
+        project_name = parts[1]
+        event_text = parts[2]
+        p_id = self.project_manager.resolve_project_id(project_name)
+        if not p_id:
+            return f"Project '{project_name}' not found in database."
+        ev_id = self.project_manager.add_timeline_event(project_id=p_id, event=event_text, type_str="milestone")
+        return f"Added milestone to project '{project_name}': '{event_text}' (ID #{ev_id})."
+
     async def _check_tool_commands(self, user_input: str) -> Optional[str]:
         """Check if input matches a tool command or protocol trigger"""
         input_lower = user_input.lower()
+
+        # Natural Language Project Triggers
+        if any(phrase in input_lower for phrase in ["what projects am i working on", "what projects am i working", "my active projects", "list active projects", "what projects do i have"]):
+            return await self.tools.execute_tool("project_tool", action="list", status="active")
+
+        if "briefing on " in input_lower or "briefing for " in input_lower:
+            m = re.search(r'(give\s+me\s+a\s+full\s+)?briefing\s+(on|for)\s+(.+)', user_input, re.I)
+            if m:
+                p_name = m.group(3).strip().rstrip('?.!')
+                return await self.tools.execute_tool("project_tool", action="get", name_or_id=p_name)
+
+        if "overdue" in input_lower and ("task" in input_lower or "tasks" in input_lower):
+            return await self.tools.execute_tool("project_tool", action="overdue")
+
+        if "add" in input_lower and "task" in input_lower:
+            m1 = re.search(r'add\s+(a\s+)?task\s+to\s+([^:]+):\s*(.+)', user_input, re.I)
+            if m1:
+                p_name = m1.group(2).strip()
+                t_desc = m1.group(3).strip()
+                return await self.handle_task_command(f"/task add {p_name} {t_desc}")
+            m2 = re.search(r'add\s+(a\s+)?task\s+to\s+(\S+)\s+(.+)', user_input, re.I)
+            if m2:
+                p_name = m2.group(2).strip()
+                t_desc = m2.group(3).strip()
+                return await self.handle_task_command(f"/task add {p_name} {t_desc}")
+
+        if "mark" in input_lower and ("done" in input_lower or "completed" in input_lower) and "task" in input_lower:
+            m = re.search(r'mark\s+(the\s+)?task\s+[\'"]?([^\'"]+)[\'"]?\s+as\s+(done|completed)\s+in\s+(.+)', user_input, re.I)
+            if not m:
+                m = re.search(r'mark\s+[\'"]?([^\'"]+)[\'"]?\s+as\s+(done|completed)\s+in\s+(.+)', user_input, re.I)
+            if m:
+                t_title = m.group(2 if m.lastindex >= 4 else 1).strip()
+                p_name = m.group(4 if m.lastindex >= 4 else 3).strip()
+                return await self.handle_task_command(f"/task done {p_name} {t_title}")
+
+        if input_lower.startswith("create a new project called ") or input_lower.startswith("create a project called ") or input_lower.startswith("create project "):
+            m = re.search(r'create\s+(a\s+)?(new\s+)?project\s+(called\s+|named\s+)?([a-zA-Z0-9_\-\s]+)', user_input, re.I)
+            if m:
+                p_name = m.group(4).strip().rstrip('?.!')
+                p_id = self.project_manager.create_project(name=p_name)
+                if p_id:
+                    msg = f"Created new project '{p_name}' (ID #{p_id}), sir. You can add tasks, notes, or details anytime."
+                    try:
+                        if hasattr(self.proactive_monitor, "tts") and self.proactive_monitor.tts:
+                            await self.proactive_monitor.tts.speak(msg)
+                    except Exception:
+                        pass
+                    return msg
+                else:
+                    return f"Project '{p_name}' already exists in database."
+
+        if "add" in input_lower and "note" in input_lower and "to" in input_lower:
+            m = re.search(r'add\s+(a\s+)?note\s+to\s+([^:]+):\s*(.+)', user_input, re.I)
+            if m:
+                p_name = m.group(2).strip()
+                n_text = m.group(3).strip()
+                return self.handle_project_note_command(f"/note {p_name} {n_text}")
+
+        if "we decided to " in input_lower:
+            m = re.search(r'we\s+decided\s+to\s+(.+?)\s+because\s+(.+)', user_input, re.I)
+            if m:
+                dec_text = "We decided to " + m.group(1).strip()
+                reason_text = m.group(2).strip()
+                active = self.project_manager.get_active_projects_summary()
+                if active:
+                    target_p = active[0]
+                    d_id = self.project_manager.add_decision(project_id=target_p["id"], decision=dec_text, reasoning=reason_text)
+                    return f"Recorded decision for project '{target_p['name']}': {dec_text} (Reasoning: {reason_text})."
+
+        if input_lower.endswith(" is done") or "mark project " in input_lower:
+            m = re.search(r'(mark\s+project\s+)?([a-zA-Z0-9_\-\s]+)\s+is\s+done', user_input, re.I)
+            if not m:
+                m = re.search(r'mark\s+project\s+([a-zA-Z0-9_\-\s]+)\s+as\s+completed', user_input, re.I)
+            if m:
+                p_name = m.group(2 if m.lastindex >= 2 else 1).strip().rstrip('?.!')
+                ok = self.project_manager.complete_project(p_name)
+                if ok:
+                    msg = f"Project '{p_name}' has been marked as completed, sir. Outstanding work."
+                    try:
+                        if hasattr(self.proactive_monitor, "tts") and self.proactive_monitor.tts:
+                            await self.proactive_monitor.tts.speak(msg)
+                    except Exception:
+                        pass
+                    return msg
         
         # Git Status Natural Language Matching
         if "git status" in input_lower or "what's my git status" in input_lower or "what branch am i on" in input_lower:
@@ -1499,14 +1802,22 @@ class JARVISCLI:
                         self.memory.log_task(f"Open website {target}", "completed")
                         return result
                     
-                    cmd, matches, matched_key = self.app_registry.resolve_app(target)
-                    if cmd or matches or target_lower in ["notepad", "calc", "calculator", "chrome", "vscode", "explorer", "task manager", "settings"]:
-                        result = await self.tools.execute_tool("open_application", app_name=target)
-                        self.memory.log_task(f"Open application {target}", "completed")
-                        if matched_key:
-                            conf_warn = f"⚠️ [CONFIDENCE WARNING] I matched '{target}' to '{matched_key}' — confirm this is correct?\n"
-                            result = conf_warn + result
-                        return result
+                    result = await self.tools.execute_tool("open_application", app_name=target)
+                    self.memory.log_task(f"Open application {target}", "completed")
+                    return result
+
+        # Close Application
+        for prefix in ["close ", "kill ", "stop ", "exit ", "terminate "]:
+            if input_lower.startswith(prefix):
+                target = user_input[len(prefix):].strip()
+                target_lower = target.lower()
+                
+                if not ("folder" in target_lower or "directory" in target_lower or "file" in target_lower or "server" in target_lower):
+                    confirm = "confirm" in input_lower or "yes" in input_lower or "force" in input_lower
+                    clean_target = re.sub(r'^(confirm|yes|force)\s+', '', target, flags=re.I).strip()
+                    result = await self.tools.execute_tool("close_application", app_name=clean_target or target, confirm=confirm)
+                    self.memory.log_task(f"Close application {target}", "completed")
+                    return result
 
         # Web Search / Browse URL / DuckDuckGo Search
         if any(kw in input_lower for kw in ["duckduckgo", "ddg", "search web for", "web search for"]):
@@ -1598,7 +1909,7 @@ class JARVISCLI:
             reminder_text, due_at = self.parse_reminder_time(user_input)
             reminder = self.memory.add_reminder(reminder_text, due_date=due_at.isoformat())
             due_time_str = due_at.strftime("%H:%M:%S")
-            return f"Reminder set for '{reminder_text}' (due at {due_time_str})."
+            return f"Reminder added for '{reminder_text}' (due at {due_time_str})."
         
         # Add note
         elif input_lower.startswith("note:") or input_lower.startswith("save note:") or input_lower.startswith("add note:"):
@@ -1619,6 +1930,9 @@ class JARVISCLI:
                 response_text += chunk
                 status.update(f"[bold cyan]JARVIS:[/bold cyan] {response_text[-50:]}")
         
+        if not response_text or not response_text.strip():
+            response_text = "Done, sir."
+
         return response_text
     
     def _handle_voice_transcription(self, text: str):
@@ -1748,13 +2062,15 @@ class JARVISCLI:
                         timeout=0.1
                     )
                     # Voice input received
-                    console.print(f"[bold cyan]You (voice):[/bold cyan] {user_input}")
+                    ui.render_user_message(f"🎤 (voice) {user_input}")
                 except asyncio.TimeoutError:
                     # No voice input, get text input in a separate thread so event loop stays responsive
                     ui.set_state(UIState.IDLE)
                     user_input = await asyncio.to_thread(
                         ui.get_user_input
                     )
+                    if user_input:
+                        ui.render_user_message(user_input)
                 
                 if not user_input:
                     continue
@@ -1766,11 +2082,20 @@ class JARVISCLI:
                 self.is_busy = True
                 self.proactive_monitor.set_busy(True)
                 
-                # Process input
-                response = await self.process_command(user_input)
+                # Render section divider
+                ui.render_divider()
+
+                # Process input with thinking status
+                ui.start_thinking()
+                try:
+                    response = await self.process_command(user_input)
+                finally:
+                    ui.stop_thinking()
                 
-                if response:
-                    # Display response using HUD UI panel
+                if response is not None:
+                    if not response or not response.strip():
+                        response = "Done, sir."
+                    # Display response using UI panel
                     ui.render_response(response)
                     
                     # Stop any transient speech and start new response speech task
@@ -1788,6 +2113,8 @@ class JARVISCLI:
                         self.memory.log_conversation_message("assistant", response)
                         asyncio.create_task(self.api_client.extract_and_save_facts(user_input, response))
                 else:
+                    response = "Done, sir."
+                    ui.render_response(response)
                     ui.set_state(UIState.IDLE)
                 
                 # Clear busy state

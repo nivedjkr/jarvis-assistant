@@ -8,6 +8,9 @@ import subprocess
 import shutil
 import webbrowser
 import urllib.parse
+import asyncio
+import time
+import psutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from rich.console import Console
@@ -295,43 +298,207 @@ class GitStatusTool(Tool):
 
 
 class AppLaunchTool(Tool):
-    """Tool to launch software applications"""
+    """Tool to launch software applications with a tiered strategy and psutil verification."""
     
     def __init__(self, app_registry: Optional[AppRegistry] = None):
         super().__init__("open_application", "Launch an installed software application or Windows tool")
         self.app_registry = app_registry or AppRegistry()
         
     async def execute(self, app_name: str = "", name: str = "") -> str:
-        """Launch application by name"""
-        target = app_name or name
+        """Launch application by name with 4-tier launch strategy and psutil verification."""
+        target = (app_name or name).strip()
+        if not target:
+            return "Error: No application specified to open."
+
+        cmd, matches, matched_key = self.app_registry.resolve_app(target)
+        if matches:
+            matches_str = ", ".join(f"'{m}'" for m in matches)
+            return f"Multiple matching applications found for '{target}': {matches_str}. Please specify which one."
+
+        command = cmd or target
+        proc_target = self.app_registry.resolve_process_name(matched_key or target)
+
+        launched = False
+        tried_logs = []
+
+        # Tier 1: Full .exe path on disk
+        clean_path = command.replace("start ", "").strip().strip('"')
+        if os.path.isabs(clean_path) and os.path.exists(clean_path) and hasattr(os, "startfile"):
+            try:
+                os.startfile(clean_path)
+                launched = True
+                tried_logs.append(f"Tier 1 (os.startfile: {clean_path})")
+            except Exception as e:
+                tried_logs.append(f"Tier 1 failed ({e})")
+
+        # Tier 2: Short command / binary name with DETACHED_PROCESS flags
+        if not launched:
+            try:
+                creationflags = 0
+                if hasattr(subprocess, "DETACHED_PROCESS") and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+                    creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+
+                subprocess.Popen(
+                    command,
+                    shell=True,
+                    env=os.environ.copy(),
+                    creationflags=creationflags,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                launched = True
+                tried_logs.append(f"Tier 2 (subprocess.Popen: {command})")
+            except Exception as e:
+                tried_logs.append(f"Tier 2 failed ({e})")
+
+        # Tier 3: os.startfile fallback
+        if not launched and hasattr(os, "startfile"):
+            try:
+                os.startfile(command)
+                launched = True
+                tried_logs.append(f"Tier 3 (os.startfile: {command})")
+            except Exception as e:
+                tried_logs.append(f"Tier 3 failed ({e})")
+
+        # Tier 4: All failed
+        if not launched:
+            return f"Failed to open '{target}'. Tried: {'; '.join(tried_logs)}."
+
+        # Launch verification: wait 1.5 seconds and check psutil
+        await asyncio.sleep(1.5)
+
+        cmd_stem = os.path.splitext(os.path.basename(command.replace("start ", "").strip()))[0].lower()
+        proc_stem = os.path.splitext(os.path.basename(proc_target))[0].lower()
+        target_stem = os.path.splitext(os.path.basename(target))[0].lower()
+
+        stems = {s for s in [cmd_stem, proc_stem, target_stem] if s and (len(s) >= 3 or s in ["code", "cmd", "wt", "calc"])}
+
+        is_running = False
         try:
-            cmd, matches, matched_key = self.app_registry.resolve_app(target)
-            
-            if cmd:
-                if cmd.startswith("start "):
-                    os.system(cmd)
-                else:
-                    subprocess.Popen(cmd, shell=True)
-                msg = f"Launched application: '{matched_key or target}' ({cmd})"
-                if matched_key:
-                    msg = f"⚠️ [CONFIDENCE WARNING] I matched '{target}' to '{matched_key}' — confirm this is correct?\n" + msg
-                return msg
-            
-            if matches:
-                matches_str = ", ".join(f"'{m}'" for m in matches)
-                return f"Multiple matching applications found for '{target}': {matches_str}. Please specify which one."
-            
-            # Fallback to os.startfile on Windows
-            if hasattr(os, "startfile"):
+            for proc in psutil.process_iter(['name']):
+                p_name = (proc.info.get('name') or "").lower()
+                if any(stem in p_name for stem in stems):
+                    is_running = True
+                    break
+        except Exception:
+            is_running = True
+
+        app_display = matched_key or target
+        if is_running:
+            return f"Opened {app_display}, sir."
+        else:
+            return f"Failed to open {app_display} — no process detected after launch attempt."
+
+
+class AppCloseTool(Tool):
+    """Tool to close running software applications with graceful termination, kill fallback, and psutil verification."""
+
+    PROTECTED_PROCESSES = {
+        "python.exe", "pythonw.exe", "cmd.exe", "powershell.exe",
+        "wt.exe", "windowsterminal.exe"
+    }
+
+    def __init__(self, app_registry: Optional[AppRegistry] = None):
+        super().__init__("close_application", "Close a running software application")
+        self.app_registry = app_registry or AppRegistry()
+
+    async def execute(self, app_name: str = "", name: str = "", confirm: bool = False) -> str:
+        """Close running application by name with safety checks and psutil verification."""
+        target = (app_name or name).strip()
+        if not target:
+            return "Error: No application specified to close."
+
+        target_proc = self.app_registry.resolve_process_name(target)
+        proc_stem = os.path.splitext(os.path.basename(target_proc))[0].lower()
+        target_stem = os.path.splitext(os.path.basename(target))[0].lower()
+
+        stems = {s for s in [proc_stem, target_stem] if s}
+
+        # Safety Check: Never close protected terminal/python processes without confirmation
+        is_protected = any(p.replace(".exe", "").lower() in stems for p in self.PROTECTED_PROCESSES)
+        if is_protected and not confirm:
+            return "That might be the terminal JARVIS is running in, sir. Confirm you want to close it?"
+
+        # 1. Graceful termination first
+        killed_procs = []
+        try:
+            for proc in psutil.process_iter(['name', 'pid']):
                 try:
-                    os.startfile(target)
-                    return f"Opened '{target}' via Windows launcher."
-                except Exception:
-                    pass
-            
-            return f"Error: Application '{target}' not recognized. Use '/addapp {target} <path_or_cmd>' to register it."
+                    p_name = (proc.info.get('name') or "").lower()
+                    if any(stem in p_name for stem in stems):
+                        proc.terminate()
+                        killed_procs.append(proc)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
         except Exception as e:
-            return f"Error launching application '{target}': {str(e)}"
+            console.print(f"[dim yellow]Process iteration warning: {e}[/dim yellow]")
+
+        if not killed_procs:
+            return f"{target} wasn't running, sir."
+
+        # Wait up to 3 seconds for graceful termination
+        await asyncio.sleep(3.0)
+
+        # 2. Force kill any matching process still running
+        try:
+            for proc in psutil.process_iter(['name', 'pid']):
+                try:
+                    p_name = (proc.info.get('name') or "").lower()
+                    if any(stem in p_name for stem in stems):
+                        proc.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception:
+            pass
+
+        # Close verification: wait 2 seconds and check psutil
+        await asyncio.sleep(2.0)
+
+        still_running = False
+        try:
+            for proc in psutil.process_iter(['name']):
+                p_name = (proc.info.get('name') or "").lower()
+                if any(stem in p_name for stem in stems):
+                    still_running = True
+                    break
+        except Exception:
+            pass
+
+        if not still_running:
+            return f"Closed {target}, sir."
+        else:
+            return f"Could not close {target}, sir. It may need manual intervention."
+
+
+def open_url(url: str) -> str:
+    # Method 1: Windows start command (most reliable)
+    try:
+        subprocess.Popen(
+            f'start "" "{url}"',
+            shell=True,
+            env=os.environ.copy(),
+            creationflags=subprocess.DETACHED_PROCESS |
+                         subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+        return f"Opening {url}, sir."
+    except Exception as e:
+        pass
+    
+    # Method 2: os.startfile
+    try:
+        os.startfile(url)
+        return f"Opening {url}, sir."
+    except Exception as e:
+        pass
+    
+    # Method 3: webbrowser as last resort
+    try:
+        import webbrowser
+        webbrowser.open(url)
+        return f"Opening {url}, sir."
+    except Exception as e:
+        return f"Failed to open {url}: {str(e)}"
 
 
 class URLOpenTool(Tool):
@@ -349,13 +516,11 @@ class URLOpenTool(Tool):
             
             if target.startswith(("http://", "https://", "www.")) or ("." in target and " " not in target):
                 url = target if target.startswith(("http://", "https://")) else f"https://{target}"
-                webbrowser.open(url)
-                return f"Opened URL in browser: {url}"
+                return open_url(url)
             else:
                 query_encoded = urllib.parse.quote(target)
                 search_url = f"https://www.google.com/search?q={query_encoded}"
-                webbrowser.open(search_url)
-                return f"Opened Google search for: '{target}'"
+                return open_url(search_url)
         except Exception as e:
             return f"Error opening URL/browser: {str(e)}"
 
@@ -366,15 +531,15 @@ class WebsiteOpenTool(Tool):
     SITE_ALIASES = {
         "youtube": "https://www.youtube.com",
         "gmail": "https://mail.google.com",
-        "github": "https://github.com",
+        "github": "https://www.github.com",
         "google": "https://www.google.com",
         "reddit": "https://www.reddit.com",
-        "twitter": "https://x.com",
-        "x": "https://x.com",
-        "stackoverflow": "https://stackoverflow.com",
-        "stack overflow": "https://stackoverflow.com",
+        "twitter": "https://www.twitter.com",
         "linkedin": "https://www.linkedin.com",
-        "wikipedia": "https://www.wikipedia.org"
+        "netflix": "https://www.netflix.com",
+        "spotify": "https://open.spotify.com",
+        "chatgpt": "https://chat.openai.com",
+        "claude": "https://claude.ai"
     }
     
     def __init__(self):
@@ -393,12 +558,10 @@ class WebsiteOpenTool(Tool):
                         break
             
             if url:
-                webbrowser.open(url)
-                return f"Opened website: '{site_name}' ({url})"
+                return open_url(url)
             else:
                 search_url = f"https://www.google.com/search?q={urllib.parse.quote(site_name)}"
-                webbrowser.open(search_url)
-                return f"Opened Google search for website: '{site_name}'"
+                return open_url(search_url)
         except Exception as e:
             return f"Error opening website '{site_name}': {str(e)}"
 
@@ -470,6 +633,113 @@ class DuckDuckGoSearchTool(Tool):
             return f"Error executing DuckDuckGo search for '{target}': {str(e)}"
 
 
+class ProjectTool(Tool):
+    """Tool to manage and query projects in database"""
+
+    def __init__(self, project_manager: Optional[Any] = None):
+        super().__init__("project_tool", "Access, search, create, update, and manage project database records")
+        from jarvis.projects import ProjectManager
+        self.pm = project_manager or ProjectManager()
+
+    async def execute(self, action: str = "list", **kwargs) -> str:
+        try:
+            act = action.lower()
+            if act in ["list", "summary"]:
+                status = kwargs.get("status")
+                category = kwargs.get("category")
+                projects = self.pm.get_all_projects(status=status, category=category)
+                if not projects:
+                    return "No projects found in database matching criteria."
+                lines = [f"Found {len(projects)} project(s):"]
+                for p in projects:
+                    lines.append(f"• [{p['id']}] {p['name']} ({p['category']}, priority {p['priority']}) - Status: {p['status']} | Tasks: {p['open_tasks']} open / {p['total_tasks']} total")
+                return "\n".join(lines)
+
+            elif act == "get":
+                name_or_id = kwargs.get("name_or_id") or kwargs.get("name") or kwargs.get("id")
+                if not name_or_id:
+                    return "Error: name_or_id parameter required"
+                p = self.pm.get_project(name_or_id)
+                if not p:
+                    return f"Project '{name_or_id}' not found in database."
+                lines = [
+                    f"=== Project Briefing: {p['name']} ===",
+                    f"ID: {p['id']} | Status: {p['status']} | Category: {p['category']} | Priority: {p['priority']}",
+                    f"Description: {p.get('description') or 'N/A'}",
+                    f"Tech Stack: {p.get('tech_stack') or 'N/A'}",
+                    f"Repo: {p.get('repo_url') or 'N/A'} | Deploy: {p.get('deploy_url') or 'N/A'}",
+                    f"Start Date: {p.get('start_date') or 'N/A'} | Deadline: {p.get('deadline') or 'N/A'}",
+                    f"Task Count: {p['open_tasks']} open, {p['completed_tasks']} completed out of {p['total_tasks']} total",
+                ]
+                if p.get("tasks"):
+                    lines.append("\nTasks:")
+                    for t in p["tasks"]:
+                        due = f" (Due: {t['due_date']})" if t.get("due_date") else ""
+                        lines.append(f"  - [{t['status'].upper()}] #{t['id']} {t['title']}{due}")
+                if p.get("notes"):
+                    lines.append("\nRecent Notes:")
+                    for n in p["notes"][:5]:
+                        lines.append(f"  - {n['content']}")
+                if p.get("decisions"):
+                    lines.append("\nDecisions Logged:")
+                    for d in p["decisions"][:5]:
+                        lines.append(f"  - {d['decision']} (Reason: {d.get('reasoning', 'N/A')})")
+                if p.get("timeline"):
+                    lines.append("\nTimeline:")
+                    for tm in p["timeline"][:5]:
+                        lines.append(f"  - [{tm.get('date', 'N/A')}] {tm['event']}")
+                return "\n".join(lines)
+
+            elif act == "create":
+                name = kwargs.get("name")
+                if not name:
+                    return "Error: Project name required"
+                p_id = self.pm.create_project(
+                    name=name,
+                    description=kwargs.get("description", ""),
+                    category=kwargs.get("category", "personal"),
+                    tech_stack=kwargs.get("tech_stack", ""),
+                    deadline=kwargs.get("deadline", ""),
+                    repo_url=kwargs.get("repo_url", ""),
+                    priority=int(kwargs.get("priority", 3))
+                )
+                if not p_id:
+                    return f"Failed to create project '{name}'. A project with this name may already exist."
+                return f"Project '{name}' created successfully with ID {p_id}."
+
+            elif act == "complete":
+                name_or_id = kwargs.get("name_or_id") or kwargs.get("name") or kwargs.get("id")
+                if not name_or_id:
+                    return "Error: Project name or ID required"
+                ok = self.pm.complete_project(name_or_id)
+                if ok:
+                    return f"Project '{name_or_id}' has been marked as COMPLETED, sir."
+                return f"Could not find active project '{name_or_id}' to complete."
+
+            elif act == "search":
+                query = kwargs.get("query", "")
+                results = self.pm.search_projects(query)
+                if not results:
+                    return f"No projects found matching search query '{query}'."
+                lines = [f"Search results for '{query}':"]
+                for p in results:
+                    lines.append(f"• [{p['id']}] {p['name']} ({p['status']}) - {p.get('description', '')[:60]}")
+                return "\n".join(lines)
+
+            elif act == "overdue":
+                overdue = self.pm.get_overdue_tasks()
+                if not overdue:
+                    return "No overdue tasks found across any projects."
+                lines = [f"Found {len(overdue)} overdue task(s):"]
+                for t in overdue:
+                    lines.append(f"• ⚠️ Task #{t['id']} '{t['title']}' in {t['project_name']} (Due since: {t['due_date']})")
+                return "\n".join(lines)
+
+            return f"Unknown project action: {action}"
+        except Exception as e:
+            return f"Error executing project tool: {e}"
+
+
 class ToolRegistry:
     """Registry for all available tools"""
     
@@ -490,11 +760,13 @@ class ToolRegistry:
         self.register(ShellCommandTool(self.confirm_dangerous, self.logger))
         self.register(DirectoryTool(self.confirm_dangerous))
         self.register(AppLaunchTool(self.app_registry))
+        self.register(AppCloseTool(self.app_registry))
         self.register(URLOpenTool())
         self.register(WebsiteOpenTool())
         self.register(DuckDuckGoSearchTool())
         self.register(PDFSummarizeTool())
         self.register(GitStatusTool())
+        self.register(ProjectTool())
     
     def register(self, tool: Tool):
         """Register a new tool"""
