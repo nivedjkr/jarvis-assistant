@@ -195,6 +195,7 @@ class JARVISCLI:
             ],
             "REMINDERS & DEADLINES": [
                 ("/reminders", "Show current pending reminders"),
+                ("/reminders clear", "Clear all pending reminders"),
                 ("/deadline add \"<name>\" <date>", "Add a deadline"),
                 ("/deadlines", "List upcoming deadlines with remaining time")
             ],
@@ -297,7 +298,7 @@ class JARVISCLI:
             else:
                 return f"Unknown category '{category_filter}'. Available categories: {', '.join(categories.keys())}"
 
-        lines = [f"### ◈ JARVIS COMMAND REFERENCE ({cat_lower.upper() if cat_lower else 'ALL'})\n"]
+        lines = [f"### ◈ JARVIS COMMAND REFERENCE & HELP INFORMATION ({cat_lower.upper() if cat_lower else 'ALL'})\n"]
         for cat_name, cmds in categories.items():
             lines.append(f"**{cat_name}**")
             for cmd, desc in cmds:

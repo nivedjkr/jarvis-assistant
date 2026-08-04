@@ -45,9 +45,9 @@ def run_tests():
         print("="*50)
         for f, stdout, stderr in failed_details:
             print(f"\n--- {f} ---")
-            if stdout.strip():
+            if stdout and stdout.strip():
                 print(f"STDOUT:\n{stdout.strip()}")
-            if stderr.strip():
+            if stderr and stderr.strip():
                 print(f"STDERR:\n{stderr.strip()}")
 
 if __name__ == "__main__":

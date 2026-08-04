@@ -69,3 +69,5 @@ jarvis/data/awareness_seen.json
 
 # Logs
 *.log
+.pytest_cache/
+

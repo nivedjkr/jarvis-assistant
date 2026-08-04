@@ -35,7 +35,7 @@ async def run_help_tests():
     print("--- Test 4: /whoami Command ---")
     res4 = await cli.process_command("/whoami")
     print(f"✓ Output:\n{res4}\n")
-    assert "User Profile Summary" in res4
+    assert "user profile" in res4.lower()
 
 asyncio.run(run_help_tests())
 

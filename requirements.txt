@@ -17,3 +17,5 @@ google-auth-httplib2>=0.1.0
 google-api-python-client>=2.0.0
 duckduckgo-search>=6.0.0
 ddgs>=9.0.0
+pytest>=7.0.0
+

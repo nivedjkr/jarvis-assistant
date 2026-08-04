@@ -26,8 +26,8 @@ personality:
 
 # Voice Settings
 voice:
-  enabled: true
-  speak_responses: true  # Output-only TTS for all responses
+  enabled: false
+  speak_responses: false  # Output-only TTS for all responses
   speak_code_blocks: false  # Skip reading raw code blocks aloud
   stt_model: "base"  # "base" or "small" for faster-whisper
   tts_engine: "edge"  # "edge" or "pyttsx3"
