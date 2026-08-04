@@ -2112,64 +2112,8 @@ class JARVISCLI:
                 self.memory.log_task(f"Read file {filename}", "completed")
                 return res_warn + result
         
-        # List files / directory
-        elif "list" in input_lower or "show files" in input_lower or input_lower == "ls" or input_lower.startswith("ls "):
-            directory = "."
-            words = user_input.split()
-            if "in" in words:
-                try:
-                    idx = words.index("in")
-                    if idx + 1 < len(words):
-                        directory = words[idx + 1].rstrip('?.!')
-                except ValueError:
-                    pass
-            elif len(words) > 1 and words[0] == "ls":
-                directory = words[1].rstrip('?.!')
-            result = await self.tools.execute_tool("list_files", directory=directory)
-            self.memory.log_task(f"List files in {directory}", "completed")
-            return result
-        
-        # Search files
-        elif ("search" in input_lower or "find" in input_lower) and ("file" in input_lower or "files" in input_lower or "matching" in input_lower) and not ("google" in input_lower or "web" in input_lower):
-            pattern = re.sub(r'^(search|find)\s+(for\s+)?(files?\s*)?(matching\s+)?', '', user_input, flags=re.I).strip().rstrip('?.!')
-            if not pattern:
-                pattern = "*"
-            result = await self.tools.execute_tool("search_files", pattern=pattern)
-            self.memory.log_task(f"Search for {pattern}", "completed")
-            return result
-        
-        # Run command
-        elif "run command" in input_lower or "execute command" in input_lower:
-            words = user_input.split()
-            if len(words) > 1:
-                try:
-                    cmd_start = words.index("run") if "run" in words else words.index("execute")
-                    command = " ".join(words[cmd_start + 1:])
-                    result = await self.tools.execute_tool("shell_command", command=command)
-                    self.memory.log_task(f"Execute command: {command}", "completed")
-                    return result
-                except ValueError:
-                    return "Please specify a command to run"
-        
-        # Add or check reminder
-        elif "remind" in input_lower or "reminder" in input_lower:
-            if any(kw in input_lower for kw in ["show", "list", "check", "where", "what", "pending"]):
-                return self.get_pending_reminders_summary()
-            
-            reminder_text, due_at = self.parse_reminder_time(user_input)
-            reminder = self.memory.add_reminder(reminder_text, due_date=due_at.isoformat())
-            due_time_str = due_at.strftime("%H:%M:%S")
-            return f"Reminder added for '{reminder_text}' (due at {due_time_str})."
-        
-        # Add note
-        elif input_lower.startswith("note:") or input_lower.startswith("save note:") or input_lower.startswith("add note:"):
-            note_text = re.sub(r'^(note:|save\s+note:?|add\s+note:?)\s*', '', user_input, flags=re.I).strip()
-            if note_text:
-                self.memory.add_note(note_text)
-                return f"Note saved: {note_text}"
-
         # GitHub natural language routing
-        elif any(p in input_lower for p in ["show my repos", "list repositories", "list my repos", "my repos", "my github repos"]):
+        if any(p in input_lower for p in ["show my repos", "list repositories", "list my repos", "my repos", "my github repos", "list repos", "show repos", "github repos", "my repositories"]):
             return await self.tools.execute_tool("github_repo", action="list")
         
         elif any(p in input_lower for p in ["open issues", "what issues do i have", "show my open issues", "show open issues", "list open issues"]):
@@ -2198,6 +2142,23 @@ class JARVISCLI:
         
         elif any(p in input_lower for p in ["repo info", "jarvis-assistant stats", "repo stats", "show repo info"]):
             return await self.tools.execute_tool("github_repo", action="info")
+
+        # List files / directory
+        elif ("list" in input_lower or "show files" in input_lower or input_lower == "ls" or input_lower.startswith("ls ")) and not any(k in input_lower for k in ["repo", "repository", "repositories", "issue", "pr", "pull", "ci", "build"]):
+            directory = "."
+            words = user_input.split()
+            if "in" in words:
+                try:
+                    idx = words.index("in")
+                    if idx + 1 < len(words):
+                        directory = words[idx + 1].rstrip('?.!')
+                except ValueError:
+                    pass
+            elif len(words) > 1 and words[0] == "ls":
+                directory = words[1].rstrip('?.!')
+            result = await self.tools.execute_tool("list_files", directory=directory)
+            self.memory.log_task(f"List files in {directory}", "completed")
+            return result
         
         return None
     

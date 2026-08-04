@@ -303,10 +303,13 @@ from jarvis.github_tool import GitHubTool as NativeGitHubTool
 _native_gh = NativeGitHubTool()
 
 
+GH_NOTICE = " IMPORTANT: Never generate OAuth URLs or login flows. gh CLI is already authenticated. Just call the tool directly and return real output. If gh returns an auth error, say so plainly."
+
+
 class GitHubIssuesTool(Tool):
     """List, create, or close GitHub issues"""
     def __init__(self):
-        super().__init__("github_issues", "List, create, or close GitHub issues")
+        super().__init__("github_issues", "List, create, or close GitHub issues." + GH_NOTICE)
 
     async def execute(self, action: str = "list", repo: str = "", title: str = "", number: Any = None, state: str = "open", **kwargs) -> str:
         act = action.lower()
@@ -323,7 +326,7 @@ class GitHubIssuesTool(Tool):
 class GitHubPRsTool(Tool):
     """List or view GitHub pull requests"""
     def __init__(self):
-        super().__init__("github_prs", "List or view GitHub pull requests")
+        super().__init__("github_prs", "List or view GitHub pull requests." + GH_NOTICE)
 
     async def execute(self, action: str = "list", repo: str = "", number: Any = None, state: str = "open", **kwargs) -> str:
         act = action.lower()
@@ -337,7 +340,7 @@ class GitHubPRsTool(Tool):
 class GitHubCITool(Tool):
     """Check CI/Actions status and logs"""
     def __init__(self):
-        super().__init__("github_ci", "Check CI/Actions status and logs")
+        super().__init__("github_ci", "Check CI/Actions status and logs." + GH_NOTICE)
 
     async def execute(self, action: str = "status", repo: str = "", run_id: str = "", **kwargs) -> str:
         act = action.lower()
@@ -350,7 +353,7 @@ class GitHubCITool(Tool):
 class GitHubRepoTool(Tool):
     """View repo info or list all repos"""
     def __init__(self):
-        super().__init__("github_repo", "View repo info or list all repos")
+        super().__init__("github_repo", "View repo info or list all repos." + GH_NOTICE)
 
     async def execute(self, action: str = "info", repo: str = "", **kwargs) -> str:
         act = action.lower()
@@ -363,7 +366,7 @@ class GitHubRepoTool(Tool):
 class GitHubNotificationsTool(Tool):
     """Check GitHub notifications"""
     def __init__(self):
-        super().__init__("github_notifications", "Check GitHub notifications")
+        super().__init__("github_notifications", "Check GitHub notifications." + GH_NOTICE)
 
     async def execute(self, **kwargs) -> str:
         return _native_gh.notifications(limit=kwargs.get("limit", 5))

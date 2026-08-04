@@ -17,6 +17,16 @@ class GitHubTool:
         self.check_interval_minutes = 30
         self._load_config()
 
+    def verify_gh_auth(self) -> bool:
+        try:
+            result = subprocess.run(
+                ['gh', 'auth', 'status'],
+                capture_output=True, text=True, timeout=10, shell=True
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def _load_config(self):
         try:
             import yaml
