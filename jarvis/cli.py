@@ -24,6 +24,7 @@ from jarvis.memory import Memory, CommandLogger
 from jarvis.projects import ProjectManager
 from jarvis.tools import ToolRegistry, WebsiteOpenTool
 from jarvis.apps import AppRegistry
+from jarvis.openclaw_bridge import register_openclaw_tools
 from jarvis.voice import VoiceManager, ProactiveMonitor
 from jarvis.awareness import GlobalAwarenessManager
 from jarvis.protocols import ProtocolManager
@@ -31,6 +32,34 @@ from jarvis.ui import ui, UIState
 
 
 console = ui.console
+
+
+def get_clipboard_text() -> str:
+    """Retrieve text content from system clipboard using tkinter standard library or PowerShell fallback."""
+    try:
+        import tkinter
+        root = tkinter.Tk()
+        root.withdraw()
+        text = root.clipboard_get()
+        root.destroy()
+        if text and isinstance(text, str) and text.strip():
+            return text
+    except Exception:
+        pass
+
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+            capture_output=True,
+            text=True,
+            timeout=3
+        )
+        if res.returncode == 0 and res.stdout:
+            return res.stdout
+    except Exception:
+        pass
+
+    return ""
 
 
 class JARVISCLI:
@@ -51,6 +80,8 @@ class JARVISCLI:
             logger=self.logger if self.config["tools"]["log_commands"] else None,
             app_registry=self.app_registry
         )
+        # Register OpenClaw skills as JARVIS tools
+        register_openclaw_tools(self.tools)
         
         # Initialize voice manager
         self.voice_manager = VoiceManager(self.config)
@@ -136,8 +167,8 @@ class JARVISCLI:
         """Display startup banner"""
         ui.show_banner()
     
-    def show_help(self, category_filter: Optional[str] = None):
-        """Display help information, organized into categories and optionally filtered"""
+    def get_help_text(self, category_filter: Optional[str] = None) -> str:
+        """Get formatted Markdown help guide for categories"""
         cat_lower = category_filter.strip().lower() if category_filter else None
         
         categories = {
@@ -146,7 +177,10 @@ class JARVISCLI:
                 ("/clear", "Clear the screen"),
                 ("/exit", "Exit JARVIS"),
                 ("/history", "Show conversation history"),
-                ("/tools", "List available tools")
+                ("/tools", "List available tools"),
+                ("/paste [instruction]", "Paste large sentences/code directly from system clipboard"),
+                ("/multiline [instruction]", "Enter multi-line input mode (end with 'END')"),
+                ("/ultron <task>", "Delegate a task to Ultron masterbrain")
             ],
             "VOICE": [
                 ("/speak on|off", "Toggle spoken response output"),
@@ -186,7 +220,12 @@ class JARVISCLI:
             ],
             "DEVELOPER": [
                 ("/explain-error [error]", "Explain traceback error and fix steps"),
-                ("\"what's my git status\"", "Show real git status, branch, and recent commit")
+                ("\"what's my git status\"", "Show real git status, branch, and recent commit"),
+                ("/github issues", "List open issues"),
+                ("/github prs", "List open PRs"),
+                ("/github ci", "Check CI status"),
+                ("/github repo", "Show repo info"),
+                ("/github issue <title>", "Create new issue")
             ],
             "IDEAS & NOTES": [
                 ("/idea <text>", "Save a business/project idea"),
@@ -207,6 +246,11 @@ class JARVISCLI:
             "GLOBAL AWARENESS": [
                 ("/awareness on|off|topics", "Manage background news monitoring"),
                 ("/news", "Show recent surfaced notable news updates")
+            ],
+            "DESKTOP HUD & FRONTEND": [
+                ("/desktop", "Show Electron + React desktop HUD interface status & telemetry"),
+                ("Tab or S", "Toggle Live Telemetry Sidebar in JARVIS Desktop App"),
+                ("/mute or /stop", "Stop active speech playback immediately")
             ],
             "SYSTEM MONITORING": [
                 ("/system", "Real-time snapshot of CPU, RAM, GPU, disk, and network"),
@@ -246,41 +290,78 @@ class JARVISCLI:
             ]
         }
         
-        # Filter categories if requested
         if cat_lower:
             matched_cats = {k: v for k, v in categories.items() if cat_lower in k.lower() or (cat_lower in ["projects", "project", "task", "tasks"] and "PROJECTS" in k) or (cat_lower in ["dev", "swe"] and "DEVELOPER" in k) or (cat_lower in ["study", "flashcards"] and "STUDY" in k) or (cat_lower in ["diagnostics", "trust", "diag"] and "DIAGNOSTICS" in k)}
             if matched_cats:
                 categories = matched_cats
             else:
-                console.print(f"[yellow]Unknown category '{category_filter}'. Available categories: {', '.join(categories.keys())}[/yellow]")
-                return
+                return f"Unknown category '{category_filter}'. Available categories: {', '.join(categories.keys())}"
 
-        output_lines = []
+        lines = [f"### ◈ JARVIS COMMAND REFERENCE ({cat_lower.upper() if cat_lower else 'ALL'})\n"]
         for cat_name, cmds in categories.items():
-            output_lines.append(f"[bold yellow]=== {cat_name} ===[/bold yellow]")
+            lines.append(f"**{cat_name}**")
             for cmd, desc in cmds:
-                output_lines.append(f"  [bold bright_cyan]{cmd:<38}[/bold bright_cyan] - [white]{desc}[/white]")
-            output_lines.append("")
+                lines.append(f"- `{cmd}` : {desc}")
+            lines.append("")
 
-        output_lines.append("[dim]Tip: Use '/help <category>' (e.g. '/help trading' or '/help study') to view a specific category.[/dim]")
-        
+        lines.append("*Tip: Type `/help <category>` (e.g. `/help trading` or `/help study`) to filter by category.*")
+        return "\n".join(lines)
+
+    def show_help(self, category_filter: Optional[str] = None):
+        """Display help information, organized into categories and optionally filtered"""
+        cat_lower = category_filter.strip().lower() if category_filter else None
+        help_text = self.get_help_text(category_filter)
         title_str = f"[bold bright_cyan]JARVIS Commands Help ({cat_lower.upper() if cat_lower else 'ALL'})[/bold bright_cyan]"
-        console.print(Panel("\n".join(output_lines), title=title_str, border_style="bright_cyan"))
+        console.print(Panel(help_text, title=title_str, border_style="bright_cyan"))
 
     def handle_whoami(self) -> str:
         """Summarize user profile and stored facts"""
         profile = self.memory.get_profile()
         facts = self.memory.get_facts()
         
-        lines = ["User Profile Summary:"]
-        for k, v in profile.items():
-            lines.append(f"- {k.replace('_', ' ').title()}: {v}")
-            
+        lines = ["### 👤 USER PROFILE & MEMORY SUMMARY\n"]
+        if profile:
+            lines.append("**Profile Attributes:**")
+            for k, v in profile.items():
+                lines.append(f"- **{k.replace('_', ' ').title()}**: {v}")
+            lines.append("")
+
         if facts:
-            lines.append(f"\nStored Facts ({len(facts)} items):")
-            for f in facts[:10]:
-                lines.append(f"- [{f.get('category','general')}] {f['content']}")
+            lines.append(f"**Stored Memory Facts ({len(facts)} items):**")
+            for f in facts[:15]:
+                lines.append(f"- [{f.get('category','general').upper()}] {f['content']}")
                 
+        return "\n".join(lines)
+
+    def get_tools_text(self) -> str:
+        """Get formatted Markdown available tools text"""
+        tools = self.tools.list_tools()
+        lines = ["### ◈ REGISTERED SYSTEM TOOLS & CAPABILITIES\n"]
+        for t in tools:
+            lines.append(f"- **{t['name']}**: {t['description']}")
+        return "\n".join(lines)
+
+    def get_reminders_text(self) -> str:
+        """Get formatted Markdown pending reminders text"""
+        reminders = self.memory.get_reminders()
+        pending = [r for r in reminders if not r.get('completed')]
+        if not pending:
+            return "No pending reminders found, sir."
+        lines = ["### ⏰ PENDING REMINDERS\n"]
+        for idx, r in enumerate(pending, 1):
+            due = f" (Due: {r['due_date'][11:16]})" if r.get('due_date') and len(r.get('due_date', '')) >= 16 else ""
+            lines.append(f"{idx}. {r['text']}{due}")
+        return "\n".join(lines)
+
+    def get_facts_text(self, category_filter: Optional[str] = None) -> str:
+        """Get formatted Markdown facts text"""
+        facts = self.memory.get_facts(category=category_filter)
+        if not facts:
+            return f"No stored facts found{' in category ' + category_filter if category_filter else ''}, sir."
+        lines = [f"### 🧠 STORED MEMORY FACTS ({len(facts)} items)\n"]
+        for f in facts[:25]:
+            cat = f.get('category', 'general').upper()
+            lines.append(f"- **[{cat}]** {f['content']}")
         return "\n".join(lines)
 
     def show_apps(self):
@@ -633,9 +714,15 @@ class JARVISCLI:
             parts = cmd_raw.split(maxsplit=1)
             cat = parts[1] if len(parts) > 1 else None
             self.show_help(cat)
-            return f"Displaying help information{' for category ' + cat if cat else ''}, sir."
+            return self.get_help_text(cat)
+        elif cmd_lower.startswith("/paste"):
+            return await self.handle_paste_command(cmd_raw)
+        elif cmd_lower.startswith("/multiline"):
+            return await self.handle_multiline_command(cmd_raw)
         elif cmd_lower in ["/whoami", "/recall"]:
             return self.handle_whoami()
+        elif cmd_lower.startswith("/desktop") or cmd_lower.startswith("/ui"):
+            return self.handle_desktop_command()
         elif cmd_lower == "/diagnose":
             return await self.handle_diagnose_command()
         elif cmd_lower.startswith("/why"):
@@ -652,10 +739,10 @@ class JARVISCLI:
             return "Displaying conversation history, sir."
         elif cmd_lower == "/tools":
             self.show_tools()
-            return "Displaying available tools, sir."
+            return self.get_tools_text()
         elif cmd_lower == "/reminders":
             self.show_reminders()
-            return "Displaying your reminders, sir."
+            return self.get_reminders_text()
         elif cmd_lower == "/notes":
             self.show_notes()
             return "Displaying your saved notes, sir."
@@ -664,7 +751,7 @@ class JARVISCLI:
             return "Displaying recent task history, sir."
         elif cmd_lower == "/profile":
             self.show_profile()
-            return "Displaying user profile statistics, sir."
+            return self.handle_whoami()
         elif cmd_lower == "/apps":
             self.show_apps()
             return "Displaying registered applications, sir."
@@ -680,7 +767,7 @@ class JARVISCLI:
             parts = cmd_raw.split(maxsplit=1)
             category = parts[1] if len(parts) > 1 else None
             self.show_facts(category)
-            return "Displaying stored facts, sir."
+            return self.get_facts_text(category)
         elif cmd_lower.startswith("/remember"):
             parts = cmd_raw.split(maxsplit=1)
             fact_text = parts[1] if len(parts) > 1 else ""
@@ -709,7 +796,7 @@ class JARVISCLI:
             return self.handle_awareness_command(cmd_raw)
         elif cmd_lower == "/news":
             self.show_news()
-            return "Displaying recent surfaced news updates, sir."
+            return self.get_news_text()
         elif cmd_lower.startswith("/flashcard"):
             return await self.handle_flashcard_command(cmd_raw)
         elif cmd_lower == "/review":
@@ -832,8 +919,113 @@ class JARVISCLI:
             confirm = "confirm" in cmd_lower or "force" in cmd_lower
             clean_app = app.replace("confirm", "").replace("force", "").strip()
             return await self.tools.execute_tool("close_application", app_name=clean_app or app, confirm=confirm)
+        elif cmd_lower.startswith("/ultron"):
+            return await self.handle_ultron_command(cmd_raw)
+        elif cmd_lower.startswith("/github"):
+            return await self.handle_github_command(cmd_raw)
         else:
             return f"Unknown command: {command}. Type /help for available commands."
+
+    async def handle_github_command(self, cmd_raw: str) -> str:
+        """Handle /github [issues|prs|ci|repo|issue <title>] commands"""
+        parts = cmd_raw.strip().split(maxsplit=1)
+        sub = parts[1].strip() if len(parts) > 1 else "issues"
+        sub_lower = sub.lower()
+
+        if sub_lower.startswith("issue "):
+            title = sub[6:].strip()
+            if not title:
+                return "Usage: /github issue <title>"
+            return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="create", repo="nivedjkr/jarvis-assistant", title=title)
+        elif sub_lower in ["issues", "issue"]:
+            return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
+        elif sub_lower in ["prs", "pr", "pulls", "pullrequests"]:
+            return await self.tools.execute_tool("openclaw_github", command="pr", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
+        elif sub_lower in ["ci", "build", "runs", "workflow"]:
+            return await self.tools.execute_tool("openclaw_github", command="run", subcommand="list", repo="nivedjkr/jarvis-assistant", limit=3)
+        elif sub_lower in ["repo", "info", "stats"]:
+            return await self.tools.execute_tool("openclaw_github", command="api", subcommand="repos/nivedjkr/jarvis-assistant", jq=".name,.description,.stargazerCount,.forks")
+        else:
+            return "Usage: /github [issues | prs | ci | repo | issue <title>]"
+
+    async def handle_ultron_command(self, cmd_raw: str) -> str:
+        """Handle /ultron commands - delegate to Ultron masterbrain."""
+        parts = cmd_raw.split(maxsplit=1)
+        if len(parts) < 2:
+            return "Usage: /ultron <task> - Delegate a task to Ultron masterbrain"
+        
+        task = parts[1].strip()
+        if not task:
+            return "Usage: /ultron <task> - Delegate a task to Ultron masterbrain"
+        
+        # Send to Ultron webhook
+        try:
+            import requests
+            response = requests.post(
+                "http://127.0.0.1:8766/delegate",
+                json={"task": task, "reply_to_jarvis": True},
+                timeout=10
+            )
+            if response.status_code == 200:
+                return f"Delegated to Ultron: {task}"
+            else:
+                return f"Ultron webhook error: {response.status_code}"
+        except Exception as e:
+            return f"Failed to reach Ultron: {e}"
+
+    async def handle_paste_command(self, cmd_raw: str) -> str:
+        """Process pasted text directly from system clipboard as a prompt."""
+        parts = cmd_raw.split(maxsplit=1)
+        extra_instruction = parts[1].strip() if len(parts) > 1 else ""
+        
+        clipboard_content = get_clipboard_text()
+        if not clipboard_content or not clipboard_content.strip():
+            return "No text found on clipboard, sir. Please copy your large sentence or multi-line text to your clipboard first, then run /paste."
+        
+        content_clean = clipboard_content.strip()
+        lines = content_clean.splitlines()
+        char_count = len(content_clean)
+        line_count = len(lines)
+        
+        if extra_instruction:
+            full_prompt = f"{extra_instruction}:\n\n{content_clean}"
+        else:
+            full_prompt = content_clean
+            
+        ui.render_user_message(f"📋 [Pasted from clipboard: {line_count} line{'s' if line_count > 1 else ''}, {char_count} chars]")
+        
+        res = await self.process_single_command(full_prompt)
+        return res or "Done, sir."
+
+    async def handle_multiline_command(self, cmd_raw: str) -> str:
+        """Collect multi-line input from console until user types 'END' on a new line."""
+        parts = cmd_raw.split(maxsplit=1)
+        extra_instruction = parts[1].strip() if len(parts) > 1 else ""
+        
+        ui.render_user_message("⌨️ Multi-line input mode activated.")
+        console.print("[dim]Paste or type your text below. Type 'END' on a new line and press Enter when finished:[/dim]")
+        
+        lines = []
+        while True:
+            try:
+                line = await asyncio.to_thread(input, "... ")
+                if line.strip() == "END":
+                    break
+                lines.append(line)
+            except (EOFError, KeyboardInterrupt):
+                break
+                
+        full_text = "\n".join(lines).strip()
+        if not full_text:
+            return "No multi-line text entered, sir."
+            
+        if extra_instruction:
+            full_prompt = f"{extra_instruction}:\n\n{full_text}"
+        else:
+            full_prompt = full_text
+            
+        res = await self.process_single_command(full_prompt)
+        return res or "Done, sir."
 
     def show_protocols(self):
         """Display registered protocols"""
@@ -941,6 +1133,37 @@ class JARVISCLI:
                 
         else:
             return "Usage: /protocol [list|run <name>|create <name>|delete <name>]"
+
+    def get_news_text(self) -> str:
+        """Get formatted Markdown news items for display"""
+        news_items = self.awareness_manager.get_surfaced_news(limit=15)
+        
+        if not news_items:
+            # Live RSS fetch fallback for popular topics if no surfaced news saved yet
+            try:
+                articles = []
+                for topic in ["Artificial Intelligence", "Technology", "Markets"]:
+                    fetched = self.awareness_manager.fetch_topic_news(topic, max_results=2)
+                    if fetched:
+                        articles.extend(fetched)
+                if articles:
+                    lines = ["### 🌐 LIVE NOTABLE NEWS HIGHLIGHTS\n"]
+                    for idx, a in enumerate(articles[:6], 1):
+                        link_str = f" · [Read Link]({a['link']})" if a.get('link') else ""
+                        lines.append(f"{idx}. **[{a.get('topic', 'News')}]** {a.get('headline') or a.get('title')}{link_str}")
+                    return "\n".join(lines)
+            except Exception:
+                pass
+            return "No surfaced news items available yet. Global Awareness background monitor is actively searching for updates, sir."
+        
+        lines = ["### 🌐 SURFACED NOTABLE NEWS HIGHLIGHTS\n"]
+        for idx, item in enumerate(news_items, 1):
+            time_str = item.get("timestamp", "")[:16].replace("T", " ")
+            link_str = f" · [Read Article]({item.get('link')})" if item.get('link') else ""
+            score_str = f" (Score: {item.get('score')}/10)" if item.get('score') else ""
+            lines.append(f"{idx}. **[{item.get('topic', 'General')}]** {item.get('headline')}{score_str}{link_str}\n   *Surfaced: {time_str}*")
+        
+        return "\n".join(lines)
 
     def show_news(self):
         """Display recent surfaced news items"""
@@ -1476,12 +1699,44 @@ class JARVISCLI:
         g_status = "[bold green]✓ OK[/bold green]" if g_auth_ok else "[bold yellow]⚠ UNAUTHENTICATED[/bold yellow]"
         table.add_row("Google Sync (Calendar/Gmail)", g_status, g_msg)
 
+        # 9. Electron Desktop HUD Interface
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        desk_ok = sock.connect_ex(('127.0.0.1', 8765)) == 0
+        sock.close()
+        desk_msg = "WebSocket bridge listening on ws://127.0.0.1:8765/ws (Electron HUD active)" if desk_ok else "WebSocket bridge offline / waiting for Electron connection"
+        desk_status = "[bold green]✓ OK[/bold green]" if desk_ok else "[bold yellow]! STANDBY[/bold yellow]"
+        table.add_row("Electron Desktop HUD", desk_status, desk_msg)
+
         console.print(table)
-        return "Self-diagnostic check complete, sir."
+        return "Self-diagnostic checks completed, sir."
+
+    def handle_desktop_command(self) -> str:
+        """Return status and telemetry info for the Electron + React desktop application"""
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        ws_open = sock.connect_ex(('127.0.0.1', 8765)) == 0
+        sock.close()
+
+        status_str = "CONNECTED & RUNNING" if ws_open else "STANDBY / READY"
+        
+        lines = [
+            "### 🖥️ JARVIS DESKTOP HUD TELEMETRY\n",
+            f"- **Interface Status**: `{status_str}`",
+            "- **Tech Stack**: Electron v29 · React 18 · Vite 5",
+            "- **WebSocket Bridge**: `ws://127.0.0.1:8765/ws`",
+            "- **UI Components**: Futuristic Glowing Orb Animation, Live Telemetry Sidebar, Input Bar, Title Bar",
+            "- **Desktop Shortcuts**:",
+            "  - `Tab` or `S` : Toggle Live Telemetry Sidebar",
+            "  - `/mute` or `/stop` : Stop audio speech playback",
+            "- **Integration**: Direct bi-directional real-time IPC bridge connected to JARVIS CLI core engine."
+        ]
+        return "\n".join(lines)
 
     def handle_why_command(self, cmd_raw: str) -> str:
         """Explain the tool execution details for recent response"""
-        parts = cmd_raw.strip().split()
         idx = 0
         if len(parts) > 1:
             arg = parts[-1]
@@ -1797,12 +2052,24 @@ class JARVISCLI:
                 
                 # Exclude folder/directory/file commands
                 if not ("folder" in target_lower or "directory" in target_lower or "file" in target_lower or "command" in target_lower):
-                    if target_lower in WebsiteOpenTool.SITE_ALIASES or any(site in target_lower for site in ["youtube", "github", "gmail", "google", "reddit", "twitter"]):
+                    is_website = (
+                        target_lower.startswith(("http://", "https://", "www."))
+                        or bool(re.search(r'\.[a-z]{2,6}(/|\?|#|$)', target_lower))
+                        or any(kw in target_lower for kw in ["website", "site", "url", "page", "link", "webpage", "browser"])
+                        or target_lower in WebsiteOpenTool.SITE_ALIASES
+                        or any(alias in target_lower for alias in WebsiteOpenTool.SITE_ALIASES)
+                    )
+                    
+                    if is_website:
                         result = await self.tools.execute_tool("open_website", site_name=target)
                         self.memory.log_task(f"Open website {target}", "completed")
                         return result
                     
                     result = await self.tools.execute_tool("open_application", app_name=target)
+                    if "failed to open" in result.lower() and not os.path.exists(target):
+                        web_result = await self.tools.execute_tool("open_website", site_name=target)
+                        self.memory.log_task(f"Open website fallback {target}", "completed")
+                        return web_result
                     self.memory.log_task(f"Open application {target}", "completed")
                     return result
 
@@ -1917,6 +2184,28 @@ class JARVISCLI:
             if note_text:
                 self.memory.add_note(note_text)
                 return f"Note saved: {note_text}"
+
+        # GitHub natural language routing
+        elif any(p in input_lower for p in ["show my repos", "list my repos", "list my repositories", "show my repositories"]):
+            return await self.tools.execute_tool("openclaw_github", command="repo", subcommand="list", repo="nivedjkr")
+        
+        elif any(p in input_lower for p in ["open issues", "what issues do i have", "show my open issues", "list open issues"]):
+            return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
+        
+        elif any(p in input_lower for p in ["show my prs", "any pull requests", "show pull requests", "list pull requests", "open prs"]):
+            return await self.tools.execute_tool("openclaw_github", command="pr", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
+        
+        elif any(p in input_lower for p in ["did ci pass", "check build status", "ci status", "check ci"]):
+            return await self.tools.execute_tool("openclaw_github", command="run", subcommand="list", repo="nivedjkr/jarvis-assistant", limit=3)
+        
+        elif input_lower.startswith("create issue:") or input_lower.startswith("create issue "):
+            title = re.sub(r'^create\s+issue:?\s*', '', user_input, flags=re.I).strip()
+            if title:
+                return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="create", repo="nivedjkr/jarvis-assistant", title=title)
+            return "Usage: create issue: <title>"
+        
+        elif any(p in input_lower for p in ["show repo info", "jarvis-assistant stats", "repo stats", "repo info"]):
+            return await self.tools.execute_tool("openclaw_github", command="api", subcommand="repos/nivedjkr/jarvis-assistant", jq=".name,.description,.stargazerCount,.forks")
         
         return None
     
@@ -1925,10 +2214,18 @@ class JARVISCLI:
         response_text = ""
         ui.set_state(UIState.THINKING)
         
-        with console.status("[bold cyan]🧠 JARVIS is thinking...[/bold cyan]") as status:
+        try:
+            with console.status("[bold cyan]🧠 JARVIS is thinking...[/bold cyan]") as status:
+                async for chunk in self.api_client.chat_stream(user_input):
+                    response_text += chunk
+                    try:
+                        status.update(f"[bold cyan]JARVIS:[/bold cyan] {response_text[-50:]}")
+                    except Exception:
+                        pass
+        except Exception:
+            # Fallback for daemon / API mode where rich status live display is unavailable or already active
             async for chunk in self.api_client.chat_stream(user_input):
                 response_text += chunk
-                status.update(f"[bold cyan]JARVIS:[/bold cyan] {response_text[-50:]}")
         
         if not response_text or not response_text.strip():
             response_text = "Done, sir."
@@ -2153,5 +2450,23 @@ def main():
     asyncio.run(cli.run())
 
 
+_global_cli_instance = None
+
+async def process_message(user_message: str):
+    """Process message through JARVIS pipeline for WebSocket/API consumers."""
+    global _global_cli_instance
+    if _global_cli_instance is None:
+        _global_cli_instance = JARVISCLI()
+    
+    try:
+        response = await _global_cli_instance.process_command(user_message)
+        if response is None or not str(response).strip():
+            response = "Done, sir."
+        return str(response), []
+    except Exception as e:
+        return f"Error processing request: {str(e)}", []
+
+
 if __name__ == "__main__":
     main()
+

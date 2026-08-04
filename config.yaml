@@ -53,4 +53,9 @@ location:
   city: "Kerala"
   country: "India"
 
+# GitHub Settings
+github:
+  default_repo: "nivedjkr/jarvis-assistant"
+
+
 

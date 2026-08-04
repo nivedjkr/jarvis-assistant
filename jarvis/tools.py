@@ -4,6 +4,7 @@ Provides file operations, shell commands, and other utilities
 """
 
 import os
+import re
 import subprocess
 import shutil
 import webbrowser
@@ -471,34 +472,83 @@ class AppCloseTool(Tool):
             return f"Could not close {target}, sir. It may need manual intervention."
 
 
+def find_chrome_path() -> Optional[str]:
+    """Locate Google Chrome executable on Windows/OSX/Linux."""
+    possible_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Google\Chrome\Application\chrome.exe"),
+        os.path.join(os.environ.get("PROGRAMFILES", ""), r"Google\Chrome\Application\chrome.exe"),
+        os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), r"Google\Chrome\Application\chrome.exe"),
+        shutil.which("chrome"),
+        shutil.which("chrome.exe"),
+        shutil.which("google-chrome")
+    ]
+    for path in possible_paths:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
 def open_url(url: str) -> str:
-    # Method 1: Windows start command (most reliable)
+    """Open URL using Google Chrome as preferred browser, with fallbacks."""
+    clean_url = url.strip()
+    if not clean_url.startswith(("http://", "https://")):
+        clean_url = f"https://{clean_url}"
+
+    # Method 1: Direct Google Chrome execution (User requested Google Chrome as default)
+    chrome_path = find_chrome_path()
+    if chrome_path:
+        try:
+            creationflags = 0
+            if hasattr(subprocess, "DETACHED_PROCESS") and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+                creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            subprocess.Popen(
+                [chrome_path, clean_url],
+                creationflags=creationflags,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return f"Opening {clean_url} in Google Chrome, sir."
+        except Exception:
+            pass
+
+    # Method 2: os.startfile (Native Windows ShellExecute)
     try:
-        subprocess.Popen(
-            f'start "" "{url}"',
-            shell=True,
-            env=os.environ.copy(),
-            creationflags=subprocess.DETACHED_PROCESS |
-                         subprocess.CREATE_NEW_PROCESS_GROUP
-        )
-        return f"Opening {url}, sir."
-    except Exception as e:
+        if hasattr(os, "startfile"):
+            os.startfile(clean_url)
+            return f"Opening {clean_url}, sir."
+    except Exception:
         pass
     
-    # Method 2: os.startfile
-    try:
-        os.startfile(url)
-        return f"Opening {url}, sir."
-    except Exception as e:
-        pass
-    
-    # Method 3: webbrowser as last resort
+    # Method 3: Python webbrowser standard library
     try:
         import webbrowser
-        webbrowser.open(url)
-        return f"Opening {url}, sir."
+        try:
+            browser = webbrowser.get('google-chrome') or webbrowser.get('chrome')
+            browser.open(clean_url)
+            return f"Opening {clean_url} in Google Chrome, sir."
+        except Exception:
+            webbrowser.open(clean_url)
+            return f"Opening {clean_url}, sir."
+    except Exception:
+        pass
+    
+    # Method 4: Windows start command fallback
+    try:
+        creationflags = 0
+        if hasattr(subprocess, "DETACHED_PROCESS") and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(
+            f'start "" "{clean_url}"',
+            shell=True,
+            env=os.environ.copy(),
+            creationflags=creationflags
+        )
+        return f"Opening {clean_url}, sir."
     except Exception as e:
-        return f"Failed to open {url}: {str(e)}"
+        return f"Failed to open {clean_url}: {str(e)}"
 
 
 class URLOpenTool(Tool):
@@ -526,42 +576,73 @@ class URLOpenTool(Tool):
 
 
 class WebsiteOpenTool(Tool):
-    """Tool to open common websites by alias"""
+    """Tool to open common websites by alias, domain name, or direct URL"""
     
     SITE_ALIASES = {
         "youtube": "https://www.youtube.com",
+        "you tube": "https://www.youtube.com",
         "gmail": "https://mail.google.com",
+        "g mail": "https://mail.google.com",
         "github": "https://www.github.com",
+        "git hub": "https://www.github.com",
         "google": "https://www.google.com",
         "reddit": "https://www.reddit.com",
         "twitter": "https://www.twitter.com",
+        "x": "https://x.com",
         "linkedin": "https://www.linkedin.com",
+        "linked in": "https://www.linkedin.com",
         "netflix": "https://www.netflix.com",
         "spotify": "https://open.spotify.com",
         "chatgpt": "https://chat.openai.com",
-        "claude": "https://claude.ai"
+        "chat gpt": "https://chat.openai.com",
+        "claude": "https://claude.ai",
+        "amazon": "https://www.amazon.com",
+        "wikipedia": "https://www.wikipedia.org",
+        "instagram": "https://www.instagram.com",
+        "facebook": "https://www.facebook.com",
+        "whatsapp": "https://web.whatsapp.com",
+        "coursera": "https://www.coursera.org",
+        "udemy": "https://www.udemy.com",
+        "stackoverflow": "https://stackoverflow.com",
+        "stack overflow": "https://stackoverflow.com"
     }
     
     def __init__(self):
-        super().__init__("open_website", "Open a common website in the browser by name (youtube, github, gmail, etc.)")
+        super().__init__("open_website", "Open a website in the default browser by name, alias, domain, or URL")
         
-    async def execute(self, site_name: str) -> str:
-        """Open common website by alias"""
+    async def execute(self, site_name: str = "", url: str = "") -> str:
+        """Open website by name, alias, domain, or URL"""
         try:
-            name_clean = site_name.strip().lower()
-            url = self.SITE_ALIASES.get(name_clean)
+            target = (site_name or url).strip()
+            if not target:
+                return "Error: No website name or URL provided."
+                
+            # Strip leading prefix tags like "website", "site", "url", "page"
+            target_clean = re.sub(r'^(website|site|url|page|link|webpage)\s+', '', target, flags=re.I).strip()
+            target_lower = target_clean.lower()
             
-            if not url:
+            # Check for direct URL or domain string
+            if target_clean.startswith(("http://", "https://", "www.")) or bool(re.search(r'\.[a-z]{2,6}(/|\?|#|$)', target_lower)):
+                final_url = target_clean if target_clean.startswith(("http://", "https://")) else f"https://{target_clean}"
+                return open_url(final_url)
+                
+            # Direct alias match
+            resolved_url = self.SITE_ALIASES.get(target_lower)
+            if not resolved_url:
                 for alias, site_url in self.SITE_ALIASES.items():
-                    if name_clean in alias or alias in name_clean:
-                        url = site_url
+                    if alias in target_lower or target_lower in alias:
+                        resolved_url = site_url
                         break
-            
-            if url:
-                return open_url(url)
+                        
+            if resolved_url:
+                return open_url(resolved_url)
             else:
-                search_url = f"https://www.google.com/search?q={urllib.parse.quote(site_name)}"
-                return open_url(search_url)
+                if " " not in target_clean:
+                    constructed_url = f"https://www.{target_clean}.com"
+                    return open_url(constructed_url)
+                else:
+                    search_url = f"https://www.google.com/search?q={urllib.parse.quote(target_clean)}"
+                    return open_url(search_url)
         except Exception as e:
             return f"Error opening website '{site_name}': {str(e)}"
 
@@ -805,8 +886,46 @@ class ToolRegistry:
             "result": str(result),
             "timestamp": datetime.now().strftime("%H:%M:%S")
         }
-        self.last_transactions.insert(0, tx)
-        if len(self.last_transactions) > 5:
-            self.last_transactions.pop()
-            
         return result
+
+
+class ToolHandler:
+    """Wrapper handler to execute tools by action name"""
+    def __init__(self, registry: Optional[ToolRegistry] = None):
+        if registry is None:
+            try:
+                from jarvis.api import get_cli_instance
+                cli = get_cli_instance()
+                self.registry = cli.tools
+            except Exception:
+                self.registry = ToolRegistry()
+        else:
+            self.registry = registry
+
+    def execute(self, action: str, args: Optional[Dict[str, Any]] = None) -> Any:
+        args = args or {}
+        action_map = {
+            "open_app": "open_app",
+            "open_application": "open_app",
+            "close_app": "close_app",
+            "read_file": "read_file",
+            "write_file": "write_file",
+            "shell": "shell",
+            "run_command": "shell",
+        }
+        tool_name = action_map.get(action, action)
+        
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self.registry.execute_tool(tool_name, **args))
+                return future.result(timeout=30)
+        else:
+            return loop.run_until_complete(self.registry.execute_tool(tool_name, **args))
+

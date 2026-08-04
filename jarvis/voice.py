@@ -655,6 +655,7 @@ class ProactiveMonitor:
         self.running = False
         self.thread = None
         self.is_busy = False
+        self._push_callback = None
         self.announcement_queue = []
         self.delivered_reminders = set()
         self.alerted_overdue_tasks = set()
@@ -677,11 +678,16 @@ class ProactiveMonitor:
         self._last_cal_check: float = now_ts
         self._last_email_check: float = now_ts
         self._last_project_check: float = now_ts
+        self._last_github_check: float = 0.0
         self._boot_sys_alert_suppressed: bool = True
 
         # Rolling 10-minute price history: {ticker: [(timestamp, price)]}
         self._price_history: Dict[str, List[Tuple[float, float]]] = {}
         self._alerted_pct_windows: set = set()
+
+    def set_push_callback(self, callback):
+        """Set callback to push proactive alerts to external clients (e.g. Electron WebSocket)"""
+        self._push_callback = callback
 
     def set_busy(self, busy: bool):
         """Set busy state (when JARVIS is mid-conversation/recording/speaking)"""
@@ -749,11 +755,30 @@ class ProactiveMonitor:
     def _deliver_announcements(self):
         """Deliver queued announcements when not busy"""
         while self.announcement_queue and not self.is_busy:
-            phrase = self.announcement_queue.pop(0)
-            try:
-                asyncio.run(self.tts.speak(phrase))
-            except Exception as e:
-                console.print(f"[red]Error delivering announcement: {e}[/red]")
+            item = self.announcement_queue.pop(0)
+            phrase = item[0] if isinstance(item, tuple) else item
+            alert_type = item[1] if isinstance(item, tuple) else "reminder"
+
+            pushed = False
+            if self._push_callback:
+                try:
+                    import asyncio
+                    import inspect
+                    if inspect.iscoroutinefunction(self._push_callback):
+                        pushed = bool(asyncio.run(self._push_callback(phrase, alert_type)))
+                    else:
+                        pushed = bool(self._push_callback(phrase, alert_type))
+                except Exception as pe:
+                    console.print(f"[dim yellow]Push alert error: {pe}[/dim yellow]")
+
+            # Only invoke local Python TTS if NOT pushed to connected GUI frontend (prevents double sound)
+            if not pushed:
+                try:
+                    if self.tts:
+                        import asyncio
+                        asyncio.run(self.tts.speak(phrase))
+                except Exception as e:
+                    console.print(f"[red]Error delivering announcement: {e}[/red]")
     
     def _check_deadlines(self):
         """Check for due deadlines and escalate alert frequency"""
@@ -992,6 +1017,100 @@ class ProactiveMonitor:
         except Exception as e:
             console.print(f"[dim yellow]Project monitor check warning: {e}[/dim yellow]")
 
+    def _check_github(self):
+        """Check GitHub for new issues, failed CI runs, and new PRs every 30 minutes (1800s)"""
+        now_ts = time.time()
+        if now_ts - self._last_github_check < 1800.0:
+            return
+        self._last_github_check = now_ts
+
+        try:
+            import json
+            import subprocess
+            from pathlib import Path
+
+            seen_file = Path("jarvis/data/github_seen.json")
+            seen_file.parent.mkdir(parents=True, exist_ok=True)
+
+            first_run = not seen_file.exists()
+            seen_data = {"seen_issues": [], "seen_prs": [], "seen_runs": []}
+            if not first_run:
+                try:
+                    with open(seen_file, "r", encoding="utf-8") as f:
+                        seen_data = json.load(f)
+                except Exception:
+                    pass
+
+            repo = getattr(self, "default_repo", "nivedjkr/jarvis-assistant")
+            try:
+                import yaml
+                if Path("config.yaml").exists():
+                    with open("config.yaml", "r", encoding="utf-8") as f:
+                        cfg = yaml.safe_load(f)
+                        repo = cfg.get("github", {}).get("default_repo", repo)
+            except Exception:
+                pass
+
+            repo_short = repo.split("/")[-1] if "/" in repo else repo
+
+            # 1. Check new open issues
+            p_issue = subprocess.run(
+                ["gh", "issue", "list", "--repo", repo, "--state", "open", "--json", "number,title"],
+                capture_output=True, text=True, timeout=30
+            )
+            if p_issue.returncode == 0 and p_issue.stdout.strip():
+                issues = json.loads(p_issue.stdout)
+                for issue in issues:
+                    i_num = issue.get("number")
+                    title = issue.get("title", "")
+                    if i_num not in seen_data["seen_issues"]:
+                        seen_data["seen_issues"].append(i_num)
+                        if not first_run:
+                            alert_msg = f"Sir, new issue on {repo_short}: {title}"
+                            console.print(f"\n[bold bright_cyan]🐙 GITHUB ALERT:[/bold bright_cyan] [bold white]{alert_msg}[/bold white]\n")
+                            self.announcement_queue.append(alert_msg)
+
+            # 2. Check new open PRs
+            p_pr = subprocess.run(
+                ["gh", "pr", "list", "--repo", repo, "--state", "open", "--json", "number,title"],
+                capture_output=True, text=True, timeout=30
+            )
+            if p_pr.returncode == 0 and p_pr.stdout.strip():
+                prs = json.loads(p_pr.stdout)
+                for pr in prs:
+                    pr_num = pr.get("number")
+                    title = pr.get("title", "")
+                    if pr_num not in seen_data["seen_prs"]:
+                        seen_data["seen_prs"].append(pr_num)
+                        if not first_run:
+                            alert_msg = f"Sir, new pull request: {title}"
+                            console.print(f"\n[bold bright_cyan]🐙 GITHUB ALERT:[/bold bright_cyan] [bold white]{alert_msg}[/bold white]\n")
+                            self.announcement_queue.append(alert_msg)
+
+            # 3. Check failed CI runs
+            p_run = subprocess.run(
+                ["gh", "run", "list", "--repo", repo, "--limit", "5", "--json", "databaseId,status,conclusion,displayTitle"],
+                capture_output=True, text=True, timeout=30
+            )
+            if p_run.returncode == 0 and p_run.stdout.strip():
+                runs = json.loads(p_run.stdout)
+                for r in runs:
+                    r_id = r.get("databaseId")
+                    conclusion = r.get("conclusion")
+                    title = r.get("displayTitle", "")
+                    if conclusion == "failure" and r_id not in seen_data["seen_runs"]:
+                        seen_data["seen_runs"].append(r_id)
+                        if not first_run:
+                            alert_msg = f"Sir, CI failed on {repo_short}, {title}"
+                            console.print(f"\n[bold red]🐙 GITHUB CI ALERT:[/bold red] [bold white]{alert_msg}[/bold white]\n")
+                            self.announcement_queue.append(alert_msg)
+
+            with open(seen_file, "w", encoding="utf-8") as f:
+                json.dump(seen_data, f, indent=2)
+
+        except Exception as e:
+            console.print(f"[dim yellow]GitHub monitor check warning: {e}[/dim yellow]")
+
     def _monitor_loop(self):
         """Main monitoring loop"""
         while self.running:
@@ -1005,6 +1124,7 @@ class ProactiveMonitor:
                 self._check_calendar()
                 self._check_email()
                 self._check_projects()
+                self._check_github()
                 self._deliver_announcements()
                 time.sleep(self.check_interval)
             except Exception as e:
@@ -1037,8 +1157,8 @@ class ProactiveMonitor:
             self.thread = None
         console.print("[dim]Proactive monitor stopped[/dim]")
     
-    async def speak_boot_greeting(self, user_title: str = "sir"):
-        """Speak boot greeting enriched with real calendar event count and randomized status phrases"""
+    def get_boot_greeting(self, user_title: str = "sir") -> str:
+        """Get boot greeting text enriched with real calendar event count and randomized status phrases"""
         try:
             greeting = self._get_time_greeting()
             
@@ -1058,7 +1178,14 @@ class ProactiveMonitor:
             ]
             closing = random.choice(random_closings)
 
-            greeting_text = f"{greeting}, {user_title}.{cal_phrase} {closing}".strip()
+            return f"{greeting}, {user_title}.{cal_phrase} {closing}".strip()
+        except Exception:
+            return f"Good day, {user_title}. JARVIS online and standing by."
+
+    async def speak_boot_greeting(self, user_title: str = "sir"):
+        """Speak boot greeting enriched with real calendar event count and randomized status phrases"""
+        try:
+            greeting_text = self.get_boot_greeting(user_title)
             
             from jarvis.ui import ui
             ui.render_response(greeting_text)

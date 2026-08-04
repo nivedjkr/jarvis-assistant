@@ -404,6 +404,21 @@ class Memory:
                 result.append(r)
             return result
 
+    def get_pending_reminders(self) -> List[Dict]:
+        """Get all pending/uncompleted reminders"""
+        reminders = self.get_reminders()
+        return [r for r in reminders if not r.get("completed")]
+
+    def get_fact_count(self) -> int:
+        """Get total count of facts stored in DB"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM facts")
+                return cursor.fetchone()[0]
+        except Exception:
+            return 0
+
     def complete_reminder(self, reminder_id: int) -> bool:
         """Mark reminder completed"""
         now = datetime.now().isoformat()
@@ -697,7 +712,9 @@ class CommandLogger:
         if not os.path.exists(self.log_file):
             return []
         
-        with open(self.log_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        
         return lines[-limit:]
+
+
+# Backward compatibility alias
+MemoryManager = Memory
+

@@ -1,0 +1,9 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #root {
+  background: #000;
+  height: 100vh;
+  overflow: hidden;
+  font-family: -apple-system, 'Inter', sans-serif;
+  color: #fff;
+}
+::-webkit-scrollbar { width: 0; }

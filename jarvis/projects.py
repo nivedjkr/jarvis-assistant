@@ -804,3 +804,10 @@ class ProjectManager:
 
         context_lines.append("CRITICAL: You MUST answer using only this real DB project context. Do not invent or approximate details.")
         return "\n".join(context_lines)
+
+
+def get_active_projects_summary() -> List[Dict[str, Any]]:
+    """Helper function to get active projects summary using default ProjectManager"""
+    pm = ProjectManager()
+    return pm.get_active_projects_summary()
+

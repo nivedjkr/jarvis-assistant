@@ -52,3 +52,24 @@ node_modules/
 out/
 .vite/
 
+# Electron
+jarvis-desktop/node_modules/
+jarvis-desktop/dist/
+jarvis-desktop/.vite/
+jarvis-desktop/.env
+
+# Google OAuth
+jarvis/data/google_token.json
+jarvis/data/credentials.json
+
+# New data files
+jarvis/data/github_seen.json
+jarvis/data/internship_seen.json
+jarvis/data/awareness_seen.json
+
+# Logs
+ultron_alerts.log
+*.log
+
+# OpenClaw
+~/.openclaw/workspace/

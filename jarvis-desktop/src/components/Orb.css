@@ -1,0 +1,54 @@
+.orb-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 0;
+  user-select: none;
+}
+
+.orb-bars {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 64px;
+}
+
+.orb-bar {
+  width: 5px;
+  border-radius: 3px;
+  transition: background-color 0.3s ease, opacity 0.3s ease;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+
+.orb-status {
+  margin-top: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  transition: color 0.3s ease;
+  font-family: -apple-system, 'Inter', monospace, sans-serif;
+}
+
+@keyframes idle-pulse {
+  0%, 100% { height: 4px; }
+  50% { height: 10px; }
+}
+
+@keyframes listen-pulse {
+  0%, 100% { height: 6px; }
+  50% { height: 48px; }
+}
+
+@keyframes think-pulse {
+  0%, 100% { height: 6px; }
+  50% { height: 40px; }
+}
+
+@keyframes speak-pulse {
+  0%, 100% { height: 6px; }
+  50% { height: 56px; }
+}

@@ -14,6 +14,7 @@ from jarvis.cli import JARVISCLI
 
 cli = JARVISCLI()
 pm = cli.proactive_monitor
+pm.stop()
 pm.check_interval = 1  # 1-second interval for test execution
 
 async def run_reminder_tests():

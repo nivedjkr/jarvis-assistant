@@ -1,0 +1,27 @@
+.input-bar-container {
+  padding: 16px 24px 20px 24px;
+  background: #000;
+  width: 100%;
+}
+
+.input-bar-field {
+  width: 100%;
+  background: #0a0a0a;
+  border: 0.5px solid #0d3a3a;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #ffffff;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: -apple-system, 'Inter', sans-serif;
+}
+
+.input-bar-field::placeholder {
+  color: #0d3a3a;
+}
+
+.input-bar-field:focus {
+  border-color: #00D9FF;
+  box-shadow: 0 0 20px rgba(0, 217, 255, 0.08);
+}
