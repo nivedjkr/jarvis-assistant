@@ -2103,14 +2103,16 @@ class JARVISCLI:
             return result
         
         # Read file
-        elif any(kw in input_lower for kw in ["read", "cat", "view", "show contents of", "what is in", "what's in"]):
+        elif any(kw in input_lower for kw in ["cat ", "show contents of", "what is in", "what's in"]) or input_lower.startswith("read ") or input_lower.startswith("view "):
             filename = re.sub(r'^(can\s+you\s+)?(please\s+)?(read|cat|view|show\s+contents\s+of|what\s+is\s+in|what\'s\s+in|display)\s+(the\s+)?(contents\s+of\s+)?(file\s+)?', '', user_input, flags=re.I).strip().rstrip('?.!')
-            if filename and len(filename.split()) <= 3:
+            pronouns = {"it", "this", "that", "page", "article", "website", "site", "url", "webpage", "them", "these", "those", "me", "something", "anything", "pdf", "book", "paper"}
+            if filename and filename.lower() not in pronouns and len(filename.split()) <= 3:
                 resolved_p = Path(filename).resolve()
-                res_warn = f"⚠️ [PATH RESOLUTION] Resolving '{filename}' to '{resolved_p}' — proceeding.\n"
-                result = await self.tools.execute_tool("read_file", filepath=filename)
-                self.memory.log_task(f"Read file {filename}", "completed")
-                return res_warn + result
+                if resolved_p.exists() or "." in filename or "/" in filename or "\\" in filename or ":" in filename or "file" in input_lower or input_lower.startswith("cat "):
+                    res_warn = f"⚠️ [PATH RESOLUTION] Resolving '{filename}' to '{resolved_p}' — proceeding.\n"
+                    result = await self.tools.execute_tool("read_file", filepath=filename)
+                    self.memory.log_task(f"Read file {filename}", "completed")
+                    return res_warn + result
         
         # GitHub natural language routing
         if any(p in input_lower for p in ["show my repos", "list repositories", "list my repos", "my repos", "my github repos", "list repos", "show repos", "github repos", "my repositories"]):
