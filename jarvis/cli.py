@@ -186,7 +186,8 @@ class JARVISCLI:
             "MEMORY": [
                 ("/remember <fact>", "Save a fact manually"),
                 ("/forget <keyword>", "Search and remove a stored fact"),
-                ("/profile", "Show stored profile and memory stats"),
+                ("/profile", "Show stored profile attributes and memory stats"),
+                ("/profile set <key> <value>", "Update a profile attribute (e.g. /profile set name Nived)"),
                 ("/facts [category]", "List facts in a category"),
                 ("/notes", "Show saved notes"),
                 ("/tasks", "Show recent task execution history"),
@@ -748,7 +749,13 @@ class JARVISCLI:
         elif cmd_lower == "/tasks":
             self.show_tasks()
             return "Displaying recent task history, sir."
-        elif cmd_lower == "/profile":
+        elif cmd_lower.startswith("/profile"):
+            parts = cmd_raw.split(maxsplit=3)
+            if len(parts) >= 4 and parts[1].lower() in ["set", "add", "update"]:
+                key = parts[2].strip()
+                val = parts[3].strip()
+                self.memory.set_profile_value(key, val)
+                return f"Profile updated: **{key}** = '{val}', sir."
             self.show_profile()
             return self.handle_whoami()
         elif cmd_lower == "/apps":
@@ -2155,7 +2162,9 @@ class JARVISCLI:
                 return await self.tools.execute_tool("email", action="read", index=idx)
             else:
                 return await self.tools.execute_tool("email", action="list")
-
+        # Memory & Profile natural language routing
+        elif any(p in input_lower for p in ["who am i", "what do you know about me", "tell me what you know about me", "recall profile", "my profile"]):
+            return self.handle_whoami()
         # List files / directory
         elif ("list" in input_lower or "show files" in input_lower or input_lower == "ls" or input_lower.startswith("ls ")) and not any(k in input_lower for k in ["repo", "repository", "repositories", "issue", "pr", "pull", "ci", "build"]):
             directory = "."
