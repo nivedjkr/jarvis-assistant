@@ -431,6 +431,18 @@ class Memory:
             conn.commit()
             return cursor.rowcount > 0
 
+    def clear_all_pending_reminders(self) -> int:
+        """Mark all pending reminders as completed / cleared"""
+        now = datetime.now().isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                UPDATE reminders
+                SET completed = 1, status = 'completed', completed_at = ?
+                WHERE completed = 0 OR status = 'pending'
+            """, (now,))
+            conn.commit()
+            return cursor.rowcount
+
     # --- Notes Methods ---
 
     def add_note(self, text: str, category: str = "general") -> Dict:

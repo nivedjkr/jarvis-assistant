@@ -740,7 +740,10 @@ class JARVISCLI:
         elif cmd_lower == "/tools":
             self.show_tools()
             return self.get_tools_text()
-        elif cmd_lower == "/reminders":
+        elif cmd_lower.startswith("/reminders"):
+            if any(w in cmd_lower for w in ["clear", "delete", "remove"]):
+                count = self.memory.clear_all_pending_reminders()
+                return f"Cleared {count} pending reminder(s), sir."
             self.show_reminders()
             return self.get_reminders_text()
         elif cmd_lower == "/notes":
@@ -2165,6 +2168,11 @@ class JARVISCLI:
         # Memory & Profile natural language routing
         elif any(p in input_lower for p in ["who am i", "what do you know about me", "tell me what you know about me", "recall profile", "my profile"]):
             return self.handle_whoami()
+
+        # Clear reminders natural language routing
+        elif any(p in input_lower for p in ["remove all pending reminders", "remove all reminders", "delete all pending reminders", "delete all reminders", "clear pending reminders", "clear all reminders", "clear reminders"]):
+            count = self.memory.clear_all_pending_reminders()
+            return f"Cleared {count} pending reminder(s), sir."
         # List files / directory
         elif ("list" in input_lower or "show files" in input_lower or input_lower == "ls" or input_lower.startswith("ls ")) and not any(k in input_lower for k in ["repo", "repository", "repositories", "issue", "pr", "pull", "ci", "build"]):
             directory = "."
