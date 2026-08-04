@@ -955,6 +955,8 @@ class ProactiveMonitor:
 
     def _check_email(self):
         """Check Gmail inbox unread triage every 5 minutes (300s)"""
+        if not self.google_auth.is_authenticated():
+            return
         now_ts = time.time()
         if now_ts - self._last_email_check < 300.0:
             return

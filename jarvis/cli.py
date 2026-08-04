@@ -879,15 +879,15 @@ class JARVISCLI:
             parts = cmd_raw.split(maxsplit=2)
             sub = parts[1].lower() if len(parts) > 1 else ""
             if sub == "summary":
-                return self.proactive_monitor.email_service.generate_email_summary_briefing()
+                return await self.tools.execute_tool("email", action="summary")
             elif sub == "read":
                 try:
                     idx = int(parts[2]) if len(parts) > 2 else 1
                 except ValueError:
                     idx = 1
-                return self.proactive_monitor.email_service.read_email_body_by_index(idx)
+                return await self.tools.execute_tool("email", action="read", index=idx)
             else:
-                return self.proactive_monitor.email_service.format_unread_list()
+                return await self.tools.execute_tool("email", action="list")
         elif cmd_lower.startswith("/search"):
             parts = cmd_raw.split(maxsplit=1)
             query = parts[1].strip() if len(parts) > 1 else ""
@@ -2144,6 +2144,17 @@ class JARVISCLI:
         
         elif any(p in input_lower for p in ["repo info", "jarvis-assistant stats", "repo stats", "show repo info"]):
             return await self.tools.execute_tool("github_repo", action="info")
+
+        # Email natural language routing
+        elif any(p in input_lower for p in ["check my email", "check email", "any new emails", "any new email", "my email", "read email", "email summary", "inbox summary", "check inbox"]):
+            if "summary" in input_lower:
+                return await self.tools.execute_tool("email", action="summary")
+            elif "read" in input_lower:
+                m = re.search(r'read\s+email\s+#?(\d+)', input_lower)
+                idx = int(m.group(1)) if m else 1
+                return await self.tools.execute_tool("email", action="read", index=idx)
+            else:
+                return await self.tools.execute_tool("email", action="list")
 
         # List files / directory
         elif ("list" in input_lower or "show files" in input_lower or input_lower == "ls" or input_lower.startswith("ls ")) and not any(k in input_lower for k in ["repo", "repository", "repositories", "issue", "pr", "pull", "ci", "build"]):

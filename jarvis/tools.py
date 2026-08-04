@@ -372,6 +372,32 @@ class GitHubNotificationsTool(Tool):
         return _native_gh.notifications(limit=kwargs.get("limit", 5))
 
 
+class EmailTool(Tool):
+    """Check Gmail unread messages, read email body, or get inbox summary."""
+
+    def __init__(self):
+        super().__init__("email", "Check Gmail unread messages, read email body by index, or get inbox summary. IMPORTANT: Never generate fake emails or fake content. If unauthenticated, report so plainly.")
+
+    async def execute(self, action: str = "list", index: Any = None, **kwargs) -> str:
+        from jarvis.email_service import EmailService
+        from jarvis.google_auth import GoogleAuthManager
+        auth_mgr = GoogleAuthManager()
+        if not auth_mgr.is_authenticated():
+            return "Google Email is unauthenticated, sir. Run Google OAuth setup or place credentials.json in workspace to connect."
+        svc = EmailService(auth_mgr)
+        act = action.lower() if action else "list"
+        if act == "summary":
+            return svc.generate_email_summary_briefing()
+        elif act in ("read", "view") or index is not None:
+            try:
+                idx = int(index) if index is not None else 1
+            except ValueError:
+                idx = 1
+            return svc.read_email_body_by_index(idx)
+        else:
+            return svc.format_unread_list()
+
+
 class AppLaunchTool(Tool):
     """Tool to launch software applications with a tiered strategy and psutil verification."""
     
@@ -926,6 +952,7 @@ class ToolRegistry:
         self.register(GitHubCITool())
         self.register(GitHubRepoTool())
         self.register(GitHubNotificationsTool())
+        self.register(EmailTool())
         self.register(ProjectTool())
     
     def register(self, tool: Tool):
