@@ -958,20 +958,10 @@ class JARVISCLI:
         if not task:
             return "Usage: /ultron <task> - Delegate a task to Ultron masterbrain"
         
-        # Send to Ultron webhook
-        try:
-            import requests
-            response = requests.post(
-                "http://127.0.0.1:8766/delegate",
-                json={"task": task, "reply_to_jarvis": True},
-                timeout=10
-            )
-            if response.status_code == 200:
-                return f"Delegated to Ultron: {task}"
-            else:
-                return f"Ultron webhook error: {response.status_code}"
-        except Exception as e:
-            return f"Failed to reach Ultron: {e}"
+        # Execute via direct Ultron / OpenClaw CLI subprocess
+        from jarvis.openclaw_bridge import call_ultron
+        res = call_ultron(f'agent --message "{task}"')
+        return f"Delegated to Ultron: {res}"
 
     async def handle_paste_command(self, cmd_raw: str) -> str:
         """Process pasted text directly from system clipboard as a prompt."""
@@ -1709,6 +1699,14 @@ class JARVISCLI:
         desk_status = "[bold green]✓ OK[/bold green]" if desk_ok else "[bold yellow]! STANDBY[/bold yellow]"
         table.add_row("Electron Desktop HUD", desk_status, desk_msg)
 
+        # 10. Ultron / OpenClaw CLI Subsystem Check
+        from jarvis.openclaw_bridge import call_ultron
+        version_out = call_ultron("--version")
+        ultron_ok = not (version_out.startswith("Ultron error") or version_out.startswith("Bridge error") or version_out.startswith("Ultron timed out"))
+        ultron_status = "[bold green]✓ OK[/bold green]" if ultron_ok else "[bold yellow]⚠ OFFLINE[/bold yellow]"
+        ultron_msg = f"npx openclaw CLI operational ({version_out})" if ultron_ok else f"npx openclaw CLI check failed: {version_out}"
+        table.add_row("Ultron / OpenClaw CLI Bridge", ultron_status, ultron_msg)
+
         console.print(table)
         return "Self-diagnostic checks completed, sir."
 
@@ -2186,8 +2184,8 @@ class JARVISCLI:
                 return f"Note saved: {note_text}"
 
         # GitHub natural language routing
-        elif any(p in input_lower for p in ["show my repos", "list my repos", "list my repositories", "show my repositories"]):
-            return await self.tools.execute_tool("openclaw_github", command="repo", subcommand="list", repo="nivedjkr")
+        elif any(p in input_lower for p in ["my github", "github status", "show my repos", "list my repos", "list my repositories", "show my repositories"]):
+            return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
         
         elif any(p in input_lower for p in ["open issues", "what issues do i have", "show my open issues", "list open issues"]):
             return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")

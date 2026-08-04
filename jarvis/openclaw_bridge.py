@@ -1,60 +1,36 @@
 """
 OpenClaw Skills Bridge for JARVIS
-Exposes OpenClaw skills as callable JARVIS tools via the openclaw CLI (npx) and GitHub CLI (gh).
+Exposes OpenClaw / Ultron skills as callable JARVIS tools via direct CLI subprocess (call_ultron).
 """
 
+import os
+import subprocess
 import asyncio
-import shutil
 from typing import List, Any, Optional, Dict
 from pathlib import Path
 
 from jarvis.tools import Tool, ToolRegistry
 
 
-def _get_npx_path() -> str:
-    """Resolve system path to npx executable."""
-    which_npx = shutil.which("npx.cmd") or shutil.which("npx")
-    if which_npx:
-        return which_npx
-    default_win = r"C:\Program Files\nodejs\npx.cmd"
-    if Path(default_win).exists():
-        return default_win
-    return "npx"
-
-
-def _get_gh_path() -> str:
-    """Resolve system path to gh executable."""
-    which_gh = shutil.which("gh.exe") or shutil.which("gh")
-    if which_gh:
-        return which_gh
-    default_win = r"C:\Program Files\GitHub CLI\gh.exe"
-    if Path(default_win).exists():
-        return default_win
-    return "gh"
-
-
-async def _run_openclaw(cmd_args: List[str], timeout: int = 60) -> str:
-    """Run openclaw via npx and return output."""
-    npx_path = _get_npx_path()
-    cmd = [npx_path, "-y", "openclaw"] + cmd_args
+def call_ultron(command: str) -> str:
+    """Execute npx openclaw command via subprocess directly."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(Path.home())
+        result = subprocess.run(
+            f'npx openclaw {command}',
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=os.path.expanduser('~')
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        if proc.returncode == 0:
-            return stdout.decode('utf-8', errors='replace').strip() or "Command executed successfully"
+        if result.returncode == 0:
+            return result.stdout.strip() or "Command executed successfully"
         else:
-            return f"Error (exit {proc.returncode}): {stderr.decode('utf-8', errors='replace').strip()}"
-    except asyncio.TimeoutError:
-        return f"Error: Command timed out after {timeout}s"
-    except FileNotFoundError:
-        return "Error: 'npx' not found. Install Node.js and ensure openclaw is installed globally (npm i -g openclaw)"
+            return f"Ultron error: {result.stderr.strip() or result.stdout.strip()}"
+    except subprocess.TimeoutExpired:
+        return "Ultron timed out, sir."
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Bridge error: {str(e)}"
 
 
 class OpenClawSkillRegistryTool(Tool):
@@ -68,19 +44,19 @@ class OpenClawSkillRegistryTool(Tool):
         q_str = query or kwargs.get("q")
         
         if action == "list":
-            cmd = ["skills", "list"]
+            cmd = "skills list"
         elif action in ["inspect", "info"] and s_name:
-            cmd = ["skills", "info", s_name]
+            cmd = f"skills info {s_name}"
         elif action == "search" and q_str:
-            cmd = ["skills", "search", q_str]
+            cmd = f"skills search {q_str}"
         else:
-            cmd = ["skills", "list"]
+            cmd = "skills list"
         
-        return await _run_openclaw(cmd)
+        return call_ultron(cmd)
 
 
 class OpenClawGitHubTool(Tool):
-    """GitHub operations via gh CLI directly"""
+    """GitHub operations via OpenClaw / gh CLI bridge"""
     
     def __init__(self, default_repo: str = "nivedjkr/jarvis-assistant"):
         super().__init__(
@@ -108,10 +84,8 @@ class OpenClawGitHubTool(Tool):
         target_repo = repo or self.default_repo
         kw = dict(kwargs)
         
-        # Pop action if passed in kwargs or parameter
         act = (action or kw.pop("action", "")).strip()
         
-        # Parse action into command/subcommand if command is not explicitly set
         if act and not command:
             act_lower = act.lower()
             if act_lower in ("list", "issues", "issue_list", "issue-list"):
@@ -136,59 +110,53 @@ class OpenClawGitHubTool(Tool):
                 if len(parts) > 1:
                     subcommand = parts[1]
                 if len(parts) > 2:
-                    pos_args = parts[2:]
-                    for idx, pa in enumerate(pos_args):
+                    for idx, pa in enumerate(parts[2:]):
                         kw[f"_pos_{idx}"] = pa
 
-        # Default fallback command if still empty
         if not command:
             command = "issue"
             subcommand = "list"
 
-        gh_path = _get_gh_path()
-        cmd = [gh_path, command]
+        cmd_parts = ["skills", "run", "github", command]
 
-        # Commands that accept --repo flag
         repo_scoped_commands = {
             "issue", "pr", "run", "workflow", "release",
             "project", "gist", "secret", "variable", "search"
         }
 
-        # Handling specific command structures
         if command == "api":
             endpoint = subcommand or f"repos/{target_repo}"
-            cmd.append(endpoint)
+            cmd_parts.append(endpoint)
         elif command == "repo":
             sub = subcommand or "view"
-            cmd.append(sub)
+            cmd_parts.append(sub)
             if sub in ("view", "clone", "fork", "sync"):
-                # Pass repo positionally for gh repo view/clone
                 pos_repo = kw.pop("name", None) or target_repo
                 if pos_repo:
-                    cmd.append(pos_repo)
+                    cmd_parts.append(pos_repo)
             elif sub == "list" and target_repo:
-                owner = target_repo.split("/")[0] if "/" in target_repo else target_repo
-                cmd.append(owner)
+                pos_keys = sorted([k for k in kw.keys() if k.startswith("_pos_")])
+                if not pos_keys:
+                    owner = target_repo.split("/")[0] if "/" in target_repo else target_repo
+                    cmd_parts.append(owner)
         else:
             if subcommand:
-                cmd.append(subcommand)
+                cmd_parts.append(subcommand)
             
-            # Extract positional ID/number argument for commands like issue view/close/comment, pr view/checkout
             if command in ("issue", "pr") and subcommand in ("view", "close", "reopen", "comment", "checkout", "diff", "merge", "edit", "lock"):
                 num_val = kw.pop("number", None) or kw.pop("issue_number", None) or kw.pop("pr_number", None) or kw.pop("id", None)
                 if num_val is not None:
-                    cmd.append(str(num_val))
+                    cmd_parts.append(str(num_val))
 
             if command == "issue" and subcommand == "create" and "body" not in kw:
                 kw["body"] = ""
 
             if target_repo and command in repo_scoped_commands:
-                cmd.extend(["--repo", target_repo])
+                cmd_parts.extend(["--repo", target_repo])
 
-        # Append remaining kwargs as flags
         pos_keys = sorted([k for k in kw.keys() if k.startswith("_pos_")])
         for pk in pos_keys:
-            cmd.append(str(kw.pop(pk)))
+            cmd_parts.append(str(kw.pop(pk)))
 
         for k, v in list(kw.items()):
             if v is None or k.startswith("_") or k in ("command", "subcommand", "repo"):
@@ -196,29 +164,29 @@ class OpenClawGitHubTool(Tool):
             flag_name = k.replace("_", "-")
             if isinstance(v, bool):
                 if v:
-                    cmd.append(f"--{flag_name}")
+                    cmd_parts.append(f"--{flag_name}")
             else:
-                cmd.extend([f"--{flag_name}", str(v)])
+                cmd_parts.extend([f"--{flag_name}", str(v)])
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
-            out_str = stdout.decode('utf-8', errors='replace').strip()
-            err_str = stderr.decode('utf-8', errors='replace').strip()
-            if proc.returncode == 0:
-                return out_str or "Command executed successfully"
-            else:
-                return f"Error (exit {proc.returncode}): {err_str or out_str}"
-        except asyncio.TimeoutError:
-            return "Error: Command timed out after 60s"
-        except FileNotFoundError:
-            return "Error: 'gh' not found. Install GitHub CLI."
-        except Exception as e:
-            return f"Error: {str(e)}"
+        full_cmd_str = " ".join(cmd_parts)
+        res = call_ultron(full_cmd_str)
+        if res.startswith("Ultron error") or res.startswith("Bridge error") or "not found" in res.lower() or "not recognize" in res.lower():
+            gh_cmd = ["gh", command] + cmd_parts[4:]
+            try:
+                result = subprocess.run(
+                    " ".join(gh_cmd),
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+                if result.returncode == 0:
+                    return result.stdout.strip() or "Command executed successfully"
+                else:
+                    return f"Error (exit {result.returncode}): {result.stderr.strip() or result.stdout.strip()}"
+            except Exception as e:
+                return f"GitHub CLI error: {str(e)}"
+        return res
 
 
 class OpenClawNotionTool(Tool):
@@ -231,13 +199,13 @@ class OpenClawNotionTool(Tool):
         )
     
     async def execute(self, action: str = "pages", **kwargs) -> str:
-        cmd = ["skills", "run", "notion"]
+        cmd_parts = ["skills", "run", "notion"]
         if action:
-            cmd.append(action)
+            cmd_parts.append(action)
         for key, value in kwargs.items():
             if value is not None:
-                cmd.extend([f"--{key.replace('_', '-')}", str(value)])
-        return await _run_openclaw(cmd)
+                cmd_parts.extend([f"--{key.replace('_', '-')}", str(value)])
+        return call_ultron(" ".join(cmd_parts))
 
 
 class OpenClawBrowserTool(Tool):
@@ -250,15 +218,15 @@ class OpenClawBrowserTool(Tool):
         )
     
     async def execute(self, action: str = "navigate", url: str = "", **kwargs) -> str:
-        cmd = ["skills", "run", "browser-automation"]
+        cmd_parts = ["skills", "run", "browser-automation"]
         if action:
-            cmd.append(action)
+            cmd_parts.append(action)
         if url:
-            cmd.extend(["--url", url])
+            cmd_parts.extend(["--url", url])
         for key, value in kwargs.items():
             if value is not None:
-                cmd.extend([f"--{key.replace('_', '-')}", str(value)])
-        return await _run_openclaw(cmd, timeout=120)
+                cmd_parts.extend([f"--{key.replace('_', '-')}", str(value)])
+        return call_ultron(" ".join(cmd_parts))
 
 
 class OpenClawDiagramTool(Tool):
@@ -271,17 +239,17 @@ class OpenClawDiagramTool(Tool):
         )
     
     async def execute(self, action: str = "create", **kwargs) -> str:
-        cmd = ["skills", "run", "diagram-maker"]
+        cmd_parts = ["skills", "run", "diagram-maker"]
         if action:
-            cmd.append(action)
+            cmd_parts.append(action)
         for key, value in kwargs.items():
             if value is not None:
-                cmd.extend([f"--{key.replace('_', '-')}", str(value)])
-        return await _run_openclaw(cmd)
+                cmd_parts.extend([f"--{key.replace('_', '-')}", str(value)])
+        return call_ultron(" ".join(cmd_parts))
 
 
 class OpenClawWeatherTool(Tool):
-    """Weather via wttr.in API (no OpenClaw dependency)"""
+    """Weather via wttr.in API (fallback) or OpenClaw weather skill"""
     
     def __init__(self):
         super().__init__(
@@ -321,8 +289,8 @@ class OpenClawWeatherTool(Tool):
                                 f"Precipitation: {precip_mm} mm")
                     else:
                         return f"Error: wttr.in returned {resp.status}"
-        except Exception as e:
-            return f"Error fetching weather: {str(e)}"
+        except Exception:
+            return call_ultron(f"skills run weather {loc}")
 
 
 class OpenClawHealthCheckTool(Tool):
@@ -335,13 +303,13 @@ class OpenClawHealthCheckTool(Tool):
         )
     
     async def execute(self, action: str = "audit", **kwargs) -> str:
-        cmd = ["skills", "run", "healthcheck"]
+        cmd_parts = ["skills", "run", "healthcheck"]
         if action:
-            cmd.append(action)
+            cmd_parts.append(action)
         for key, value in kwargs.items():
             if value is not None:
-                cmd.extend([f"--{key.replace('_', '-')}", str(value)])
-        return await _run_openclaw(cmd, timeout=120)
+                cmd_parts.extend([f"--{key.replace('_', '-')}", str(value)])
+        return call_ultron(" ".join(cmd_parts))
 
 
 class OpenClawNodeConnectTool(Tool):
@@ -354,13 +322,13 @@ class OpenClawNodeConnectTool(Tool):
         )
     
     async def execute(self, action: str = "diagnose", **kwargs) -> str:
-        cmd = ["skills", "run", "node-connect"]
+        cmd_parts = ["skills", "run", "node-connect"]
         if action:
-            cmd.append(action)
+            cmd_parts.append(action)
         for key, value in kwargs.items():
             if value is not None:
-                cmd.extend([f"--{key.replace('_', '-')}", str(value)])
-        return await _run_openclaw(cmd)
+                cmd_parts.extend([f"--{key.replace('_', '-')}", str(value)])
+        return call_ultron(" ".join(cmd_parts))
 
 
 class OpenClawTaskFlowTool(Tool):
@@ -373,13 +341,13 @@ class OpenClawTaskFlowTool(Tool):
         )
     
     async def execute(self, action: str = "list", **kwargs) -> str:
-        cmd = ["skills", "run", "taskflow"]
+        cmd_parts = ["skills", "run", "taskflow"]
         if action:
-            cmd.append(action)
+            cmd_parts.append(action)
         for key, value in kwargs.items():
             if value is not None:
-                cmd.extend([f"--{key.replace('_', '-')}", str(value)])
-        return await _run_openclaw(cmd)
+                cmd_parts.extend([f"--{key.replace('_', '-')}", str(value)])
+        return call_ultron(" ".join(cmd_parts))
 
 
 class OpenClawGenericSkillTool(Tool):
@@ -392,13 +360,13 @@ class OpenClawGenericSkillTool(Tool):
         if not skill:
             return "Error: 'skill' parameter required"
         
-        cmd = ["skills", "run", skill]
+        cmd_parts = ["skills", "run", skill]
         if action:
-            cmd.append(action)
+            cmd_parts.append(action)
         for key, value in kwargs.items():
             if value is not None:
-                cmd.extend([f"--{key.replace('_', '-')}", str(value)])
-        return await _run_openclaw(cmd, timeout=120)
+                cmd_parts.extend([f"--{key.replace('_', '-')}", str(value)])
+        return call_ultron(" ".join(cmd_parts))
 
 
 REGISTERED_SKILLS = [
@@ -468,7 +436,7 @@ def test_all_skills() -> Dict[str, str]:
     for skill_name in REGISTERED_SKILLS:
         try:
             result = call_skill(skill_name, test_args[skill_name])
-            if isinstance(result, str) and result.startswith("Error"):
+            if isinstance(result, str) and (result.startswith("Ultron error") or result.startswith("Bridge error")):
                 results[skill_name] = f'FAIL: {result}'
             else:
                 results[skill_name] = 'OK'
