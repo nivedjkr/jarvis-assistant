@@ -283,7 +283,16 @@ export default function App() {
       
       <div style={{ display: 'flex', flex: 1, height: 'calc(100vh - 32px)', overflow: 'hidden' }}>
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          <Orb state={orbState} />
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'center',
+            alignItems: 'center',
+            margin: '0 auto',
+            flex: 1
+          }}>
+            <Orb state={orbState} />
+          </div>
+
           <ChatLog messages={messages} />
           <InputBar onSend={handleSendMessage} />
         </div>
