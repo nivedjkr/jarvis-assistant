@@ -23,7 +23,6 @@ An Iron-Man-inspired, dual-interface (Desktop GUI + Terminal CLI) AI assistant p
 - Real-time monitoring — weather, calendar, email, system resources
 - Security monitor — anomaly detection, process monitoring
 - Electron desktop app — black minimal UI with JARVIS orb animation
-- Ultron bridge — bidirectional OpenClaw agent integration
 - GitHub integration — issues, PRs, CI status via gh CLI
 
 ---
@@ -33,7 +32,6 @@ An Iron-Man-inspired, dual-interface (Desktop GUI + Terminal CLI) AI assistant p
 jarvis/                  - Python CLI backend
 jarvis-desktop/          - Electron + React frontend
 jarvis/api.py            - FastAPI WebSocket bridge
-jarvis/openclaw_bridge.py - Ultron/OpenClaw integration
 ```
 
 ---

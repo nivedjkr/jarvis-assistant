@@ -24,7 +24,6 @@ from jarvis.memory import Memory, CommandLogger
 from jarvis.projects import ProjectManager
 from jarvis.tools import ToolRegistry, WebsiteOpenTool
 from jarvis.apps import AppRegistry
-from jarvis.openclaw_bridge import register_openclaw_tools
 from jarvis.voice import VoiceManager, ProactiveMonitor
 from jarvis.awareness import GlobalAwarenessManager
 from jarvis.protocols import ProtocolManager
@@ -80,8 +79,6 @@ class JARVISCLI:
             logger=self.logger if self.config["tools"]["log_commands"] else None,
             app_registry=self.app_registry
         )
-        # Register OpenClaw skills as JARVIS tools
-        register_openclaw_tools(self.tools)
         
         # Initialize voice manager
         self.voice_manager = VoiceManager(self.config)
@@ -179,8 +176,7 @@ class JARVISCLI:
                 ("/history", "Show conversation history"),
                 ("/tools", "List available tools"),
                 ("/paste [instruction]", "Paste large sentences/code directly from system clipboard"),
-                ("/multiline [instruction]", "Enter multi-line input mode (end with 'END')"),
-                ("/ultron <task>", "Delegate a task to Ultron masterbrain")
+                ("/multiline [instruction]", "Enter multi-line input mode (end with 'END')")
             ],
             "VOICE": [
                 ("/speak on|off", "Toggle spoken response output"),
@@ -919,8 +915,6 @@ class JARVISCLI:
             confirm = "confirm" in cmd_lower or "force" in cmd_lower
             clean_app = app.replace("confirm", "").replace("force", "").strip()
             return await self.tools.execute_tool("close_application", app_name=clean_app or app, confirm=confirm)
-        elif cmd_lower.startswith("/ultron"):
-            return await self.handle_ultron_command(cmd_raw)
         elif cmd_lower.startswith("/github"):
             return await self.handle_github_command(cmd_raw)
         else:
@@ -936,32 +930,17 @@ class JARVISCLI:
             title = sub[6:].strip()
             if not title:
                 return "Usage: /github issue <title>"
-            return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="create", repo="nivedjkr/jarvis-assistant", title=title)
+            return await self.tools.execute_tool("github_tool", command="issue", subcommand="create", repo="nivedjkr/jarvis-assistant", title=title)
         elif sub_lower in ["issues", "issue"]:
-            return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
+            return await self.tools.execute_tool("github_tool", command="issue", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
         elif sub_lower in ["prs", "pr", "pulls", "pullrequests"]:
-            return await self.tools.execute_tool("openclaw_github", command="pr", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
+            return await self.tools.execute_tool("github_tool", command="pr", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
         elif sub_lower in ["ci", "build", "runs", "workflow"]:
-            return await self.tools.execute_tool("openclaw_github", command="run", subcommand="list", repo="nivedjkr/jarvis-assistant", limit=3)
+            return await self.tools.execute_tool("github_tool", command="run", subcommand="list", repo="nivedjkr/jarvis-assistant", limit=3)
         elif sub_lower in ["repo", "info", "stats"]:
-            return await self.tools.execute_tool("openclaw_github", command="api", subcommand="repos/nivedjkr/jarvis-assistant", jq=".name,.description,.stargazerCount,.forks")
+            return await self.tools.execute_tool("github_tool", command="api", subcommand="repos/nivedjkr/jarvis-assistant", jq=".name,.description,.stargazerCount,.forks")
         else:
             return "Usage: /github [issues | prs | ci | repo | issue <title>]"
-
-    async def handle_ultron_command(self, cmd_raw: str) -> str:
-        """Handle /ultron commands - delegate to Ultron masterbrain."""
-        parts = cmd_raw.split(maxsplit=1)
-        if len(parts) < 2:
-            return "Usage: /ultron <task> - Delegate a task to Ultron masterbrain"
-        
-        task = parts[1].strip()
-        if not task:
-            return "Usage: /ultron <task> - Delegate a task to Ultron masterbrain"
-        
-        # Execute via direct Ultron / OpenClaw CLI subprocess
-        from jarvis.openclaw_bridge import call_ultron
-        res = call_ultron(f'agent --message "{task}"')
-        return f"Delegated to Ultron: {res}"
 
     async def handle_paste_command(self, cmd_raw: str) -> str:
         """Process pasted text directly from system clipboard as a prompt."""
@@ -1698,14 +1677,6 @@ class JARVISCLI:
         desk_msg = "WebSocket bridge listening on ws://127.0.0.1:8765/ws (Electron HUD active)" if desk_ok else "WebSocket bridge offline / waiting for Electron connection"
         desk_status = "[bold green]✓ OK[/bold green]" if desk_ok else "[bold yellow]! STANDBY[/bold yellow]"
         table.add_row("Electron Desktop HUD", desk_status, desk_msg)
-
-        # 10. Ultron / OpenClaw CLI Subsystem Check
-        from jarvis.openclaw_bridge import call_ultron
-        version_out = call_ultron("--version")
-        ultron_ok = not (version_out.startswith("Ultron error") or version_out.startswith("Bridge error") or version_out.startswith("Ultron timed out"))
-        ultron_status = "[bold green]✓ OK[/bold green]" if ultron_ok else "[bold yellow]⚠ OFFLINE[/bold yellow]"
-        ultron_msg = f"npx openclaw CLI operational ({version_out})" if ultron_ok else f"npx openclaw CLI check failed: {version_out}"
-        table.add_row("Ultron / OpenClaw CLI Bridge", ultron_status, ultron_msg)
 
         console.print(table)
         return "Self-diagnostic checks completed, sir."

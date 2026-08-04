@@ -298,6 +298,38 @@ class GitStatusTool(Tool):
             return f"Error running git commands: {str(e)}"
 
 
+class GitHubTool(Tool):
+    """Tool for GitHub operations via gh CLI directly (issues, PRs, CI, api)"""
+
+    def __init__(self, default_repo: str = "nivedjkr/jarvis-assistant"):
+        super().__init__("github_tool", "GitHub CLI for issues, PRs, CI status, and API queries")
+        self.default_repo = default_repo
+
+    async def execute(self, command: str = "issue", subcommand: str = "list", repo: str = "", **kwargs) -> str:
+        target_repo = repo or self.default_repo
+        cmd = ["gh", command]
+        if subcommand:
+            cmd.append(subcommand)
+        if command in ("issue", "pr", "run", "workflow") and target_repo:
+            cmd.extend(["--repo", target_repo])
+        for k, v in kwargs.items():
+            if v is not None and not k.startswith("_"):
+                flag = k.replace("_", "-")
+                if isinstance(v, bool):
+                    if v:
+                        cmd.append(f"--{flag}")
+                else:
+                    cmd.extend([f"--{flag}", str(v)])
+        try:
+            res = subprocess.run(" ".join(cmd), shell=True, capture_output=True, text=True, timeout=30)
+            if res.returncode == 0:
+                return res.stdout.strip() or "Command executed successfully"
+            else:
+                return f"GitHub CLI error: {res.stderr.strip() or res.stdout.strip()}"
+        except Exception as e:
+            return f"Error executing gh CLI: {str(e)}"
+
+
 class AppLaunchTool(Tool):
     """Tool to launch software applications with a tiered strategy and psutil verification."""
     
@@ -847,6 +879,7 @@ class ToolRegistry:
         self.register(DuckDuckGoSearchTool())
         self.register(PDFSummarizeTool())
         self.register(GitStatusTool())
+        self.register(GitHubTool())
         self.register(ProjectTool())
     
     def register(self, tool: Tool):

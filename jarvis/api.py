@@ -162,10 +162,10 @@ async def handle_voice_input(websocket: WebSocket, data: dict):
         data['message'] = voice_text
         await handle_chat_message(websocket, data)
 
-# Ultron bridge endpoints
+# External chat API endpoints
 @app.post("/chat")
 async def chat_endpoint(request: dict):
-    # Accepts: { "message": "...", "source": "ultron" }
+    # Accepts: { "message": "...", "source": "external" }
     # Processes through full JARVIS pipeline
     # Returns: { "response": "...", "tool_calls": [] }
     message = request.get('message', '')
@@ -267,7 +267,7 @@ async def full_status():
 
 @app.post("/push-alert")
 async def push_alert(request: dict):
-    # Ultron bridge calls this to push alerts to JARVIS GUI
+    # External system calls this to push alerts to JARVIS GUI
     # Accepts: { "message": "...", "severity": "info|warning|critical" }
     message = request.get('message', '')
     severity = request.get('severity', 'info')
@@ -289,7 +289,7 @@ async def push_alert(request: dict):
             await active_websocket.send_json({
                 'type': 'proactive_alert',
                 'text': message,
-                'alert_type': f'ultron_{severity}'
+                'alert_type': f'agent_{severity}'
             })
             return {"pushed": True}
         except Exception as e:
@@ -298,7 +298,7 @@ async def push_alert(request: dict):
     else:
         # GUI not connected — log it
         print(f"[ALERT] GUI offline, logged: {message}")
-        with open('ultron_alerts.log', 'a', encoding='utf-8') as f:
+        with open('agent_alerts.log', 'a', encoding='utf-8') as f:
             f.write(f"{message}\n")
         return {"pushed": False, "logged": True}
 

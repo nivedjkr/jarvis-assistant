@@ -68,8 +68,4 @@ jarvis/data/internship_seen.json
 jarvis/data/awareness_seen.json
 
 # Logs
-ultron_alerts.log
 *.log
-
-# OpenClaw
-~/.openclaw/workspace/
