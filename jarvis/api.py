@@ -329,6 +329,36 @@ async def get_watchlist():
     except Exception as e:
         return []
 
+@app.get("/vitals")
+async def get_vitals():
+    try:
+        import psutil
+        import time
+        from jarvis.system_monitor import SystemMonitor
+        monitor = SystemMonitor()
+        snapshot = monitor.get_system_snapshot()
+        
+        boot_time = psutil.boot_time()
+        uptime_seconds = int(time.time() - boot_time)
+        snapshot["uptime_seconds"] = uptime_seconds
+        
+        cli = get_cli_instance()
+        tx = getattr(cli.tools, 'last_transactions', [])
+        snapshot["commands_today"] = len(tx)
+        snapshot["tool_calls_today"] = len([t for t in tx if t.get('tool')])
+        return snapshot
+    except Exception as e:
+        return {
+            "cpu_pct": 0,
+            "ram_pct": 0,
+            "ram_used_gb": 0,
+            "ram_total_gb": 0,
+            "uptime_seconds": 0,
+            "commands_today": 0,
+            "tool_calls_today": 0
+        }
+
+
 def free_port(port: int = 8765):
     """Find and terminate any stale background process listening on the target port"""
     try:

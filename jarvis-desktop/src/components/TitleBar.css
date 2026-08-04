@@ -1,44 +1,93 @@
-.title-bar {
-  height: 32px;
-  background: #000;
+.command-title-bar {
+  height: 36px;
+  background: #0e0e13;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
-  -webkit-app-region: drag;
-  user-select: none;
-}
-
-.title-bar-label {
+  padding: 0 12px;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
-  letter-spacing: 2px;
-  color: #555555;
-  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: #e8e6e0;
+  -webkit-app-region: drag;
 }
 
-.title-bar-controls {
+.title-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  transition: background 0.3s ease;
+}
+
+.status-dot.online {
+  background: #4ade80;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
+}
+
+.status-dot.offline {
+  background: #f0b429;
+  box-shadow: 0 0 8px rgba(240, 180, 41, 0.4);
+}
+
+.brand-mark {
+  font-weight: 600;
+  color: #e8e6e0;
+  text-transform: uppercase;
+}
+
+.title-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   -webkit-app-region: no-drag;
 }
 
-.title-btn {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #222222;
+.session-id {
+  color: #6b6b74;
+  font-size: 10px;
+}
+
+.live-clock {
+  color: #a78bfa;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.title-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.control-btn {
+  background: transparent;
   border: none;
+  color: #6b6b74;
+  font-family: inherit;
+  font-size: 11px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+  border-radius: 3px;
+  transition: all 0.2s ease;
 }
 
-.title-btn.minimize:hover {
-  background: #00D9FF;
-  box-shadow: 0 0 8px rgba(0, 217, 255, 0.6);
+.control-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8e6e0;
 }
 
-.title-btn.close:hover {
-  background: #ff4d4d;
-  box-shadow: 0 0 8px rgba(255, 77, 77, 0.6);
+.control-btn.close:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
 }

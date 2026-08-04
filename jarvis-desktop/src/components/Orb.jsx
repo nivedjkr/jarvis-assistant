@@ -1,12 +1,11 @@
-import { useEffect, useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 
 export default function Orb({ state = 'idle' }) {
   const canvasRef = useRef(null)
   const animRef = useRef(null)
-  const nodesRef = useRef([])
   const stateRef = useRef(state)
-  
-  // Update stateRef when state prop changes
+  const pointsRef = useRef([])
+
   useEffect(() => {
     stateRef.current = state
   }, [state])
@@ -16,260 +15,212 @@ export default function Orb({ state = 'idle' }) {
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    
-    // Canvas size
-    const W = canvas.width = 400
-    const H = canvas.height = 400
+
+    const W = (canvas.width = 300)
+    const H = (canvas.height = 300)
     const CX = W / 2
     const CY = H / 2
-    
-    // State configs
-    const configs = {
-      idle: {
-        nodeColor: '#00D9FF',
-        lineColor: '#00D9FF',
-        nodeOpacity: 0.25,
-        lineOpacity: 0.08,
-        speed: 0.15,
-        pulseSpeed: 0.008,
-        connectionDist: 80,
-        nodeCount: 45,
-        nodeSize: 2
-      },
-      listening: {
-        nodeColor: '#00D9FF',
-        lineColor: '#00FFFF',
-        nodeOpacity: 0.8,
-        lineOpacity: 0.3,
-        speed: 0.4,
-        pulseSpeed: 0.025,
-        connectionDist: 100,
-        nodeCount: 45,
-        nodeSize: 3
-      },
-      thinking: {
-        nodeColor: '#6644FF',
-        lineColor: '#4422FF',
-        nodeOpacity: 0.6,
-        lineOpacity: 0.2,
-        speed: 0.25,
-        pulseSpeed: 0.015,
-        connectionDist: 90,
-        nodeCount: 45,
-        nodeSize: 2.5
-      },
-      speaking: {
-        nodeColor: '#00FFFF',
-        lineColor: '#FFFFFF',
-        nodeOpacity: 1.0,
-        lineOpacity: 0.4,
-        speed: 0.6,
-        pulseSpeed: 0.04,
-        connectionDist: 120,
-        nodeCount: 45,
-        nodeSize: 3.5
+
+    // Generate ~900 3D points on a sphere using Fibonacci sphere algorithm
+    const count = 900
+    const phi = Math.PI * (3 - Math.sqrt(5))
+    pointsRef.current = Array.from({ length: count }, (_, i) => {
+      const y = 1 - (i / (count - 1)) * 2
+      const r = Math.sqrt(1 - y * y)
+      const theta = phi * i
+      return {
+        x: Math.cos(theta) * r,
+        y: y,
+        z: Math.sin(theta) * r,
+        phase: Math.random() * Math.PI * 2
       }
-    }
-    
-    // Initialize nodes
-    const initNodes = (count) => {
-      nodesRef.current = Array.from({ length: count }, (_, i) => {
-        // Distribute nodes — some clustered near center, 
-        // some spread to edges (like Obsidian graph)
-        const angle = Math.random() * Math.PI * 2
-        const radius = Math.random() < 0.3 
-          ? Math.random() * 60   // 30% near center
-          : 60 + Math.random() * 130  // 70% spread out
-        return {
-          x: CX + Math.cos(angle) * radius,
-          y: CY + Math.sin(angle) * radius,
-          vx: (Math.random() - 0.5) * 0.5,
-          vy: (Math.random() - 0.5) * 0.5,
-          radius: 1.5 + Math.random() * 2,
-          pulseOffset: Math.random() * Math.PI * 2,
-          // Some nodes are "hubs" — bigger, more connected
-          isHub: Math.random() < 0.1
-        }
-      })
-    }
-    
-    initNodes(45)
+    })
+
+    let rotX = 0
+    let rotY = 0
     let time = 0
-    
+
     const draw = () => {
-      const cfg = configs[stateRef.current] || configs.idle
-      time += cfg.pulseSpeed
-      
-      // Clear with slight trail effect for glow
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.15)'
-      ctx.fillRect(0, 0, W, H)
-      
-      // Update node positions
-      nodesRef.current.forEach(node => {
-        node.x += node.vx * cfg.speed
-        node.y += node.vy * cfg.speed
-        
-        // Soft boundary — nodes drift back toward canvas
-        const margin = 30
-        if (node.x < margin) node.vx += 0.05
-        if (node.x > W - margin) node.vx -= 0.05
-        if (node.y < margin) node.vy += 0.05
-        if (node.y > H - margin) node.vy -= 0.05
-        
-        // Gentle center gravity for idle state
-        if (stateRef.current === 'idle') {
-          node.vx += (CX - node.x) * 0.0001
-          node.vy += (CY - node.y) * 0.0001
+      const currentState = stateRef.current || 'idle'
+      time += 0.02
+
+      // Configs per state
+      const configs = {
+        idle: {
+          baseColor: '#a78bfa',
+          rotSpeedX: 0.003,
+          rotSpeedY: 0.006,
+          radius: 90,
+          jitter: 0,
+          particleSize: 1.4,
+          glowAlpha: 0.15
+        },
+        listening: {
+          baseColor: '#00D9FF',
+          rotSpeedX: 0.008,
+          rotSpeedY: 0.014,
+          radius: 105,
+          jitter: 0.02,
+          particleSize: 1.8,
+          glowAlpha: 0.3
+        },
+        thinking: {
+          baseColor: '#6644FF',
+          rotSpeedX: 0.015,
+          rotSpeedY: 0.025,
+          radius: 85,
+          jitter: 0.08,
+          particleSize: 1.5,
+          glowAlpha: 0.25
+        },
+        speaking: {
+          baseColor: '#d946a8',
+          rotSpeedX: 0.01,
+          rotSpeedY: 0.018,
+          radius: 98,
+          jitter: 0.03,
+          particleSize: 2.0,
+          glowAlpha: 0.4
         }
-        
-        // Speed limiting
-        const maxSpeed = 0.8
-        const speed = Math.sqrt(
-          node.vx * node.vx + node.vy * node.vy
-        )
-        if (speed > maxSpeed) {
-          node.vx = (node.vx / speed) * maxSpeed
-          node.vy = (node.vy / speed) * maxSpeed
+      }
+
+      const cfg = configs[currentState] || configs.idle
+
+      rotX += cfg.rotSpeedX
+      rotY += cfg.rotSpeedY
+
+      ctx.fillStyle = '#08080b'
+      ctx.fillRect(0, 0, W, H)
+
+      const fov = 260
+      const points = pointsRef.current
+
+      // Calculate 3D transformation for points
+      const transformed = points.map(pt => {
+        let px = pt.x
+        let py = pt.y
+        let pz = pt.z
+
+        // Add state-specific jitter
+        if (cfg.jitter > 0) {
+          px += (Math.random() - 0.5) * cfg.jitter
+          py += (Math.random() - 0.5) * cfg.jitter
+          pz += (Math.random() - 0.5) * cfg.jitter
+        }
+
+        // Breathing effect in idle
+        let currentRadius = cfg.radius
+        if (currentState === 'idle') {
+          currentRadius += Math.sin(time * 1.5 + pt.phase) * 3
+        }
+
+        // Y-axis rotation
+        const x1 = px * Math.cos(rotY) + pz * Math.sin(rotY)
+        const z1 = -px * Math.sin(rotY) + pz * Math.cos(rotY)
+        const y1 = py
+
+        // X-axis rotation
+        const y2 = y1 * Math.cos(rotX) - z1 * Math.sin(rotX)
+        const z2 = y1 * Math.sin(rotX) + z1 * Math.cos(rotX)
+        const x2 = x1
+
+        // Perspective projection
+        const scale = fov / (fov + z2 * currentRadius)
+        const screenX = CX + x2 * currentRadius * scale
+        const screenY = CY + y2 * currentRadius * scale
+
+        return {
+          x: screenX,
+          y: screenY,
+          z: z2,
+          scale: scale,
+          rawY: y2
         }
       })
-      
-      // Draw connections
-      const nodes = nodesRef.current
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const dx = nodes[i].x - nodes[j].x
-          const dy = nodes[i].y - nodes[j].y
-          const dist = Math.sqrt(dx*dx + dy*dy)
-          
-          if (dist < cfg.connectionDist) {
-            // Closer = more opaque line
-            const alpha = (1 - dist / cfg.connectionDist) 
-                          * cfg.lineOpacity
-            
-            // Pulse the line opacity
-            const pulse = Math.sin(
-              time + nodes[i].pulseOffset
-            ) * 0.5 + 0.5
-            
-            ctx.beginPath()
-            ctx.moveTo(nodes[i].x, nodes[i].y)
-            ctx.lineTo(nodes[j].x, nodes[j].y)
-            ctx.strokeStyle = cfg.lineColor
-            ctx.globalAlpha = alpha * (0.5 + pulse * 0.5)
-            ctx.lineWidth = 0.5
-            ctx.stroke()
+
+      // Sort points back to front for realistic depth transparency rendering
+      transformed.sort((a, b) => a.z - b.z)
+
+      // Center sphere atmospheric glow
+      const centerGlow = ctx.createRadialGradient(CX, CY, 10, CX, CY, cfg.radius * 1.2)
+      centerGlow.addColorStop(0, cfg.baseColor)
+      centerGlow.addColorStop(1, 'transparent')
+      ctx.globalAlpha = cfg.glowAlpha
+      ctx.fillStyle = centerGlow
+      ctx.beginPath()
+      ctx.arc(CX, CY, cfg.radius * 1.2, 0, Math.PI * 2)
+      ctx.fill()
+
+      // Render 3D sphere particles
+      transformed.forEach(p => {
+        // Map depth to opacity (front = bright, back = dim)
+        const alpha = Math.max(0.1, (p.z + 1) / 2)
+
+        let color = cfg.baseColor
+        let pSize = cfg.particleSize * p.scale
+
+        // Speaking state: ripple pulse wave moving along sphere latitude
+        if (currentState === 'speaking') {
+          const wave = Math.sin(time * 6 - p.rawY * 5)
+          if (wave > 0.4) {
+            color = '#FFFFFF'
+            pSize *= 1.4
           }
         }
-      }
-      
-      // Draw nodes
-      nodes.forEach(node => {
-        const pulse = Math.sin(time + node.pulseOffset)
-        const size = node.isHub 
-          ? (node.radius * 2.5) + pulse * 1.5
-          : node.radius + pulse * 0.8
-        
-        // Speaking: ripple from center
-        let rippleBoost = 1
-        if (stateRef.current === 'speaking') {
-          const distFromCenter = Math.sqrt(
-            Math.pow(node.x - CX, 2) + 
-            Math.pow(node.y - CY, 2)
-          )
-          rippleBoost = 1 + Math.sin(
-            time * 3 - distFromCenter * 0.05
-          ) * 0.5
-        }
-        
-        // Outer glow
-        ctx.globalAlpha = cfg.nodeOpacity * 0.3 * rippleBoost
+
+        ctx.globalAlpha = alpha * 0.9
+        ctx.fillStyle = color
         ctx.beginPath()
-        ctx.arc(node.x, node.y, size * 3, 0, Math.PI * 2)
-        ctx.fillStyle = cfg.nodeColor
-        ctx.fill()
-        
-        // Inner glow
-        ctx.globalAlpha = cfg.nodeOpacity * 0.6 * rippleBoost
-        ctx.beginPath()
-        ctx.arc(node.x, node.y, size * 1.5, 0, Math.PI * 2)
-        ctx.fillStyle = cfg.nodeColor
-        ctx.fill()
-        
-        // Core dot
-        ctx.globalAlpha = cfg.nodeOpacity * rippleBoost
-        ctx.beginPath()
-        ctx.arc(node.x, node.y, size, 0, Math.PI * 2)
-        ctx.fillStyle = cfg.nodeColor
+        ctx.arc(p.x, p.y, Math.max(0.5, pSize), 0, Math.PI * 2)
         ctx.fill()
       })
-      
-      // Center hub — brightest node, always present
-      const centerPulse = Math.sin(time * 1.5) * 0.5 + 0.5
-      const centerSize = 4 + centerPulse * 3
-      
-      // Center glow rings
-      ctx.globalAlpha = cfg.nodeOpacity * 0.15
-      ctx.beginPath()
-      ctx.arc(CX, CY, centerSize * 4, 0, Math.PI * 2)
-      ctx.fillStyle = cfg.nodeColor
-      ctx.fill()
-      
-      ctx.globalAlpha = cfg.nodeOpacity * 0.4
-      ctx.beginPath()
-      ctx.arc(CX, CY, centerSize * 2, 0, Math.PI * 2)
-      ctx.fillStyle = cfg.nodeColor
-      ctx.fill()
-      
-      ctx.globalAlpha = 1
-      ctx.beginPath()
-      ctx.arc(CX, CY, centerSize, 0, Math.PI * 2)
-      ctx.fillStyle = cfg.nodeColor
-      ctx.fill()
-      
-      ctx.globalAlpha = 1
+
+      ctx.globalAlpha = 1.0
       animRef.current = requestAnimationFrame(draw)
     }
-    
+
     draw()
-    
+
     return () => {
       if (animRef.current) {
         cancelAnimationFrame(animRef.current)
       }
     }
-  }, []) // Only run once — state changes via stateRef
-  
+  }, [])
+
   const statusText = {
     idle: 'IDLE',
     listening: 'LISTENING . . .',
     thinking: 'PROCESSING',
     speaking: 'SPEAKING'
   }
-  
+
+  const statusColors = {
+    idle: '#6b6b74',
+    listening: '#00D9FF',
+    thinking: '#6644FF',
+    speaking: '#d946a8'
+  }
+
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: '1rem'
-    }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
       <canvas
         ref={canvasRef}
-        width={400}
-        height={400}
-        style={{
-          width: '280px',
-          height: '280px'
-        }}
+        width={300}
+        height={300}
+        style={{ width: '220px', height: '220px' }}
       />
-      <div style={{
-        fontSize: '11px',
-        letterSpacing: '0.3em',
-        color: state === 'idle' ? '#0d2e2e' : '#00D9FF',
-        fontWeight: 400,
-        textTransform: 'uppercase',
-        transition: 'color 0.5s ease'
-      }}>
+      <div
+        style={{
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: '10px',
+          letterSpacing: '0.2em',
+          color: statusColors[state] || '#6b6b74',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          transition: 'color 0.4s ease'
+        }}
+      >
         {statusText[state] || 'IDLE'}
       </div>
     </div>

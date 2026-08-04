@@ -1,0 +1,82 @@
+.directives-panel {
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
+  background: #0e0e13;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 14px;
+  gap: 16px;
+  font-family: 'JetBrains Mono', monospace;
+  box-sizing: border-box;
+}
+
+.directives-header {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: #6b6b74;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 6px;
+}
+
+.directives-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.no-directives {
+  font-size: 10px;
+  color: #6b6b74;
+  letter-spacing: 0.1em;
+  font-style: italic;
+  margin-top: 10px;
+}
+
+.directive-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #e8e6e0;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.directive-item:hover {
+  border-color: rgba(167, 139, 250, 0.25);
+  background: rgba(167, 139, 250, 0.04);
+}
+
+.directive-marker {
+  color: #a78bfa;
+  font-size: 10px;
+  margin-top: 1px;
+}
+
+.directive-item.completed {
+  opacity: 0.5;
+}
+
+.directive-item.completed .directive-marker {
+  color: #6b6b74;
+}
+
+.directive-item.completed .directive-text {
+  text-decoration: line-through;
+  color: #6b6b74;
+}
+
+.directive-text {
+  word-break: break-word;
+}

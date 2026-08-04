@@ -12,8 +12,9 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1080,
     height: 720,
-    backgroundColor: '#000000',
+    backgroundColor: '#08080b',
     frame: false,
+
     titleBarStyle: 'hidden',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -137,6 +138,8 @@ ipcMain.handle('send-slash-command', (event, command) => {
 ipcMain.handle('get-projects', () => fetchJson('http://127.0.0.1:8765/projects'))
 ipcMain.handle('get-reminders', () => fetchJson('http://127.0.0.1:8765/reminders'))
 ipcMain.handle('get-watchlist', () => fetchJson('http://127.0.0.1:8765/watchlist'))
+ipcMain.handle('get-vitals', () => fetchJson('http://127.0.0.1:8765/vitals'))
+
 
 ipcMain.handle('window-minimize', () => mainWindow && mainWindow.minimize())
 ipcMain.handle('window-close', () => {

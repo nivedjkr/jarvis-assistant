@@ -1,7 +1,22 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import './TitleBar.css'
 
-export default function TitleBar({ onToggleSidebar, isSidebarOpen, isConnected = true }) {
+export default function TitleBar({ isConnected = true }) {
+  const [timeStr, setTimeStr] = useState('')
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date()
+      const hours = String(now.getHours()).padStart(2, '0')
+      const minutes = String(now.getMinutes()).padStart(2, '0')
+      const seconds = String(now.getSeconds()).padStart(2, '0')
+      setTimeStr(`${hours}:${minutes}:${seconds}`)
+    }
+    updateTime()
+    const timer = setInterval(updateTime, 1000)
+    return () => clearInterval(timer)
+  }, [])
+
   const handleMinimize = () => {
     if (window.jarvis?.minimize) {
       window.jarvis.minimize()
@@ -15,50 +30,19 @@ export default function TitleBar({ onToggleSidebar, isSidebarOpen, isConnected =
   }
 
   return (
-    <div className="title-bar">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <div className="title-bar-label">J.A.R.V.I.S.</div>
-        <div style={{
-          fontSize: '9px',
-          padding: '2px 6px',
-          borderRadius: '4px',
-          letterSpacing: '1px',
-          background: isConnected ? 'rgba(0, 217, 255, 0.1)' : 'rgba(255, 68, 68, 0.15)',
-          border: isConnected ? '0.5px solid #0d3a3a' : '0.5px solid #ff4444',
-          color: isConnected ? '#00D9FF' : '#ff6666'
-        }}>
-          {isConnected ? 'ONLINE' : 'RECONNECTING...'}
-        </div>
-        <button
-          onClick={onToggleSidebar}
-          style={{
-            background: isSidebarOpen ? 'rgba(0,217,255,0.15)' : 'transparent',
-            border: '0.5px solid #0d3a3a',
-            color: isSidebarOpen ? '#00D9FF' : '#555',
-            fontSize: '9px',
-            padding: '2px 6px',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            WebkitAppRegion: 'no-drag',
-            letterSpacing: '1px'
-          }}
-          title="Toggle Sidebar (Tab / S)"
-        >
-          TELEMETRY {isSidebarOpen ? '◄' : '►'}
-        </button>
+    <div className="command-title-bar">
+      <div className="title-left">
+        <div className={`status-dot ${isConnected ? 'online' : 'offline'}`} />
+        <span className="brand-mark">J.A.R.V.I.S. // COMMAND DECK</span>
       </div>
 
-      <div className="title-bar-controls">
-        <button
-          className="title-btn minimize"
-          onClick={handleMinimize}
-          title="Minimize"
-        />
-        <button
-          className="title-btn close"
-          onClick={handleClose}
-          title="Close"
-        />
+      <div className="title-right">
+        <span className="session-id">SESSION: #JVS-887B</span>
+        <span className="live-clock">{timeStr || '00:00:00'}</span>
+        <div className="title-controls">
+          <button className="control-btn" onClick={handleMinimize} title="Minimize">—</button>
+          <button className="control-btn close" onClick={handleClose} title="Close">✕</button>
+        </div>
       </div>
     </div>
   )

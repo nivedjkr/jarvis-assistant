@@ -26,15 +26,18 @@ export default function InputBar({ onSend }) {
   }
 
   return (
-    <div className="input-bar-container">
+    <div className="terminal-input-bar">
+      <span className="prompt-symbol">&gt;</span>
       <input
         type="text"
-        className="input-bar-field"
-        placeholder="Ask JARVIS or type /help, /profile, /projects..."
+        className="terminal-input-field"
+        placeholder="Type a command or ask JARVIS..."
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
+        autoFocus
       />
+      <span className="send-hint">ENTER TO SEND</span>
     </div>
   )
 }

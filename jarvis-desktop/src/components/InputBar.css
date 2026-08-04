@@ -1,27 +1,47 @@
-.input-bar-container {
-  padding: 16px 24px 20px 24px;
-  background: #000;
-  width: 100%;
+.terminal-input-bar {
+  height: 52px;
+  min-height: 52px;
+  max-height: 52px;
+  background: #0e0e13;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  box-sizing: border-box;
 }
 
-.input-bar-field {
-  width: 100%;
-  background: #0a0a0a;
-  border: 0.5px solid #0d3a3a;
-  border-radius: 8px;
-  padding: 12px 16px;
-  color: #ffffff;
-  font-size: 13px;
+.prompt-symbol {
+  font-size: 16px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #a78bfa 0%, #d946a8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  user-select: none;
+}
+
+.terminal-input-field {
+  flex: 1;
+  background: transparent;
+  border: none;
   outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  font-family: -apple-system, 'Inter', sans-serif;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: #e8e6e0;
+  letter-spacing: 0.03em;
 }
 
-.input-bar-field::placeholder {
-  color: #0d3a3a;
+.terminal-input-field::placeholder {
+  color: #6b6b74;
+  font-size: 11px;
 }
 
-.input-bar-field:focus {
-  border-color: #00D9FF;
-  box-shadow: 0 0 20px rgba(0, 217, 255, 0.08);
+.send-hint {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: #6b6b74;
+  font-weight: 500;
+  user-select: none;
+  white-space: nowrap;
 }

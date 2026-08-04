@@ -13,36 +13,30 @@ export default function ChatLog({ messages = [] }) {
       {messages.map((msg, index) => {
         const isAlert = msg.isAlert
         const alertType = msg.alertType ? ` [${msg.alertType.toUpperCase()}]` : ''
-        const borderColor = isAlert ? '#00D9FF' : undefined
         
+        let headerLabel = 'USER'
+        if (isAlert) {
+          headerLabel = `PROACTIVE ALERT${alertType}`
+        } else if (msg.role === 'jarvis') {
+          headerLabel = 'JARVIS'
+        }
+
         return (
           <div
             key={index}
-            className={`chat-message ${msg.role}`}
-            style={isAlert ? { borderLeft: `2px solid ${borderColor}`, paddingLeft: '10px' } : {}}
+            className={`chat-message ${msg.role} ${isAlert ? 'alert-msg' : ''}`}
           >
             <div className="chat-message-header">
-              {isAlert
-                ? `⚡ PROACTIVE ALERT${alertType}`
-                : msg.role === 'jarvis' ? 'JARVIS' : 'You'
-              } · {msg.timestamp}
+              <span className="who-label">{headerLabel}</span>
+              <span className="divider-slash">//</span>
+              <span className="time-label">{msg.timestamp}</span>
             </div>
 
-            {/* Display tool execution steps if present */}
             {msg.toolCalls && msg.toolCalls.length > 0 && (
-              <div style={{ marginBottom: '6px' }}>
+              <div className="tool-calls-container">
                 {msg.toolCalls.map((tc, i) => (
-                  <div key={i} style={{
-                    fontSize: '11px',
-                    fontFamily: 'Consolas, monospace',
-                    color: 'rgba(0, 217, 255, 0.85)',
-                    background: 'rgba(0, 217, 255, 0.05)',
-                    padding: '3px 8px',
-                    borderRadius: '4px',
-                    margin: '2px 0',
-                    border: '1px solid rgba(0, 217, 255, 0.15)'
-                  }}>
-                    ⚙️ Executed tool: <strong>{tc.name}</strong>
+                  <div key={i} className="tool-call-badge">
+                    <span className="tool-icon">⚡</span> TOOL EXECUTED: <strong>{tc.name}</strong>
                   </div>
                 ))}
               </div>

@@ -3,11 +3,11 @@ import TitleBar from './components/TitleBar'
 import Orb from './components/Orb'
 import ChatLog from './components/ChatLog'
 import InputBar from './components/InputBar'
-import Sidebar from './components/Sidebar'
+import SystemVitals from './components/SystemVitals'
+import DirectivesPanel from './components/DirectivesPanel'
 
 export default function App() {
   const [orbState, setOrbState] = useState('idle')
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isConnected, setIsConnected] = useState(true)
 
   const activeUtteranceRef = useRef(null)
@@ -70,11 +70,10 @@ export default function App() {
       return
     }
 
-    // Brief timeout to avoid Chromium cancel race condition
     setTimeout(() => {
       try {
         const utterance = new SpeechSynthesisUtterance(cleanText)
-        activeUtteranceRef.current = utterance // Prevent GC
+        activeUtteranceRef.current = utterance
 
         const voices = window.speechSynthesis.getVoices()
         const preferredVoice = voices.find(v => 
@@ -104,7 +103,6 @@ export default function App() {
           stopSpeech()
         }
 
-        // Keep-alive timer for Chromium long speech bug
         speechKeepAliveRef.current = setInterval(() => {
           if ('speechSynthesis' in window && window.speechSynthesis.speaking) {
             if (window.speechSynthesis.paused) {
@@ -131,7 +129,6 @@ export default function App() {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.onvoiceschanged = handleVoicesChanged
       handleVoicesChanged()
-      // Speak initial greeting after voices are ready
       setTimeout(() => {
         speakResponse(messages[0]?.text)
       }, 300)
@@ -192,23 +189,9 @@ export default function App() {
       })
     }
 
-    // Keyboard shortcut to toggle sidebar (Tab or S when not focused on input)
-    const handleKeyDown = (e) => {
-      const isInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA'
-      if (!isInput) {
-        if (e.key === 'Tab' || e.key === 's' || e.key === 'S') {
-          e.preventDefault()
-          setIsSidebarOpen(prev => !prev)
-        }
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-
     return () => {
       clearPendingTimeout()
       stopSpeech()
-      window.removeEventListener('keydown', handleKeyDown)
       if ('speechSynthesis' in window) {
         window.speechSynthesis.onvoiceschanged = null
       }
@@ -224,7 +207,6 @@ export default function App() {
 
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
     
-    // Quick handle for local mute/stop commands
     if (cleanInput.toLowerCase() === '/mute' || cleanInput.toLowerCase() === '/stop') {
       stopSpeech()
       setMessages(prev => [...prev, {
@@ -272,36 +254,44 @@ export default function App() {
       flexDirection: 'column',
       height: '100vh',
       width: '100vw',
-      background: '#000000',
+      background: '#08080b',
       overflow: 'hidden'
     }}>
-      <TitleBar
-        onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
-        isSidebarOpen={isSidebarOpen}
-        isConnected={isConnected}
-      />
+      <TitleBar isConnected={isConnected} />
       
-      <div style={{ display: 'flex', flex: 1, height: 'calc(100vh - 32px)', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          <div style={{ 
-            display: 'flex', 
+      <div style={{
+        display: 'flex',
+        flex: 1,
+        height: 'calc(100vh - 88px)',
+        overflow: 'hidden'
+      }}>
+        <SystemVitals isConnected={isConnected} />
+
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          overflow: 'hidden',
+          borderLeft: '1px solid rgba(255, 255, 255, 0.07)',
+          borderRight: '1px solid rgba(255, 255, 255, 0.07)',
+          background: '#08080b'
+        }}>
+          <div style={{
+            display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',
-            margin: '0 auto',
-            flex: 1
+            padding: '12px 0 4px 0'
           }}>
             <Orb state={orbState} />
           </div>
 
           <ChatLog messages={messages} />
-          <InputBar onSend={handleSendMessage} />
         </div>
-        
-        <Sidebar
-          isOpen={isSidebarOpen}
-          onClose={() => setIsSidebarOpen(false)}
-        />
+
+        <DirectivesPanel isConnected={isConnected} />
       </div>
+
+      <InputBar onSend={handleSendMessage} />
     </div>
   )
 }
