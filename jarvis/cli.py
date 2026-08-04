@@ -217,11 +217,14 @@ class JARVISCLI:
             "DEVELOPER": [
                 ("/explain-error [error]", "Explain traceback error and fix steps"),
                 ("\"what's my git status\"", "Show real git status, branch, and recent commit"),
-                ("/github issues", "List open issues"),
-                ("/github prs", "List open PRs"),
-                ("/github ci", "Check CI status"),
-                ("/github repo", "Show repo info"),
-                ("/github issue <title>", "Create new issue")
+                ("/github issues [open|closed]", "List repository issues"),
+                ("/github issue create <title>", "Create a new GitHub issue"),
+                ("/github issue close <number>", "Close an issue by number"),
+                ("/github prs", "List open pull requests"),
+                ("/github ci", "Check CI/Actions status"),
+                ("/github repo", "View repo info"),
+                ("/github repos", "List all your repositories"),
+                ("/github notifications", "Check GitHub notifications")
             ],
             "IDEAS & NOTES": [
                 ("/idea <text>", "Save a business/project idea"),
@@ -921,26 +924,37 @@ class JARVISCLI:
             return f"Unknown command: {command}. Type /help for available commands."
 
     async def handle_github_command(self, cmd_raw: str) -> str:
-        """Handle /github [issues|prs|ci|repo|issue <title>] commands"""
+        """Handle /github [issues|prs|ci|repo|repos|notifications|issue create|issue close] commands"""
         parts = cmd_raw.strip().split(maxsplit=1)
         sub = parts[1].strip() if len(parts) > 1 else "issues"
         sub_lower = sub.lower()
 
-        if sub_lower.startswith("issue "):
-            title = sub[6:].strip()
+        if sub_lower.startswith("issue create "):
+            title = sub[13:].strip()
             if not title:
-                return "Usage: /github issue <title>"
-            return await self.tools.execute_tool("github_tool", command="issue", subcommand="create", repo="nivedjkr/jarvis-assistant", title=title)
-        elif sub_lower in ["issues", "issue"]:
-            return await self.tools.execute_tool("github_tool", command="issue", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
-        elif sub_lower in ["prs", "pr", "pulls", "pullrequests"]:
-            return await self.tools.execute_tool("github_tool", command="pr", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
-        elif sub_lower in ["ci", "build", "runs", "workflow"]:
-            return await self.tools.execute_tool("github_tool", command="run", subcommand="list", repo="nivedjkr/jarvis-assistant", limit=3)
+                return "Usage: /github issue create <title>"
+            return await self.tools.execute_tool("github_issues", action="create", title=title)
+        elif sub_lower.startswith("issue close "):
+            try:
+                num = int(sub[12:].strip().lstrip("#"))
+                return await self.tools.execute_tool("github_issues", action="close", number=num)
+            except ValueError:
+                return "Usage: /github issue close <number>"
+        elif sub_lower.startswith("issues"):
+            state = "closed" if "closed" in sub_lower else ("all" if "all" in sub_lower else "open")
+            return await self.tools.execute_tool("github_issues", action="list", state=state)
+        elif sub_lower in ["prs", "pr", "pulls"]:
+            return await self.tools.execute_tool("github_prs", action="list")
+        elif sub_lower in ["ci", "build", "runs"]:
+            return await self.tools.execute_tool("github_ci", action="status")
+        elif sub_lower in ["repos", "list repos"]:
+            return await self.tools.execute_tool("github_repo", action="list")
         elif sub_lower in ["repo", "info", "stats"]:
-            return await self.tools.execute_tool("github_tool", command="api", subcommand="repos/nivedjkr/jarvis-assistant", jq=".name,.description,.stargazerCount,.forks")
+            return await self.tools.execute_tool("github_repo", action="info")
+        elif sub_lower in ["notifications", "alerts"]:
+            return await self.tools.execute_tool("github_notifications")
         else:
-            return "Usage: /github [issues | prs | ci | repo | issue <title>]"
+            return "Usage: /github [issues | issue create <title> | issue close <number> | prs | ci | repo | repos | notifications]"
 
     async def handle_paste_command(self, cmd_raw: str) -> str:
         """Process pasted text directly from system clipboard as a prompt."""
@@ -2155,26 +2169,35 @@ class JARVISCLI:
                 return f"Note saved: {note_text}"
 
         # GitHub natural language routing
-        elif any(p in input_lower for p in ["my github", "github status", "show my repos", "list my repos", "list my repositories", "show my repositories"]):
-            return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
+        elif any(p in input_lower for p in ["show my repos", "list repositories", "list my repos", "my repos", "my github repos"]):
+            return await self.tools.execute_tool("github_repo", action="list")
         
-        elif any(p in input_lower for p in ["open issues", "what issues do i have", "show my open issues", "list open issues"]):
-            return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
+        elif any(p in input_lower for p in ["open issues", "what issues do i have", "show my open issues", "show open issues", "list open issues"]):
+            return await self.tools.execute_tool("github_issues", action="list", state="open")
         
-        elif any(p in input_lower for p in ["show my prs", "any pull requests", "show pull requests", "list pull requests", "open prs"]):
-            return await self.tools.execute_tool("openclaw_github", command="pr", subcommand="list", repo="nivedjkr/jarvis-assistant", state="open")
+        elif any(p in input_lower for p in ["show prs", "any pull requests", "show pull requests", "list pull requests", "open prs"]):
+            return await self.tools.execute_tool("github_prs", action="list", state="open")
         
-        elif any(p in input_lower for p in ["did ci pass", "check build status", "ci status", "check ci"]):
-            return await self.tools.execute_tool("openclaw_github", command="run", subcommand="list", repo="nivedjkr/jarvis-assistant", limit=3)
+        elif any(p in input_lower for p in ["did ci pass", "check build", "build status", "did my last build pass", "ci status", "check ci"]):
+            return await self.tools.execute_tool("github_ci", action="status")
         
         elif input_lower.startswith("create issue:") or input_lower.startswith("create issue "):
             title = re.sub(r'^create\s+issue:?\s*', '', user_input, flags=re.I).strip()
             if title:
-                return await self.tools.execute_tool("openclaw_github", command="issue", subcommand="create", repo="nivedjkr/jarvis-assistant", title=title)
+                return await self.tools.execute_tool("github_issues", action="create", title=title)
             return "Usage: create issue: <title>"
+
+        elif "close issue" in input_lower:
+            m = re.search(r'close\s+issue\s+#?(\d+)', input_lower)
+            if m:
+                num = int(m.group(1))
+                return await self.tools.execute_tool("github_issues", action="close", number=num)
+
+        elif any(p in input_lower for p in ["github notifications", "any github alerts", "github alerts"]):
+            return await self.tools.execute_tool("github_notifications")
         
-        elif any(p in input_lower for p in ["show repo info", "jarvis-assistant stats", "repo stats", "repo info"]):
-            return await self.tools.execute_tool("openclaw_github", command="api", subcommand="repos/nivedjkr/jarvis-assistant", jq=".name,.description,.stargazerCount,.forks")
+        elif any(p in input_lower for p in ["repo info", "jarvis-assistant stats", "repo stats", "show repo info"]):
+            return await self.tools.execute_tool("github_repo", action="info")
         
         return None
     

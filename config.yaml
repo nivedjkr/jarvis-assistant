@@ -56,6 +56,6 @@ location:
 # GitHub Settings
 github:
   default_repo: "nivedjkr/jarvis-assistant"
-
-
-
+  watch_repos:
+    - "nivedjkr/jarvis-assistant"
+  check_interval_minutes: 30

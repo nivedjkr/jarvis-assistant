@@ -1018,7 +1018,7 @@ class ProactiveMonitor:
             console.print(f"[dim yellow]Project monitor check warning: {e}[/dim yellow]")
 
     def _check_github(self):
-        """Check GitHub for new issues, failed CI runs, and new PRs every 30 minutes (1800s)"""
+        """Check GitHub for new issues, CI status changes, and new PRs"""
         now_ts = time.time()
         if now_ts - self._last_github_check < 1800.0:
             return
@@ -1026,84 +1026,73 @@ class ProactiveMonitor:
 
         try:
             import json
-            import subprocess
-            from pathlib import Path
-
+            from jarvis.github_tool import GitHubTool
+            gh = GitHubTool()
             seen_file = Path("jarvis/data/github_seen.json")
             seen_file.parent.mkdir(parents=True, exist_ok=True)
 
-            first_run = not seen_file.exists()
-            seen_data = {"seen_issues": [], "seen_prs": [], "seen_runs": []}
-            if not first_run:
+            seen_data = {}
+            if seen_file.exists():
                 try:
                     with open(seen_file, "r", encoding="utf-8") as f:
                         seen_data = json.load(f)
                 except Exception:
-                    pass
+                    seen_data = {}
 
-            repo = getattr(self, "default_repo", "nivedjkr/jarvis-assistant")
-            try:
-                import yaml
-                if Path("config.yaml").exists():
-                    with open("config.yaml", "r", encoding="utf-8") as f:
-                        cfg = yaml.safe_load(f)
-                        repo = cfg.get("github", {}).get("default_repo", repo)
-            except Exception:
-                pass
+            for repo in gh.watch_repos:
+                if repo not in seen_data or not isinstance(seen_data[repo], dict):
+                    seen_data[repo] = {
+                        "last_issue_number": 0,
+                        "last_ci_conclusion": "success",
+                        "last_pr_number": 0,
+                        "last_checked": datetime.now().isoformat()
+                    }
+                
+                state = seen_data[repo]
+                first_time = (state.get("last_checked") is None) or (state.get("last_issue_number") == 0 and state.get("last_pr_number") == 0)
 
-            repo_short = repo.split("/")[-1] if "/" in repo else repo
-
-            # 1. Check new open issues
-            p_issue = subprocess.run(
-                ["gh", "issue", "list", "--repo", repo, "--state", "open", "--json", "number,title"],
-                capture_output=True, text=True, timeout=30
-            )
-            if p_issue.returncode == 0 and p_issue.stdout.strip():
-                issues = json.loads(p_issue.stdout)
-                for issue in issues:
-                    i_num = issue.get("number")
-                    title = issue.get("title", "")
-                    if i_num not in seen_data["seen_issues"]:
-                        seen_data["seen_issues"].append(i_num)
-                        if not first_run:
-                            alert_msg = f"Sir, new issue on {repo_short}: {title}"
+                # 1. Check issues
+                issues_raw = gh._gh("issue", "list", "--repo", repo, "--state", "open", "--json", "number,title", as_json=True)
+                if isinstance(issues_raw, list) and issues_raw:
+                    latest_issue = max(issues_raw, key=lambda x: x.get("number", 0))
+                    num = latest_issue.get("number", 0)
+                    if num > state.get("last_issue_number", 0):
+                        if not first_time and state.get("last_issue_number", 0) > 0:
+                            alert_msg = f"Sir, new issue on {repo}: #{num} {latest_issue.get('title', '')}"
                             console.print(f"\n[bold bright_cyan]🐙 GITHUB ALERT:[/bold bright_cyan] [bold white]{alert_msg}[/bold white]\n")
                             self.announcement_queue.append(alert_msg)
+                        state["last_issue_number"] = num
 
-            # 2. Check new open PRs
-            p_pr = subprocess.run(
-                ["gh", "pr", "list", "--repo", repo, "--state", "open", "--json", "number,title"],
-                capture_output=True, text=True, timeout=30
-            )
-            if p_pr.returncode == 0 and p_pr.stdout.strip():
-                prs = json.loads(p_pr.stdout)
-                for pr in prs:
-                    pr_num = pr.get("number")
-                    title = pr.get("title", "")
-                    if pr_num not in seen_data["seen_prs"]:
-                        seen_data["seen_prs"].append(pr_num)
-                        if not first_run:
-                            alert_msg = f"Sir, new pull request: {title}"
+                # 2. Check PRs
+                prs_raw = gh._gh("pr", "list", "--repo", repo, "--state", "open", "--json", "number,title", as_json=True)
+                if isinstance(prs_raw, list) and prs_raw:
+                    latest_pr = max(prs_raw, key=lambda x: x.get("number", 0))
+                    num = latest_pr.get("number", 0)
+                    if num > state.get("last_pr_number", 0):
+                        if not first_time and state.get("last_pr_number", 0) > 0:
+                            alert_msg = f"Sir, new PR on {repo}: #{num} {latest_pr.get('title', '')}"
                             console.print(f"\n[bold bright_cyan]🐙 GITHUB ALERT:[/bold bright_cyan] [bold white]{alert_msg}[/bold white]\n")
                             self.announcement_queue.append(alert_msg)
+                        state["last_pr_number"] = num
 
-            # 3. Check failed CI runs
-            p_run = subprocess.run(
-                ["gh", "run", "list", "--repo", repo, "--limit", "5", "--json", "databaseId,status,conclusion,displayTitle"],
-                capture_output=True, text=True, timeout=30
-            )
-            if p_run.returncode == 0 and p_run.stdout.strip():
-                runs = json.loads(p_run.stdout)
-                for r in runs:
-                    r_id = r.get("databaseId")
-                    conclusion = r.get("conclusion")
-                    title = r.get("displayTitle", "")
-                    if conclusion == "failure" and r_id not in seen_data["seen_runs"]:
-                        seen_data["seen_runs"].append(r_id)
-                        if not first_run:
-                            alert_msg = f"Sir, CI failed on {repo_short}, {title}"
+                # 3. Check CI
+                runs_raw = gh._gh("run", "list", "--repo", repo, "--limit", "1", "--json", "status,conclusion,name", as_json=True)
+                if isinstance(runs_raw, list) and runs_raw:
+                    latest_run = runs_raw[0]
+                    curr_conc = latest_run.get("conclusion") or latest_run.get("status") or "unknown"
+                    last_conc = state.get("last_ci_conclusion", "success")
+                    if curr_conc != last_conc:
+                        if curr_conc == "failure":
+                            alert_msg = f"Sir, CI failed on {repo}"
                             console.print(f"\n[bold red]🐙 GITHUB CI ALERT:[/bold red] [bold white]{alert_msg}[/bold white]\n")
                             self.announcement_queue.append(alert_msg)
+                        elif curr_conc == "success" and last_conc == "failure":
+                            alert_msg = f"Sir, CI is passing again on {repo}"
+                            console.print(f"\n[bold green]🐙 GITHUB CI ALERT:[/bold green] [bold white]{alert_msg}[/bold white]\n")
+                            self.announcement_queue.append(alert_msg)
+                        state["last_ci_conclusion"] = curr_conc
+
+                state["last_checked"] = datetime.now().isoformat()
 
             with open(seen_file, "w", encoding="utf-8") as f:
                 json.dump(seen_data, f, indent=2)

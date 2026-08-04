@@ -298,36 +298,75 @@ class GitStatusTool(Tool):
             return f"Error running git commands: {str(e)}"
 
 
-class GitHubTool(Tool):
-    """Tool for GitHub operations via gh CLI directly (issues, PRs, CI, api)"""
+from jarvis.github_tool import GitHubTool as NativeGitHubTool
 
-    def __init__(self, default_repo: str = "nivedjkr/jarvis-assistant"):
-        super().__init__("github_tool", "GitHub CLI for issues, PRs, CI status, and API queries")
-        self.default_repo = default_repo
+_native_gh = NativeGitHubTool()
 
-    async def execute(self, command: str = "issue", subcommand: str = "list", repo: str = "", **kwargs) -> str:
-        target_repo = repo or self.default_repo
-        cmd = ["gh", command]
-        if subcommand:
-            cmd.append(subcommand)
-        if command in ("issue", "pr", "run", "workflow") and target_repo:
-            cmd.extend(["--repo", target_repo])
-        for k, v in kwargs.items():
-            if v is not None and not k.startswith("_"):
-                flag = k.replace("_", "-")
-                if isinstance(v, bool):
-                    if v:
-                        cmd.append(f"--{flag}")
-                else:
-                    cmd.extend([f"--{flag}", str(v)])
-        try:
-            res = subprocess.run(" ".join(cmd), shell=True, capture_output=True, text=True, timeout=30)
-            if res.returncode == 0:
-                return res.stdout.strip() or "Command executed successfully"
-            else:
-                return f"GitHub CLI error: {res.stderr.strip() or res.stdout.strip()}"
-        except Exception as e:
-            return f"Error executing gh CLI: {str(e)}"
+
+class GitHubIssuesTool(Tool):
+    """List, create, or close GitHub issues"""
+    def __init__(self):
+        super().__init__("github_issues", "List, create, or close GitHub issues")
+
+    async def execute(self, action: str = "list", repo: str = "", title: str = "", number: Any = None, state: str = "open", **kwargs) -> str:
+        act = action.lower()
+        if act == "create":
+            body = kwargs.get("body", "")
+            return _native_gh.create_issue(title=title, body=body, repo=repo or None)
+        elif act == "close":
+            num = int(number) if number is not None else 0
+            return _native_gh.close_issue(number=num, repo=repo or None)
+        else:
+            return _native_gh.list_issues(repo=repo or None, state=state, limit=kwargs.get("limit", 10))
+
+
+class GitHubPRsTool(Tool):
+    """List or view GitHub pull requests"""
+    def __init__(self):
+        super().__init__("github_prs", "List or view GitHub pull requests")
+
+    async def execute(self, action: str = "list", repo: str = "", number: Any = None, state: str = "open", **kwargs) -> str:
+        act = action.lower()
+        if act == "view":
+            num = int(number) if number is not None else 0
+            return _native_gh.view_pr(number=num, repo=repo or None)
+        else:
+            return _native_gh.list_prs(repo=repo or None, state=state, limit=kwargs.get("limit", 10))
+
+
+class GitHubCITool(Tool):
+    """Check CI/Actions status and logs"""
+    def __init__(self):
+        super().__init__("github_ci", "Check CI/Actions status and logs")
+
+    async def execute(self, action: str = "status", repo: str = "", run_id: str = "", **kwargs) -> str:
+        act = action.lower()
+        if act == "logs":
+            return _native_gh.ci_logs(run_id=run_id, repo=repo or None)
+        else:
+            return _native_gh.ci_status(repo=repo or None, limit=kwargs.get("limit", 5))
+
+
+class GitHubRepoTool(Tool):
+    """View repo info or list all repos"""
+    def __init__(self):
+        super().__init__("github_repo", "View repo info or list all repos")
+
+    async def execute(self, action: str = "info", repo: str = "", **kwargs) -> str:
+        act = action.lower()
+        if act in ("list", "repos"):
+            return _native_gh.list_repos(limit=kwargs.get("limit", 10))
+        else:
+            return _native_gh.repo_info(repo=repo or None)
+
+
+class GitHubNotificationsTool(Tool):
+    """Check GitHub notifications"""
+    def __init__(self):
+        super().__init__("github_notifications", "Check GitHub notifications")
+
+    async def execute(self, **kwargs) -> str:
+        return _native_gh.notifications(limit=kwargs.get("limit", 5))
 
 
 class AppLaunchTool(Tool):
@@ -879,7 +918,11 @@ class ToolRegistry:
         self.register(DuckDuckGoSearchTool())
         self.register(PDFSummarizeTool())
         self.register(GitStatusTool())
-        self.register(GitHubTool())
+        self.register(GitHubIssuesTool())
+        self.register(GitHubPRsTool())
+        self.register(GitHubCITool())
+        self.register(GitHubRepoTool())
+        self.register(GitHubNotificationsTool())
         self.register(ProjectTool())
     
     def register(self, tool: Tool):
