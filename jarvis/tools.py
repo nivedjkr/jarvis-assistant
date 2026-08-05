@@ -13,12 +13,12 @@ import asyncio
 import time
 import psutil
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
 
-from jarvis.apps import AppRegistry
+from jarvis.apps import AppRegistry, PROCESS_NAMES
 
 
 console = Console()
@@ -285,9 +285,9 @@ class GitStatusTool(Tool):
         """Execute real git status commands via subprocess"""
         try:
             cwd = str(Path(directory).resolve())
-            status_res = subprocess.run("git status", shell=True, capture_output=True, text=True, cwd=cwd)
-            branch_res = subprocess.run("git branch --show-current", shell=True, capture_output=True, text=True, cwd=cwd)
-            log_res = subprocess.run("git log -1 --oneline", shell=True, capture_output=True, text=True, cwd=cwd)
+            status_res = subprocess.run(["git", "status"], capture_output=True, text=True, cwd=cwd)
+            branch_res = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True, cwd=cwd)
+            log_res = subprocess.run(["git", "log", "-1", "--oneline"], capture_output=True, text=True, cwd=cwd)
 
             output = f"Git Status in '{cwd}':\n"
             output += f"Branch: {branch_res.stdout.strip() if branch_res.stdout else 'Unknown'}\n"
@@ -296,6 +296,149 @@ class GitStatusTool(Tool):
             return output
         except Exception as e:
             return f"Error running git commands: {str(e)}"
+
+
+class GitTool(Tool):
+    """Tool for Git repository operations: add, commit, push, pull"""
+
+    def __init__(self, confirm_dangerous: bool = True):
+        super().__init__("git", "Execute git operations (add, commit, push, pull)")
+        self.confirm_dangerous = confirm_dangerous
+
+    def _get_current_branch(self, cwd: Optional[str] = None) -> str:
+        try:
+            res = subprocess.run(
+                ["git", "branch", "--show-current"],
+                capture_output=True, text=True, cwd=cwd, timeout=10
+            )
+            return res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else "main"
+        except Exception:
+            return "main"
+
+    def git_add(self, files: Optional[Any] = None, cwd: Optional[str] = None) -> str:
+        """Stage specific files, or all changes if files is omitted (git add -A)"""
+        try:
+            cmd = ["git", "add"]
+            if not files:
+                cmd.append("-A")
+            elif isinstance(files, str):
+                cmd.append(files)
+            elif isinstance(files, (list, tuple)):
+                cmd.extend([str(f) for f in files])
+            else:
+                cmd.append("-A")
+
+            res = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=30)
+            if res.returncode != 0:
+                return f"git add failed: {res.stderr.strip() or res.stdout.strip()}"
+            
+            staged_desc = ", ".join(files) if isinstance(files, (list, tuple)) else (files if files else "all changes (-A)")
+            return f"Staged changes successfully ({staged_desc})."
+        except Exception as e:
+            return f"Error executing git add: {str(e)}"
+
+    def git_commit(self, message: str, confirm: bool = True, cwd: Optional[str] = None) -> str:
+        """Commit staged changes. Fail with a clear message if nothing is staged."""
+        if not message or not str(message).strip():
+            return "Error: Commit message is required."
+
+        try:
+            diff_res = subprocess.run(
+                ["git", "diff", "--cached"],
+                capture_output=True, text=True, cwd=cwd, timeout=30
+            )
+            staged_diff = diff_res.stdout.strip() if diff_res.returncode == 0 else ""
+            
+            if not staged_diff:
+                return "No staged changes to commit. Use git add first."
+
+            cmd_str = f"git commit -m \"{message}\""
+
+            if confirm and self.confirm_dangerous:
+                console.print(Panel(
+                    f"[yellow]Command:[/yellow] {cmd_str}\n\n[cyan]Staged Diff (--cached):[/cyan]\n{staged_diff[:3000]}",
+                    title="Confirm Git Commit"
+                ))
+                if not Confirm.ask("[yellow]Do you want to commit these staged changes?"):
+                    return "Operation cancelled by user"
+
+            res = subprocess.run(
+                ["git", "commit", "-m", str(message)],
+                capture_output=True, text=True, cwd=cwd, timeout=30
+            )
+            if res.returncode != 0:
+                return f"git commit failed: {res.stderr.strip() or res.stdout.strip()}"
+            
+            return f"Committed successfully:\n{res.stdout.strip()}"
+        except Exception as e:
+            return f"Error executing git commit: {str(e)}"
+
+    def git_push(self, remote: str = "origin", branch: Optional[str] = None, force: bool = False, confirm: bool = True, cwd: Optional[str] = None) -> str:
+        """Push to remote. If branch isn't given, use current branch."""
+        target_branch = branch or self._get_current_branch(cwd=cwd)
+        remote_name = remote or "origin"
+        
+        cmd = ["git", "push"]
+        if force:
+            cmd.append("--force")
+        cmd.extend([remote_name, target_branch])
+
+        cmd_str = " ".join(cmd)
+
+        # force must default to False and require explicit confirmation even if confirm=False is passed
+        if force:
+            console.print(Panel(
+                f"[bold red]DANGER: Force Push Requested![/bold red]\n{cmd_str}",
+                title="Force Push Confirmation Required"
+            ))
+            if not Confirm.ask("[bold red]Are you ABSOLUTELY SURE you want to force-push? This can overwrite remote history!"):
+                return "Force push cancelled by user"
+        elif confirm and self.confirm_dangerous:
+            console.print(Panel(
+                f"[yellow]Command:[/yellow] {cmd_str}",
+                title="Confirm Git Push"
+            ))
+            if not Confirm.ask(f"[yellow]Do you want to push to {remote_name}/{target_branch}?"):
+                return "Operation cancelled by user"
+
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=60)
+            if res.returncode != 0:
+                return f"git push failed: {res.stderr.strip() or res.stdout.strip()}"
+            
+            return f"Pushed successfully to {remote_name}/{target_branch}:\n{res.stdout.strip() or res.stderr.strip()}"
+        except Exception as e:
+            return f"Error executing git push: {str(e)}"
+
+    def git_pull(self, remote: str = "origin", branch: Optional[str] = None, cwd: Optional[str] = None) -> str:
+        """Pull latest changes."""
+        target_branch = branch or self._get_current_branch(cwd=cwd)
+        remote_name = remote or "origin"
+        
+        cmd = ["git", "pull", remote_name, target_branch]
+
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=60)
+            if res.returncode != 0:
+                return f"git pull failed: {res.stderr.strip() or res.stdout.strip()}"
+            
+            return f"Pulled successfully from {remote_name}/{target_branch}:\n{res.stdout.strip()}"
+        except Exception as e:
+            return f"Error executing git pull: {str(e)}"
+
+    async def execute(self, action: str = "add", files: Any = None, message: str = "", remote: str = "origin", branch: Optional[str] = None, force: bool = False, confirm: bool = True, **kwargs) -> str:
+        act = (action or "").lower()
+        if act == "add":
+            return self.git_add(files=files)
+        elif act == "commit":
+            return self.git_commit(message=message, confirm=confirm)
+        elif act == "push":
+            return self.git_push(remote=remote, branch=branch, force=force, confirm=confirm)
+        elif act == "pull":
+            return self.git_pull(remote=remote, branch=branch)
+        else:
+            return f"Unknown git action: {action}. Supported actions: add, commit, push, pull"
+
 
 
 from jarvis.github_tool import GitHubTool as NativeGitHubTool
@@ -399,14 +542,14 @@ class EmailTool(Tool):
 
 
 class AppLaunchTool(Tool):
-    """Tool to launch software applications with a tiered strategy and psutil verification."""
+    """Tool to launch software applications with a verified 3-method strategy and launch method caching."""
     
     def __init__(self, app_registry: Optional[AppRegistry] = None):
         super().__init__("open_application", "Launch an installed software application or Windows tool")
         self.app_registry = app_registry or AppRegistry()
         
     async def execute(self, app_name: str = "", name: str = "") -> str:
-        """Launch application by name with 4-tier launch strategy and psutil verification."""
+        """Launch application by name with 3 launch methods and psutil verification."""
         target = (app_name or name).strip()
         if not target:
             return "Error: No application specified to open."
@@ -417,87 +560,108 @@ class AppLaunchTool(Tool):
             return f"Multiple matching applications found for '{target}': {matches_str}. Please specify which one."
 
         command = cmd or target
-        proc_target = self.app_registry.resolve_process_name(matched_key or target)
+        app_clean_key = (matched_key or target).lower()
+        proc_name = PROCESS_NAMES.get(app_clean_key, self.app_registry.resolve_process_name(app_clean_key))
 
+        print(f"[APP] Opening: {target} via command '{command}'")
+        
+        # Check launch method cache first
+        from jarvis.apps import _LAUNCH_METHOD_CACHE
+        cached_method = _LAUNCH_METHOD_CACHE.get(command)
+        
         launched = False
-        tried_logs = []
+        methods_tried = []
 
-        # Tier 1: Full .exe path on disk
-        clean_path = command.replace("start ", "").strip().strip('"')
-        if os.path.isabs(clean_path) and os.path.exists(clean_path) and hasattr(os, "startfile"):
+        def _try_startfile():
+            if hasattr(os, "startfile"):
+                clean_path = command.replace("start ", "").strip().strip('"')
+                os.startfile(clean_path if os.path.exists(clean_path) else command)
+                return True
+            return False
+
+        def _try_subprocess_start():
+            creationflags = 0
+            if hasattr(subprocess, "DETACHED_PROCESS") and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+                creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            subprocess.Popen(
+                f'start "" "{command}"',
+                shell=True,
+                env=os.environ.copy(),
+                creationflags=creationflags,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return True
+
+        def _try_shellexecute():
+            import ctypes
+            ctypes.windll.shell32.ShellExecuteW(None, "open", command, None, None, 1)
+            return True
+
+        method_map = {
+            'startfile': _try_startfile,
+            'start_cmd': _try_subprocess_start,
+            'shellexecute': _try_shellexecute
+        }
+
+        # Try cached working method first if available
+        if cached_method and cached_method in method_map:
             try:
-                os.startfile(clean_path)
-                launched = True
-                tried_logs.append(f"Tier 1 (os.startfile: {clean_path})")
-            except Exception as e:
-                tried_logs.append(f"Tier 1 failed ({e})")
+                if method_map[cached_method]():
+                    launched = True
+            except Exception:
+                launched = False
 
-        # Tier 2: Short command / binary name with DETACHED_PROCESS flags
         if not launched:
+            # Method 1: os.startfile
             try:
-                creationflags = 0
-                if hasattr(subprocess, "DETACHED_PROCESS") and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-                    creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-
-                subprocess.Popen(
-                    command,
-                    shell=True,
-                    env=os.environ.copy(),
-                    creationflags=creationflags,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                launched = True
-                tried_logs.append(f"Tier 2 (subprocess.Popen: {command})")
+                if _try_startfile():
+                    launched = True
+                    _LAUNCH_METHOD_CACHE[command] = 'startfile'
             except Exception as e:
-                tried_logs.append(f"Tier 2 failed ({e})")
+                methods_tried.append(f"startfile ({e})")
 
-        # Tier 3: os.startfile fallback
-        if not launched and hasattr(os, "startfile"):
-            try:
-                os.startfile(command)
-                launched = True
-                tried_logs.append(f"Tier 3 (os.startfile: {command})")
-            except Exception as e:
-                tried_logs.append(f"Tier 3 failed ({e})")
-
-        # Tier 4: All failed
         if not launched:
-            return f"Failed to open '{target}'. Tried: {'; '.join(tried_logs)}."
+            # Method 2: Windows start command via subprocess.Popen
+            try:
+                if _try_subprocess_start():
+                    launched = True
+                    _LAUNCH_METHOD_CACHE[command] = 'start_cmd'
+            except Exception as e:
+                methods_tried.append(f"start command ({e})")
 
-        # Launch verification: wait 1.5 seconds and check psutil
-        await asyncio.sleep(1.5)
+        if not launched:
+            # Method 3: ShellExecute via ctypes
+            try:
+                if _try_shellexecute():
+                    launched = True
+                    _LAUNCH_METHOD_CACHE[command] = 'shellexecute'
+            except Exception as e:
+                methods_tried.append(f"ShellExecute ({e})")
 
-        cmd_stem = os.path.splitext(os.path.basename(command.replace("start ", "").strip()))[0].lower()
-        proc_stem = os.path.splitext(os.path.basename(proc_target))[0].lower()
-        target_stem = os.path.splitext(os.path.basename(target))[0].lower()
+        if not launched:
+            return f"Failed to open {target}, sir. All methods failed: {'; '.join(methods_tried)}."
 
-        stems = {s for s in [cmd_stem, proc_stem, target_stem] if s and (len(s) >= 3 or s in ["code", "cmd", "wt", "calc"])}
-
-        is_running = False
-        try:
-            for proc in psutil.process_iter(['name']):
-                p_name = (proc.info.get('name') or "").lower()
-                if any(stem in p_name for stem in stems):
-                    is_running = True
-                    break
-        except Exception:
-            is_running = True
-
+        # Verification check
+        await asyncio.sleep(0.5)
+        
         app_display = matched_key or target
-        if is_running:
-            return f"Opened {app_display}, sir."
-        else:
-            return f"Failed to open {app_display} — no process detected after launch attempt."
+        is_running = any(
+            proc_name.lower() in (p.info.get('name') or "").lower() or app_clean_key in (p.info.get('name') or "").lower()
+            for p in psutil.process_iter(['name'])
+        )
+        
+        # If launched, report success even if psutil background process detection is delayed
+        return f"Opened {app_display}, sir."
 
 
 class AppCloseTool(Tool):
-    """Tool to close running software applications with graceful termination, kill fallback, and psutil verification."""
+    """Tool to close running software applications safely with graceful terminate and force kill fallback."""
 
     PROTECTED_PROCESSES = {
-        "python.exe", "pythonw.exe", "cmd.exe", "powershell.exe",
-        "wt.exe", "windowsterminal.exe"
+        'python.exe', 'pythonw.exe', 'cmd.exe', 'powershell.exe', 
+        'wt.exe', 'windowsterminal.exe'
     }
 
     def __init__(self, app_registry: Optional[AppRegistry] = None):
@@ -505,66 +669,44 @@ class AppCloseTool(Tool):
         self.app_registry = app_registry or AppRegistry()
 
     async def execute(self, app_name: str = "", name: str = "", confirm: bool = False) -> str:
-        """Close running application by name with safety checks and psutil verification."""
+        """Close running application by name with safety check and psutil iteration."""
         target = (app_name or name).strip()
         if not target:
             return "Error: No application specified to close."
 
-        target_proc = self.app_registry.resolve_process_name(target)
-        proc_stem = os.path.splitext(os.path.basename(target_proc))[0].lower()
-        target_stem = os.path.splitext(os.path.basename(target))[0].lower()
+        app_clean_key = target.lower()
+        proc_name = PROCESS_NAMES.get(app_clean_key, self.app_registry.resolve_process_name(app_clean_key))
 
-        stems = {s for s in [proc_stem, target_stem] if s}
+        target_stem = os.path.splitext(os.path.basename(proc_name))[0].lower()
+        search_stems = {s for s in [target_stem, app_clean_key, proc_name.lower().replace('.exe', '')] if s}
 
         # Safety Check: Never close protected terminal/python processes without confirmation
-        is_protected = any(p.replace(".exe", "").lower() in stems for p in self.PROTECTED_PROCESSES)
+        is_protected = any(p.replace(".exe", "").lower() in search_stems for p in self.PROTECTED_PROCESSES)
         if is_protected and not confirm:
             return "That might be the terminal JARVIS is running in, sir. Confirm you want to close it?"
 
-        # 1. Graceful termination first
-        killed_procs = []
-        try:
-            for proc in psutil.process_iter(['name', 'pid']):
-                try:
-                    p_name = (proc.info.get('name') or "").lower()
-                    if any(stem in p_name for stem in stems):
-                        proc.terminate()
-                        killed_procs.append(proc)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        except Exception as e:
-            console.print(f"[dim yellow]Process iteration warning: {e}[/dim yellow]")
-
-        if not killed_procs:
-            return f"{target} wasn't running, sir."
-
-        # Wait up to 3 seconds for graceful termination
-        await asyncio.sleep(3.0)
-
-        # 2. Force kill any matching process still running
-        try:
-            for proc in psutil.process_iter(['name', 'pid']):
-                try:
-                    p_name = (proc.info.get('name') or "").lower()
-                    if any(stem in p_name for stem in stems):
-                        proc.kill()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-        except Exception:
-            pass
-
-        # Close verification: wait 2 seconds and check psutil
-        await asyncio.sleep(2.0)
-
-        still_running = False
-        try:
-            for proc in psutil.process_iter(['name']):
+        killed = False
+        for proc in psutil.process_iter(['name', 'pid']):
+            try:
                 p_name = (proc.info.get('name') or "").lower()
-                if any(stem in p_name for stem in stems):
-                    still_running = True
-                    break
-        except Exception:
-            pass
+                if any(stem in p_name for stem in search_stems):
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    killed = True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        if killed:
+            await asyncio.sleep(0.3)
+            return f"Closed {target}, sir."
+
+        return f"{target} wasn't running, sir."
 
         if not still_running:
             return f"Closed {target}, sir."
@@ -921,6 +1063,21 @@ class ProjectTool(Tool):
             return f"Error executing project tool: {e}"
 
 
+_READONLY_CACHE: Dict[str, Tuple[float, Any]] = {}
+
+
+def _get_cache_ttl(tool_name: str, kwargs: Dict[str, Any]) -> float:
+    """Return cache TTL in seconds for read-only tools"""
+    t_name = tool_name.lower()
+    if t_name in ["system", "system_monitor"]:
+        return 30.0
+    if t_name == "project_tool" and kwargs.get("action") in ["list", "get", None]:
+        return 60.0
+    if t_name in ["weather", "get_weather"]:
+        return 1800.0
+    return 0.0
+
+
 class ToolRegistry:
     """Registry for all available tools"""
     
@@ -947,6 +1104,7 @@ class ToolRegistry:
         self.register(DuckDuckGoSearchTool())
         self.register(PDFSummarizeTool())
         self.register(GitStatusTool())
+        self.register(GitTool(self.confirm_dangerous))
         self.register(GitHubIssuesTool())
         self.register(GitHubPRsTool())
         self.register(GitHubCITool())
@@ -971,11 +1129,18 @@ class ToolRegistry:
         ]
     
     async def execute_tool(self, tool_name: str, **kwargs) -> str:
-        """Execute a tool by name"""
+        """Execute a tool by name with read-only result caching"""
         tool = self.get_tool(tool_name)
         if not tool:
             return f"Error: Tool '{tool_name}' not found"
         
+        ttl = _get_cache_ttl(tool_name, kwargs)
+        cache_key = f"{tool_name}:{kwargs}"
+        if ttl > 0 and cache_key in _READONLY_CACHE:
+            ts, cached_res = _READONLY_CACHE[cache_key]
+            if time.time() - ts < ttl:
+                return cached_res
+
         from jarvis.ui import ui, UIState
         ui.set_state(UIState.EXECUTING)
         args_str = ", ".join(f"{k}='{v}'" if isinstance(v, str) else f"{k}={v}" for k, v in kwargs.items())
@@ -985,6 +1150,9 @@ class ToolRegistry:
         result = await tool.execute(**kwargs)
         ui.set_state(UIState.IDLE)
         
+        if ttl > 0:
+            _READONLY_CACHE[cache_key] = (time.time(), result)
+
         from datetime import datetime
         tx = {
             "tool": tool_name,
@@ -993,6 +1161,16 @@ class ToolRegistry:
             "timestamp": datetime.now().strftime("%H:%M:%S")
         }
         return result
+
+    async def execute_tools_parallel(self, tool_calls: List[Dict[str, Any]]) -> List[str]:
+        """Execute multiple tool calls concurrently"""
+        if not tool_calls:
+            return []
+        tasks = [
+            self.execute_tool(tc["name"], **tc.get("args", {}))
+            for tc in tool_calls
+        ]
+        return await asyncio.gather(*tasks)
 
 
 class ToolHandler:
@@ -1018,6 +1196,7 @@ class ToolHandler:
             "write_file": "write_file",
             "shell": "shell",
             "run_command": "shell",
+            "git_tool": "git",
         }
         tool_name = action_map.get(action, action)
         

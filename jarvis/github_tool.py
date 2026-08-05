@@ -21,7 +21,7 @@ class GitHubTool:
         try:
             result = subprocess.run(
                 ['gh', 'auth', 'status'],
-                capture_output=True, text=True, timeout=10, shell=True
+                capture_output=True, text=True, timeout=10
             )
             return result.returncode == 0
         except Exception:
@@ -49,8 +49,7 @@ class GitHubTool:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=15,
-                shell=True
+                timeout=15
             )
             if result.returncode != 0:
                 return {'error': result.stderr.strip() or result.stdout.strip()}
@@ -79,7 +78,7 @@ class GitHubTool:
         if target_repo:
             cmd.extend(['--repo', target_repo])
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
                 return f"Error: {result.stderr.strip() or result.stdout.strip()}"
             issues = json.loads(result.stdout)
@@ -100,7 +99,7 @@ class GitHubTool:
         else:
             cmd.extend(['--body', ''])
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
                 return f"Failed to create issue: {result.stderr.strip() or result.stdout.strip()}"
             return f"Issue created, sir: {result.stdout.strip()}"
@@ -113,7 +112,7 @@ class GitHubTool:
         if target_repo:
             cmd.extend(['--repo', target_repo])
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
                 return f"Failed: {result.stderr.strip() or result.stdout.strip()}"
             return f"Issue #{number} closed, sir."
@@ -127,7 +126,7 @@ class GitHubTool:
         if target_repo:
             cmd.extend(['--repo', target_repo])
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
                 return f"Error: {result.stderr.strip() or result.stdout.strip()}"
             prs = json.loads(result.stdout)
@@ -144,7 +143,7 @@ class GitHubTool:
         if target_repo:
             cmd.extend(['--repo', target_repo])
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
                 return f"Error: {result.stderr.strip() or result.stdout.strip()}"
             pr = json.loads(result.stdout)
@@ -162,7 +161,7 @@ class GitHubTool:
         if target_repo:
             cmd.extend(['--repo', target_repo])
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
                 return f"Error: {result.stderr.strip() or result.stdout.strip()}"
             runs = json.loads(result.stdout)
@@ -183,7 +182,7 @@ class GitHubTool:
         if target_repo:
             cmd.extend(['--repo', target_repo])
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.stdout.strip():
                 return result.stdout.strip()[:2000]
             return "No failed logs found."
@@ -195,7 +194,7 @@ class GitHubTool:
         target_repo = repo or self.default_repo
         cmd = ['gh', 'repo', 'view', target_repo, '--json', 'name,description,stargazerCount,forks,openIssues,url']
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
                 return f"Error: {result.stderr.strip() or result.stdout.strip()}"
             r = json.loads(result.stdout)
@@ -210,7 +209,7 @@ class GitHubTool:
     def list_repos(self, limit=10) -> str:
         cmd = ['gh', 'repo', 'list', '--limit', str(limit), '--json', 'name,description,url,isPrivate']
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
                 return f"Error: {result.stderr.strip() or result.stdout.strip()}"
             repos = json.loads(result.stdout)
@@ -229,7 +228,7 @@ class GitHubTool:
     def notifications(self, limit=5) -> str:
         cmd = ['gh', 'api', 'notifications', '--jq', f'.[:{limit}] | .[] | .subject.title + " (" + .reason + ")"']
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, shell=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
                 return "No notifications or error fetching them."
             output = result.stdout.strip()
