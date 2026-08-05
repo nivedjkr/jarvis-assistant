@@ -22,9 +22,8 @@ class ProjectManager:
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get database connection with Row factory"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        from jarvis.memory import get_shared_db_connection
+        return get_shared_db_connection(self.db_path)
 
     def _init_db(self):
         """Initialize project database schema and pre-populate sample data if empty"""

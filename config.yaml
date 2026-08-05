@@ -4,8 +4,8 @@
 api:
   base_url: "https://integrate.api.nvidia.com/v1"
   model: "meta/llama-3.1-8b-instruct"
-  temperature: 0.7
-  max_tokens: 1000
+  temperature: 0.6
+  max_tokens: 350
   stream: true
 
 # Memory Settings
@@ -45,8 +45,20 @@ awareness:
     - "AI"
     - "cybersecurity"
     - "space technology"
-  check_interval_hours: 3
+  check_interval_hours: 0.33  # 20 minutes (0.33 hours)
   significance_threshold: 7
+
+# Proactive Assistant Settings
+proactive:
+  enabled: true
+  frequency: 20  # Check interval frequency in minutes
+  idle_threshold_minutes: 10  # Minutes of inactivity before idle commentary
+  idle_cooldown_minutes: 15   # Minimum minutes between idle commentary speech
+  interests:
+    - "AI"
+    - "cybersecurity"
+    - "space technology"
+    - "software engineering"
 
 # Location Settings
 location:

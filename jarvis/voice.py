@@ -14,21 +14,9 @@ from datetime import datetime
 from typing import Optional, AsyncGenerator, Callable, Dict, Any, List, Tuple
 from pathlib import Path
 
-import sounddevice as sd
-import numpy as np
-from faster_whisper import WhisperModel
-import edge_tts
-import pyttsx3
-import pygame
-from pynput import keyboard
 from rich.console import Console
 
 from jarvis.ui import ui, UIState
-from jarvis.system_monitor import SystemMonitor
-from jarvis.weather import WeatherManager
-from jarvis.google_auth import GoogleAuthManager
-from jarvis.calendar_service import CalendarService
-from jarvis.email_service import EmailService
 
 
 console = Console()
@@ -39,21 +27,19 @@ class STTEngine:
     
     def __init__(self, model_size: str = "base", device: str = "cpu"):
         """
-        Initialize STT engine
-        
-        Args:
-            model_size: Model size ("base" or "small")
-            device: Device to run on ("cpu" or "cuda")
+        Initialize STT engine (lazy load model on first transcription request)
         """
         self.model_size = model_size
         self.device = device
         self.model = None
-        self._load_model()
     
     def _load_model(self):
-        """Load the Whisper model"""
+        """Load the Whisper model lazily on demand"""
+        if self.model is not None:
+            return
         try:
             console.print(f"[cyan]Loading STT model ({self.model_size})...[/cyan]")
+            from faster_whisper import WhisperModel
             self.model = WhisperModel(
                 self.model_size,
                 device=self.device,
@@ -63,18 +49,12 @@ class STTEngine:
         except Exception as e:
             console.print(f"[red]Error loading STT model: {e}[/red]")
             self.model = None
-    
-    def transcribe(self, audio_data: np.ndarray, sample_rate: int = 16000) -> str:
+
+    def transcribe(self, audio_data: Any, sample_rate: int = 16000, beam_size: int = 1) -> str:
         """
         Transcribe audio data to text
-        
-        Args:
-            audio_data: NumPy array of audio samples
-            sample_rate: Sample rate of audio
-            
-        Returns:
-            Transcribed text
         """
+        self._load_model()
         if self.model is None:
             return ""
         
@@ -82,7 +62,7 @@ class STTEngine:
             segments, info = self.model.transcribe(
                 audio_data,
                 language="en",
-                beam_size=5
+                beam_size=beam_size
             )
             
             text = " ".join([segment.text for segment in segments])
@@ -91,16 +71,11 @@ class STTEngine:
             console.print(f"[red]Error transcribing audio: {e}[/red]")
             return ""
     
-    def transcribe_file(self, audio_file: str) -> str:
+    def transcribe_file(self, audio_file: str, beam_size: int = 1) -> str:
         """
         Transcribe audio file to text
-        
-        Args:
-            audio_file: Path to audio file
-            
-        Returns:
-            Transcribed text
         """
+        self._load_model()
         if self.model is None:
             return ""
         
@@ -108,7 +83,7 @@ class STTEngine:
             segments, info = self.model.transcribe(
                 audio_file,
                 language="en",
-                beam_size=5
+                beam_size=beam_size
             )
             
             text = " ".join([segment.text for segment in segments])
@@ -143,13 +118,18 @@ def _clean_text_for_speech(text: str, speak_code_blocks: bool = False) -> str:
     # Clean up whitespace
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     
-    # Content filtering: If text is excessively long technical output (> 350 chars), summarize for speech
-    if len(cleaned) > 350 and any(kw in cleaned.lower() for kw in ["file", "directory", "code", "output", "[dir]", "[file]", "path", "contents of"]):
-        first_sentence = cleaned.split('.')[0] if '.' in cleaned else cleaned[:100]
-        cleaned = f"{first_sentence}. Detailed response printed in terminal."
+    # Content filtering: If text is long (> 250 chars), summarize/truncate to first 2 sentences for rapid speech synthesis
+    if len(cleaned) > 250:
+        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', cleaned) if s.strip()]
+        if len(sentences) > 2:
+            cleaned = f"{sentences[0]} {sentences[1]}"
+        elif len(cleaned) > 250:
+            cleaned = cleaned[:250].rsplit(' ', 1)[0] + "."
 
     return cleaned
 
+
+_TTS_CACHE: Dict[str, str] = {}
 
 class TTSEngine:
     """Text-to-Speech engine using edge-tts with pyttsx3 fallback"""
@@ -180,6 +160,7 @@ class TTSEngine:
         """Stop audio playback immediately and cancel remaining speech queue"""
         self.is_cancelled = True
         try:
+            import pygame
             if pygame.mixer.get_init():
                 if pygame.mixer.music.get_busy():
                     pygame.mixer.music.stop()
@@ -192,11 +173,59 @@ class TTSEngine:
         finally:
             self._is_speaking = False
 
+    def _configure_pyttsx_voice(self):
+        """Configure pyttsx3 voice using British male butler voice selection priority order"""
+        if not self.pyttsx_engine:
+            return
+        try:
+            voices = self.pyttsx_engine.getProperty('voices')
+            preferred = None
+            
+            # Priority 1: British / UK + Male
+            for v in voices:
+                info = f"{getattr(v, 'name', '')} {getattr(v, 'id', '')} {getattr(v, 'languages', '')}".lower()
+                if ('british' in info or 'uk' in info) and 'male' in info:
+                    preferred = v
+                    break
+            
+            # Priority 2: Daniel, Arthur, Ryan
+            if not preferred:
+                for v in voices:
+                    info = f"{getattr(v, 'name', '')} {getattr(v, 'id', '')}".lower()
+                    if any(name in info for name in ['daniel', 'arthur', 'ryan']):
+                        preferred = v
+                        break
+            
+            # Priority 3: en-GB / UK / British
+            if not preferred:
+                for v in voices:
+                    info = f"{getattr(v, 'name', '')} {getattr(v, 'id', '')} {getattr(v, 'languages', '')}".lower()
+                    if 'en-gb' in info or 'en_gb' in info or 'uk' in info or 'british' in info:
+                        preferred = v
+                        break
+            
+            # Priority 4: English
+            if not preferred:
+                for v in voices:
+                    info = f"{getattr(v, 'name', '')} {getattr(v, 'id', '')} {getattr(v, 'languages', '')}".lower()
+                    if 'en' in info:
+                        preferred = v
+                        break
+
+            if preferred:
+                self.pyttsx_engine.setProperty('voice', preferred.id)
+            
+            # Unhurried delivery (~0.95 speed)
+            self.pyttsx_engine.setProperty('rate', 165)
+        except Exception as e:
+            console.print(f"[dim yellow]pyttsx3 voice config warning: {e}[/dim yellow]")
+
     def _initialize(self):
         """Initialize the TTS engine"""
         if self.engine_type == "pyttsx3":
             try:
                 self.pyttsx_engine = pyttsx3.init()
+                self._configure_pyttsx_voice()
                 console.print("[green]pyttsx3 TTS engine initialized[/green]")
             except Exception as e:
                 console.print(f"[red]Error initializing pyttsx3: {e}[/red]")
@@ -205,6 +234,82 @@ class TTSEngine:
         else:
             console.print("[green]edge-tts TTS engine initialized[/green]")
     
+    async def synthesize_to_base64(self, text: str, speak_code_blocks: bool = False) -> str:
+        """
+        Synthesize text to base64 MP3 audio data string using edge-tts with in-memory caching.
+        Returns 'data:audio/mp3;base64,...' or empty string on error/empty text.
+        """
+        clean_text = _clean_text_for_speech(text, speak_code_blocks=speak_code_blocks)
+        if not clean_text:
+            return ""
+        
+        cache_key = f"{self.voice}:{clean_text}"
+        if cache_key in _TTS_CACHE:
+            return _TTS_CACHE[cache_key]
+        
+        try:
+            import edge_tts
+            communicate = edge_tts.Communicate(clean_text, self.voice, rate="+0%", pitch="-5Hz")
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
+                temp_path = temp_file.name
+            
+            await communicate.save(temp_path)
+            with open(temp_path, "rb") as f:
+                audio_bytes = f.read()
+            
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+            
+            import base64
+            b64_str = base64.b64encode(audio_bytes).decode('utf-8')
+            res = f"data:audio/mp3;base64,{b64_str}"
+            
+            if len(_TTS_CACHE) > 200:
+                _TTS_CACHE.pop(next(iter(_TTS_CACHE)))
+            _TTS_CACHE[cache_key] = res
+            return res
+        except Exception as e:
+            console.print(f"[red]Error synthesizing to base64: {e}[/red]")
+            return ""
+
+    async def synthesize_sentence(self, text: str) -> str:
+        """Synthesize a single sentence to base64 audio data using edge-tts with en-GB-RyanNeural"""
+        audio_bytes = await synthesize_sentence(text, voice=self.voice)
+        if not audio_bytes:
+            return ""
+        import base64
+        b64_str = base64.b64encode(audio_bytes).decode('utf-8')
+        return f"data:audio/mp3;base64,{b64_str}"
+
+async def synthesize_sentence(text: str, voice: str = "en-GB-RyanNeural") -> bytes:
+    """
+    Synthesize a single sentence using edge-tts with en-GB-RyanNeural voice.
+    Saves to a temporary file and returns raw audio bytes.
+    """
+    clean_text = _clean_text_for_speech(text)
+    if not clean_text:
+        return b""
+    try:
+        import edge_tts
+        communicate = edge_tts.Communicate(clean_text, voice)
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
+            temp_path = temp_file.name
+        
+        await communicate.save(temp_path)
+        with open(temp_path, "rb") as f:
+            audio_bytes = f.read()
+        
+        try:
+            os.unlink(temp_path)
+        except Exception:
+            pass
+        return audio_bytes
+    except Exception as e:
+        console.print(f"[red]Error in synthesize_sentence: {e}[/red]")
+        return b""
+
     def _split_sentences(self, text: str) -> list:
         """
         Split text into sentences for streaming
@@ -270,9 +375,10 @@ class TTSEngine:
             self._is_speaking = False
     
     async def _speak_edge(self, text: str):
-        """Speak using edge-tts"""
+        """Speak using edge-tts with unhurried rate (-5%) and deep pitch (-5Hz)"""
         try:
-            communicate = edge_tts.Communicate(text, self.voice)
+            import edge_tts
+            communicate = edge_tts.Communicate(text, self.voice, rate="-5%", pitch="-5Hz")
             
             # Save to temporary file
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
@@ -297,6 +403,7 @@ class TTSEngine:
         try:
             if self.pyttsx_engine is None:
                 self.pyttsx_engine = pyttsx3.init()
+                self._configure_pyttsx_voice()
             
             self._is_speaking = True
             self.pyttsx_engine.say(text)
@@ -393,7 +500,7 @@ class AudioRecorder:
             console.print(f"[red]Error starting recording: {e}[/red]")
             self.recording = False
     
-    def stop_recording(self) -> np.ndarray:
+    def stop_recording(self) -> Any:
         """
         Stop recording and return audio data
         
@@ -401,6 +508,7 @@ class AudioRecorder:
             NumPy array of recorded audio
         """
         self.recording = False
+        import numpy as np
         
         if self.stream:
             self.stream.stop()
@@ -453,21 +561,23 @@ class PushToTalkHandler:
     def _on_press(self, key):
         """Handle key press"""
         try:
+            from pynput import keyboard
             if key == keyboard.Key.space or (hasattr(key, 'char') and key.char == self.key):
                 if not self.key_pressed and self.on_press_callback:
                     self.key_pressed = True
                     self.on_press_callback()
-        except AttributeError:
+        except Exception:
             pass
     
     def _on_release(self, key):
         """Handle key release"""
         try:
+            from pynput import keyboard
             if key == keyboard.Key.space or (hasattr(key, 'char') and key.char == self.key):
                 if self.key_pressed and self.on_release_callback:
                     self.key_pressed = False
                     self.on_release_callback()
-        except AttributeError:
+        except Exception:
             pass
     
     def start(self):
@@ -475,6 +585,7 @@ class PushToTalkHandler:
         if self.listener is not None:
             return
         
+        from pynput import keyboard
         self.running = True
         self.listener = keyboard.Listener(
             on_press=self._on_press,
@@ -588,6 +699,7 @@ class VoiceManager:
             console.print(f"[cyan]Processing audio ({duration:.2f}s)...[/cyan]")
             
             # Check audio levels
+            import numpy as np
             audio_level = np.abs(audio_data).mean()
             max_level = np.abs(audio_data).max()
             console.print(f"[dim]Audio level: {audio_level:.4f} (max: {max_level:.4f})[/dim]")
@@ -652,6 +764,13 @@ class ProactiveMonitor:
             from jarvis.projects import ProjectManager
             self.project_manager = ProjectManager()
 
+        self.proactive_config = self.config.get("proactive", {})
+        self.proactive_enabled = self.proactive_config.get("enabled", True)
+        self.idle_threshold_seconds = int(self.proactive_config.get("idle_threshold_minutes", 10)) * 60
+        self.idle_cooldown_seconds = int(self.proactive_config.get("idle_cooldown_minutes", 15)) * 60
+        self.last_user_activity: float = time.time()
+        self.last_idle_commentary_time: float = 0.0
+
         self.running = False
         self.thread = None
         self.is_busy = False
@@ -663,12 +782,12 @@ class ProactiveMonitor:
         self.last_weekly_review_date = None
         self.last_check_timestamp: Optional[datetime] = None
 
-        # Feature Managers
-        self.system_monitor = SystemMonitor()
-        self.weather_manager = WeatherManager(self.config)
-        self.google_auth = GoogleAuthManager()
-        self.calendar_service = CalendarService(self.google_auth)
-        self.email_service = EmailService(self.google_auth, api_client=self.api_client)
+        # Feature Managers (lazy initialized)
+        self._system_monitor = None
+        self._weather_manager = None
+        self._google_auth = None
+        self._calendar_service = None
+        self._email_service = None
 
         # Loop Timestamps
         now_ts = time.time()
@@ -684,6 +803,87 @@ class ProactiveMonitor:
         # Rolling 10-minute price history: {ticker: [(timestamp, price)]}
         self._price_history: Dict[str, List[Tuple[float, float]]] = {}
         self._alerted_pct_windows: set = set()
+
+    @property
+    def system_monitor(self):
+        if self._system_monitor is None:
+            from jarvis.system_monitor import SystemMonitor
+            self._system_monitor = SystemMonitor()
+        return self._system_monitor
+
+    @property
+    def weather_manager(self):
+        if self._weather_manager is None:
+            from jarvis.weather import WeatherManager
+            self._weather_manager = WeatherManager(self.config)
+        return self._weather_manager
+
+    @property
+    def google_auth(self):
+        if self._google_auth is None:
+            from jarvis.google_auth import GoogleAuthManager
+            self._google_auth = GoogleAuthManager()
+        return self._google_auth
+
+    @property
+    def calendar_service(self):
+        if self._calendar_service is None:
+            from jarvis.calendar_service import CalendarService
+            self._calendar_service = CalendarService(self.google_auth)
+        return self._calendar_service
+
+    @property
+    def email_service(self):
+        if self._email_service is None:
+            from jarvis.email_service import EmailService
+            self._email_service = EmailService(self.google_auth, api_client=self.api_client)
+        return self._email_service
+
+    def touch_user_activity(self):
+        """Update last user activity timestamp whenever user sends a message or command"""
+        self.last_user_activity = time.time()
+
+    def _check_idle_commentary(self):
+        """Check if JARVIS has been idle for the threshold period and offer proactive commentary"""
+        if not self.proactive_enabled or self.is_busy:
+            return
+
+        now_ts = time.time()
+        idle_duration = now_ts - self.last_user_activity
+        cooldown_duration = now_ts - self.last_idle_commentary_time
+
+        if idle_duration >= self.idle_threshold_seconds and cooldown_duration >= self.idle_cooldown_seconds:
+            user_title = getattr(self.api_client, 'user_title', 'sir') if self.api_client else 'sir'
+            
+            phrase = None
+            try:
+                # 1. Calendar event coming up
+                summary = self.calendar_service.get_today_summary()
+                if summary and "No events" not in summary:
+                    phrase = f"Just a quick reminder, {user_title}: {summary}."
+
+                # 2. Weather check
+                if not phrase:
+                    w_sum = self.weather_manager.get_weather_summary()
+                    if w_sum:
+                        phrase = f"While things are quiet, {user_title}, weather update: {w_sum}."
+
+                # 3. Idle butler commentary fallback
+                if not phrase:
+                    import random
+                    idle_phrases = [
+                        f"Quiet session so far, {user_title}. All system vital signs remain nominal.",
+                        f"All background processes operational, {user_title}. Standing by whenever you need.",
+                        f"Infrastructure and memory systems are running smoothly, {user_title}."
+                    ]
+                    phrase = random.choice(idle_phrases)
+            except Exception as e:
+                console.print(f"[dim yellow]Idle commentary check warning: {e}[/dim yellow]")
+
+            if phrase:
+                self.last_idle_commentary_time = now_ts
+                console.print(f"\n[bold bright_cyan]💬 IDLE COMMENTARY:[/bold bright_cyan] [bold white]{phrase}[/bold white]\n")
+                self.announcement_queue.append((phrase, 'idle_commentary'))
 
     def set_push_callback(self, callback):
         """Set callback to push proactive alerts to external clients (e.g. Electron WebSocket)"""
@@ -704,16 +904,11 @@ class ProactiveMonitor:
             return "Good evening"
     
     def _get_reminder_phrases(self, reminder_text: str):
-        """Generate varied phrases for reminder announcements"""
-        phrases = [
-            f"Reminder: {reminder_text}",
-            f"Just a heads up, {reminder_text}",
-            f"Don't forget, {reminder_text}",
-            f"Time to: {reminder_text}",
-            f"Quick reminder about: {reminder_text}"
-        ]
-        import random
-        return random.choice(phrases)
+        """Generate phrase for reminder announcements"""
+        clean_text = reminder_text.strip()
+        if clean_text.lower().startswith("sir, reminder"):
+            return clean_text
+        return f"Sir, reminder — {clean_text}."
     
     def _check_reminders(self):
         """Check for due reminders"""
@@ -748,6 +943,36 @@ class ProactiveMonitor:
         if pending or due_count > 0:
             console.print(f"[dim cyan][MONITOR {now_str}][/dim cyan] Checked {len(pending)} pending reminders ({due_count} due).", highlight=False)
     
+    def _announce(self, text: str, alert_type: str = 'reminder'):
+        """Safety check — never announce empty or test strings"""
+        if not text or not text.strip():
+            return
+        if any(word in text.lower() for word in ['test', 'debug', 'placeholder', 'todo', 'example']):
+            print(f"[MONITOR] Blocked test string: {text}")
+            return
+        
+        pushed = False
+        if self._push_callback:
+            try:
+                import asyncio
+                import inspect
+                if inspect.iscoroutinefunction(self._push_callback):
+                    pushed = bool(asyncio.run(self._push_callback(text, alert_type)))
+                else:
+                    pushed = bool(self._push_callback(text, alert_type))
+            except Exception as pe:
+                console.print(f"[dim yellow]Push alert error: {pe}[/dim yellow]")
+
+        if not pushed:
+            try:
+                if self.tts:
+                    import asyncio
+                    asyncio.run(self.tts.speak(text))
+            except Exception as e:
+                console.print(f"[red]Error delivering announcement: {e}[/red]")
+
+        print(f"[MONITOR] Alert fired: {text}")
+
     def _queue_announcement(self, text: str):
         """Queue an announcement"""
         self.announcement_queue.append(text)
@@ -756,29 +981,9 @@ class ProactiveMonitor:
         """Deliver queued announcements when not busy"""
         while self.announcement_queue and not self.is_busy:
             item = self.announcement_queue.pop(0)
-            phrase = item[0] if isinstance(item, tuple) else item
+            text = item[0] if isinstance(item, tuple) else item
             alert_type = item[1] if isinstance(item, tuple) else "reminder"
-
-            pushed = False
-            if self._push_callback:
-                try:
-                    import asyncio
-                    import inspect
-                    if inspect.iscoroutinefunction(self._push_callback):
-                        pushed = bool(asyncio.run(self._push_callback(phrase, alert_type)))
-                    else:
-                        pushed = bool(self._push_callback(phrase, alert_type))
-                except Exception as pe:
-                    console.print(f"[dim yellow]Push alert error: {pe}[/dim yellow]")
-
-            # Only invoke local Python TTS if NOT pushed to connected GUI frontend (prevents double sound)
-            if not pushed:
-                try:
-                    if self.tts:
-                        import asyncio
-                        asyncio.run(self.tts.speak(phrase))
-                except Exception as e:
-                    console.print(f"[red]Error delivering announcement: {e}[/red]")
+            self._announce(text, alert_type)
     
     def _check_deadlines(self):
         """Check for due deadlines and escalate alert frequency"""
@@ -792,23 +997,18 @@ class ProactiveMonitor:
             try:
                 due_dt = datetime.fromisoformat(due_date_str)
                 diff_hours = (due_dt - now).total_seconds() / 3600.0
+                days_left = max(0, int(diff_hours / 24.0))
                 last_alerted_str = d.get("last_alerted")
                 last_alerted = datetime.fromisoformat(last_alerted_str) if last_alerted_str else None
                 
                 should_alert = False
-                alert_prefix = ""
                 
-                if 0 <= diff_hours <= 24:
-                    if not last_alerted or (now - last_alerted).total_seconds() >= 10800:
-                        should_alert = True
-                        alert_prefix = f"URGENT DEADLINE IN {int(diff_hours)} HOURS:"
-                elif 24 < diff_hours <= 72:
+                if 0 <= diff_hours <= 168:
                     if not last_alerted or (now - last_alerted).total_seconds() >= 86400:
                         should_alert = True
-                        alert_prefix = f"DEADLINE APPROACHING ({int(diff_hours / 24)} days away):"
                         
                 if should_alert:
-                    alert_text = f"{alert_prefix} {d['name']}"
+                    alert_text = f"Sir, {d['name']} deadline in {days_left} days." if days_left > 0 else f"Sir, {d['name']} deadline is today."
                     console.print(f"\n[bold red]⚠️  {alert_text}[/bold red]\n")
                     self.memory.update_deadline_last_alerted(d["id"])
                     self.announcement_queue.append(alert_text)
@@ -927,9 +1127,9 @@ class ProactiveMonitor:
                         
                         if triggered_static and not pct_move_str:
                             direction = "up" if live_price >= target_price else "down"
-                            alert_msg = f"{ticker} at ${live_price:.2f}, {direction} (crossed {condition} ${target_price:.2f}), sir{news_part}"
+                            alert_msg = f"Sir, {ticker} at ${live_price:.2f}, {direction} (crossed {condition} ${target_price:.2f})."
                         else:
-                            alert_msg = f"{ticker} at ${live_price:.2f}, {pct_move_str}, sir{news_part}"
+                            alert_msg = f"Sir, {ticker} at ${live_price:.2f}, {pct_move_str}."
 
                         console.print(f"\n[bold bright_cyan]📈 MARKET ALERT:[/bold bright_cyan] [bold white]{alert_msg}[/bold white]\n")
                         if triggered_static:
@@ -1116,6 +1316,7 @@ class ProactiveMonitor:
                 self._check_email()
                 self._check_projects()
                 self._check_github()
+                self._check_idle_commentary()
                 self._deliver_announcements()
                 time.sleep(self.check_interval)
             except Exception as e:

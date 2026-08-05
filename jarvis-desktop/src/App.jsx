@@ -10,9 +10,13 @@ export default function App() {
   const [orbState, setOrbState] = useState('idle')
   const [isConnected, setIsConnected] = useState(true)
 
-  const activeUtteranceRef = useRef(null)
-  const speechKeepAliveRef = useRef(null)
+  const activeAudioRef = useRef(null)
   const timeoutRef = useRef(null)
+  const playbackSessionRef = useRef(0)
+  const sentenceQueueRef = useRef([])
+  const isSpeakingRef = useRef(false)
+  const streamingTextRef = useRef('')
+  const lastProcessedSentenceIndexRef = useRef(0)
 
   const getInitialGreeting = () => {
     const hour = new Date().getHours()
@@ -35,14 +39,22 @@ export default function App() {
   }
 
   const stopSpeech = () => {
-    if (speechKeepAliveRef.current) {
-      clearInterval(speechKeepAliveRef.current)
-      speechKeepAliveRef.current = null
+    playbackSessionRef.current += 1
+
+    if (activeAudioRef.current) {
+      try {
+        activeAudioRef.current.pause()
+        activeAudioRef.current.currentTime = 0
+      } catch (e) {
+        console.warn('Error stopping audio:', e)
+      }
+      activeAudioRef.current = null
     }
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel()
-    }
-    activeUtteranceRef.current = null
+
+    sentenceQueueRef.current = []
+    isSpeakingRef.current = false
+    streamingTextRef.current = ''
+    lastProcessedSentenceIndexRef.current = 0
     setOrbState('idle')
   }
 
@@ -59,9 +71,92 @@ export default function App() {
       .trim()
   }
 
-  const speakResponse = (text) => {
-    if (!('speechSynthesis' in window)) return
+  const processNextSentence = async () => {
+    const currentSession = playbackSessionRef.current
 
+    if (sentenceQueueRef.current.length === 0) {
+      isSpeakingRef.current = false
+      setOrbState('idle')
+      return
+    }
+
+    isSpeakingRef.current = true
+    const item = sentenceQueueRef.current.shift()
+    if (!item || !item.promise) {
+      processNextSentence()
+      return
+    }
+
+    try {
+      const audioData = await item.promise
+      if (currentSession !== playbackSessionRef.current) return
+
+      if (!audioData) {
+        processNextSentence()
+        return
+      }
+
+      const audio = new Audio(audioData)
+      activeAudioRef.current = audio
+
+      audio.onplay = () => {
+        if (currentSession === playbackSessionRef.current) {
+          setOrbState('speaking')
+        }
+      }
+
+      audio.onended = () => {
+        activeAudioRef.current = null
+        if (currentSession === playbackSessionRef.current) {
+          processNextSentence()
+        }
+      }
+
+      audio.onerror = (e) => {
+        console.warn('Audio playback error:', e)
+        activeAudioRef.current = null
+        if (currentSession === playbackSessionRef.current) {
+          processNextSentence()
+        }
+      }
+
+      setOrbState('speaking')
+      audio.play().catch(err => {
+        console.warn('Failed to play audio:', err)
+        activeAudioRef.current = null
+        if (currentSession === playbackSessionRef.current) {
+          processNextSentence()
+        }
+      })
+    } catch (err) {
+      console.error('Sentence synthesis error:', err)
+      if (currentSession === playbackSessionRef.current) {
+        processNextSentence()
+      }
+    }
+  }
+
+  const enqueueSentences = (text) => {
+    if (!text) return
+    const sentences = text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean)
+    if (sentences.length === 0) return
+
+    for (const sentence of sentences) {
+      const clean = cleanTextForSpeech(sentence)
+      if (clean) {
+        const promise = window.jarvis?.synthesizeSentence
+          ? window.jarvis.synthesizeSentence(clean)
+          : Promise.resolve('')
+        sentenceQueueRef.current.push({ text: clean, promise })
+      }
+    }
+
+    if (!isSpeakingRef.current) {
+      processNextSentence()
+    }
+  }
+
+  const speakResponse = async (text, preloadedAudioUrl = null) => {
     stopSpeech()
 
     const cleanText = cleanTextForSpeech(text)
@@ -70,84 +165,125 @@ export default function App() {
       return
     }
 
-    setTimeout(() => {
+    if (preloadedAudioUrl) {
+      const currentSession = playbackSessionRef.current
       try {
-        const utterance = new SpeechSynthesisUtterance(cleanText)
-        activeUtteranceRef.current = utterance
+        const audio = new Audio(preloadedAudioUrl)
+        activeAudioRef.current = audio
 
-        const voices = window.speechSynthesis.getVoices()
-        const preferredVoice = voices.find(v => 
-          v.name.includes('Ryan') || 
-          v.name.includes('Natural') || 
-          v.name.includes('Google UK English Male') ||
-          (v.lang.startsWith('en') && v.name.includes('Male'))
-        ) || voices.find(v => v.lang.startsWith('en'))
-
-        if (preferredVoice) {
-          utterance.voice = preferredVoice
-        }
-
-        utterance.rate = 1.0
-        utterance.pitch = 1.0
-
-        utterance.onstart = () => {
-          setOrbState('speaking')
-        }
-
-        utterance.onend = () => {
-          stopSpeech()
-        }
-
-        utterance.onerror = (e) => {
-          console.warn('SpeechSynthesis error:', e)
-          stopSpeech()
-        }
-
-        speechKeepAliveRef.current = setInterval(() => {
-          if ('speechSynthesis' in window && window.speechSynthesis.speaking) {
-            if (window.speechSynthesis.paused) {
-              window.speechSynthesis.resume()
-            }
+        audio.onplay = () => {
+          if (currentSession === playbackSessionRef.current) {
+            setOrbState('speaking')
           }
-        }, 3000)
+        }
 
-        window.speechSynthesis.speak(utterance)
+        audio.onended = () => {
+          activeAudioRef.current = null
+          if (currentSession === playbackSessionRef.current) {
+            stopSpeech()
+          }
+        }
+
+        audio.onerror = (e) => {
+          console.warn('Audio playback error:', e)
+          activeAudioRef.current = null
+          if (currentSession === playbackSessionRef.current) {
+            enqueueSentences(cleanText)
+          }
+        }
+
+        setOrbState('speaking')
+        audio.play().catch(err => {
+          console.warn('Failed to play audio:', err)
+          activeAudioRef.current = null
+          if (currentSession === playbackSessionRef.current) {
+            enqueueSentences(cleanText)
+          }
+        })
+        return
       } catch (err) {
-        console.error('Speech error:', err)
-        setOrbState('idle')
+        console.warn('Audio element error:', err)
       }
-    }, 50)
+    }
+
+    enqueueSentences(cleanText)
   }
 
   useEffect(() => {
-    const handleVoicesChanged = () => {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.getVoices()
-      }
-    }
-
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.onvoiceschanged = handleVoicesChanged
-      handleVoicesChanged()
-      setTimeout(() => {
-        speakResponse(messages[0]?.text)
-      }, 300)
-    }
+    speakResponse(messages[0]?.text)
 
     if (window.jarvis?.onResponse) {
       window.jarvis.onResponse((data) => {
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 
-        if (data.type === 'response' || data.type === 'command_response') {
+        if (data.type === 'chunk') {
+          const chunkText = data.text || ''
+          setMessages(prev => {
+            const last = prev[prev.length - 1]
+            if (last && last.role === 'jarvis' && last.isStreaming) {
+              return [
+                ...prev.slice(0, -1),
+                { ...last, text: last.text + chunkText }
+              ]
+            } else {
+              return [
+                ...prev,
+                { role: 'jarvis', text: chunkText, timestamp: timeStr, isStreaming: true }
+              ]
+            }
+          })
+
+          streamingTextRef.current += chunkText
+          const fullText = streamingTextRef.current
+          const completedSentences = fullText.slice(lastProcessedSentenceIndexRef.current).match(/[^.!?]+[.!?]+(\s+|$)/g)
+          
+          if (completedSentences && completedSentences.length > 0) {
+            for (const sentence of completedSentences) {
+              if (/[.!?]/.test(sentence)) {
+                lastProcessedSentenceIndexRef.current += sentence.length
+                const clean = cleanTextForSpeech(sentence)
+                if (clean) {
+                  sentenceQueueRef.current.push(clean)
+                  if (!isSpeakingRef.current) {
+                    processNextSentence()
+                  }
+                }
+              }
+            }
+          } else if (!isSpeakingRef.current) {
+            setOrbState('thinking')
+          }
+        }
+        else if (data.type === 'response' || data.type === 'command_response') {
           clearPendingTimeout()
           const respText = data.text || 'Command executed, sir.'
-          setMessages(prev => [...prev, {
-            role: 'jarvis',
-            text: respText,
-            timestamp: timeStr,
-            toolCalls: data.tool_calls || []
-          }])
-          speakResponse(respText)
+          setMessages(prev => {
+            const filtered = prev.filter(m => !m.isStreaming)
+            return [...filtered, {
+              role: 'jarvis',
+              text: respText,
+              timestamp: timeStr,
+              toolCalls: data.tool_calls || []
+            }]
+          })
+
+          if (data.audio) {
+            speakResponse(respText, data.audio)
+          } else {
+            const remainingText = streamingTextRef.current.slice(lastProcessedSentenceIndexRef.current)
+            const cleanTail = cleanTextForSpeech(remainingText || respText)
+            
+            if (cleanTail && (!sentenceQueueRef.current.length && !isSpeakingRef.current)) {
+              enqueueSentences(cleanTail)
+            } else if (cleanTail && isSpeakingRef.current) {
+              sentenceQueueRef.current.push(cleanTail)
+            } else if (!sentenceQueueRef.current.length && !isSpeakingRef.current) {
+              speakResponse(respText)
+            }
+          }
+
+          streamingTextRef.current = ''
+          lastProcessedSentenceIndexRef.current = 0
         }
         else if (data.type === 'proactive_alert') {
           const alertText = data.text || 'Notification received, sir.'
@@ -158,7 +294,7 @@ export default function App() {
             isAlert: true,
             alertType: data.alert_type || 'reminder'
           }])
-          speakResponse(alertText)
+          speakResponse(alertText, data.audio)
         }
         else if (data.type === 'status') {
           if (data.status === 'thinking') {
@@ -173,7 +309,7 @@ export default function App() {
               if (prev.some(m => m.text === greetingMsg)) return prev
               return [...prev, { role: 'jarvis', text: greetingMsg, timestamp: timeStr }]
             })
-            speakResponse(greetingMsg)
+            speakResponse(greetingMsg, data.audio)
           } else if (data.status === 'disconnected') {
             setIsConnected(false)
             setOrbState('idle')
@@ -192,9 +328,6 @@ export default function App() {
     return () => {
       clearPendingTimeout()
       stopSpeech()
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.onvoiceschanged = null
-      }
     }
   }, [])
 

@@ -31,8 +31,8 @@ export default function Orb({ state = 'idle' }) {
     canvas.width = 600
     canvas.height = 600
 
-    // Generate ~900 particles once on mount with uniform sphere distribution
-    const N = 900
+    // Generate ~180 particles for crisp node constellation
+    const N = 180
     const particles = []
     for (let i = 0; i < N; i++) {
       const u = Math.random()
@@ -69,7 +69,15 @@ export default function Orb({ state = 'idle' }) {
       ctx.arc(centerX, centerY, 220, 0, Math.PI * 2)
       ctx.fill()
 
-      // Render 3D particles
+      // Spatial grid partitioning (10x10 grid on 600x600 canvas for O(N) connections)
+      const GRID_SIZE = 10
+      const CELL_SIZE = 60
+      const grid = Array.from({ length: GRID_SIZE }, () =>
+        Array.from({ length: GRID_SIZE }, () => [])
+      )
+
+      // 1. Project 3D particles to 2D screen coordinates and assign to spatial grid cells
+      const projected = new Array(particles.length)
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i]
         const t = p.theta + rot
@@ -83,10 +91,60 @@ export default function Orb({ state = 'idle' }) {
         const alpha = Math.max(0.08, Math.min(0.9, (z + 220) / 440))
         const size = Math.max(0.4, 1.6 * scale * 0.5)
 
+        projected[i] = { sx, sy, alpha, size }
+
+        const gx = Math.max(0, Math.min(GRID_SIZE - 1, Math.floor(sx / CELL_SIZE)))
+        const gy = Math.max(0, Math.min(GRID_SIZE - 1, Math.floor(sy / CELL_SIZE)))
+        grid[gx][gy].push(i)
+
+        // Draw particle node
         ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`
         ctx.beginPath()
         ctx.arc(sx, sy, size, 0, Math.PI * 2)
         ctx.fill()
+      }
+
+      // 2. Draw node connections using spatial grid cell proximity (O(N) complexity)
+      const maxDistSq = 36 * 36
+      ctx.lineWidth = 0.6
+      for (let gx = 0; gx < GRID_SIZE; gx++) {
+        for (let gy = 0; gy < GRID_SIZE; gy++) {
+          const cell = grid[gx][gy]
+          if (cell.length === 0) continue
+
+          for (let dx = 0; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              if (dx === 0 && dy < 0) continue
+              const ngx = gx + dx
+              const ngy = gy + dy
+              if (ngx < 0 || ngx >= GRID_SIZE || ngy < 0 || ngy >= GRID_SIZE) continue
+
+              const neighborCell = grid[ngx][ngy]
+              for (let i = 0; i < cell.length; i++) {
+                const idxA = cell[i]
+                const pA = projected[idxA]
+                const startJ = (ngx === gx && ngy === gy) ? i + 1 : 0
+
+                for (let j = startJ; j < neighborCell.length; j++) {
+                  const idxB = neighborCell[j]
+                  const pB = projected[idxB]
+
+                  const distSq = (pA.sx - pB.sx) ** 2 + (pA.sy - pB.sy) ** 2
+                  if (distSq < maxDistSq) {
+                    const lineAlpha = (1 - Math.sqrt(distSq) / 36) * Math.min(pA.alpha, pB.alpha) * 0.35
+                    if (lineAlpha > 0.02) {
+                      ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${lineAlpha})`
+                      ctx.beginPath()
+                      ctx.moveTo(pA.sx, pA.sy)
+                      ctx.lineTo(pB.sx, pB.sy)
+                      ctx.stroke()
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
 
       animRef.current = requestAnimationFrame(draw)

@@ -49,7 +49,7 @@ class TestDuckDuckGoSearch(unittest.TestCase):
 
     def test_5_cli_natural_language_search(self):
         """Verify natural language DuckDuckGo search queries."""
-        res = asyncio.run(self.cli._check_tool_commands("search duckduckgo for latest news"))
+        res = asyncio.run(self.cli.process_single_command("search duckduckgo for latest news"))
         self.assertIsNotNone(res)
         self.assertIn("DuckDuckGo", res)
 

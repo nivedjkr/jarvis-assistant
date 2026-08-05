@@ -22,7 +22,7 @@ console = Console()
 
 
 class GlobalAwarenessManager:
-    """Manages background news monitoring, deduplication, significance scoring, and surfacing"""
+    """Manages background news monitoring, deduplication, significance scoring, and conversational surfacing"""
 
     def __init__(
         self,
@@ -33,9 +33,22 @@ class GlobalAwarenessManager:
     ):
         self.config = config
         self.awareness_config = config.get("awareness", {})
-        self.enabled = self.awareness_config.get("enabled", True)
-        self.topics = list(self.awareness_config.get("topics", ["AI", "cybersecurity", "space technology"]))
-        self.check_interval_hours = float(self.awareness_config.get("check_interval_hours", 3))
+        self.proactive_config = config.get("proactive", {})
+        
+        self.enabled = self.awareness_config.get("enabled", True) and self.proactive_config.get("enabled", True)
+        
+        # Combine topics from awareness and proactive interests
+        topics_set = list(self.awareness_config.get("topics", ["AI", "cybersecurity", "space technology"]))
+        interests = list(self.proactive_config.get("interests", ["software engineering"]))
+        for item in interests:
+            if item not in topics_set:
+                topics_set.append(item)
+        self.topics = topics_set
+        self.topic_rotation_index = 0
+        
+        # Default check interval: 20 minutes (0.33 hours)
+        freq_mins = self.proactive_config.get("frequency", self.proactive_config.get("frequency_minutes", 20))
+        self.check_interval_hours = float(freq_mins) / 60.0
         self.significance_threshold = int(self.awareness_config.get("significance_threshold", 7))
         
         self.api_client = api_client
@@ -90,7 +103,7 @@ class GlobalAwarenessManager:
         except Exception as e:
             console.print(f"[red]Error saving surfaced news data: {e}[/red]")
 
-    def fetch_topic_news(self, topic: str, max_results: int = 5) -> List[Dict[str, str]]:
+    def fetch_topic_news(self, topic: str, max_results: int = 3) -> List[Dict[str, str]]:
         """
         Fetch news articles for a given topic using Google News RSS feed
         """
@@ -116,7 +129,6 @@ class GlobalAwarenessManager:
                 pub_date = item.findtext("pubDate", default="").strip()
                 description = item.findtext("description", default="").strip()
                 
-                # Basic HTML cleaning for description
                 import re
                 clean_desc = re.sub(r'<[^>]+>', '', description).strip()
 
@@ -134,22 +146,79 @@ class GlobalAwarenessManager:
         
         return articles
 
+    def fetch_ddg_news(self, topic: str, max_results: int = 3) -> List[Dict[str, str]]:
+        """Fetch news/web search results for a topic using DuckDuckGoSearchTool"""
+        articles = []
+        try:
+            from jarvis.tools import DuckDuckGoSearchTool
+            tool = DuckDuckGoSearchTool()
+            query = f"latest {topic} news developments"
+            
+            res = ""
+            try:
+                loop = asyncio.get_running_loop()
+                # Run in executor if loop is running
+                res = asyncio.run_coroutine_threadsafe(tool.execute(query, max_results=max_results), loop).result(timeout=12)
+            except RuntimeError:
+                res = asyncio.run(tool.execute(query, max_results=max_results))
+            
+            if res and isinstance(res, str):
+                lines = res.split('\n')
+                curr_title = ""
+                curr_url = ""
+                curr_body = ""
+                for line in lines:
+                    line_s = line.strip()
+                    if any(line_s.startswith(f"{idx}.") for idx in range(1, max_results + 2)):
+                        if curr_title and curr_url:
+                            articles.append({
+                                "topic": topic,
+                                "title": curr_title,
+                                "link": curr_url,
+                                "pub_date": datetime.now().strftime("%a, %d %b %Y %H:%M:%S GMT"),
+                                "description": curr_body or curr_title
+                            })
+                        curr_title = line_s.split('.', 1)[-1].strip()
+                        curr_url = ""
+                        curr_body = ""
+                    elif line_s.startswith("URL:"):
+                        curr_url = line_s.replace("URL:", "").strip()
+                    elif line_s.startswith("Snippet:"):
+                        curr_body = line_s.replace("Snippet:", "").strip()
+
+                if curr_title and curr_url:
+                    articles.append({
+                        "topic": topic,
+                        "title": curr_title,
+                        "link": curr_url,
+                        "pub_date": datetime.now().strftime("%a, %d %b %Y %H:%M:%S GMT"),
+                        "description": curr_body or curr_title
+                    })
+        except Exception as e:
+            console.print(f"[dim yellow]Warning: Failed DDG search for topic '{topic}': {e}[/dim yellow]")
+
+        return articles
+
     async def score_article_significance(self, topic: str, article: Dict[str, str]) -> Tuple[int, str]:
         """
-        Use LLM to evaluate article significance (1-10) and generate a spoken one-liner.
+        Use LLM to evaluate article significance (1-10) and generate a spoken conversational alert.
         """
+        user_title = getattr(self.api_client, 'user_title', 'sir') if self.api_client else 'sir'
+
         if not self.api_client or not hasattr(self.api_client, 'client'):
-            # Fallback when LLM client is unavailable
-            return 7, article["title"]
+            return 7, f"Thought you'd want to know, {user_title} — {article['title']}."
 
         prompt = (
             f"Topic: {topic}\n"
             f"Headline: {article['title']}\n"
             f"Snippet: {article['description']}\n\n"
-            "Task: Evaluate if this news item is genuinely notable and high-impact "
+            "Task: Evaluate if this item is genuinely notable and high-impact "
             "(e.g. major tech breakthrough, critical vulnerability, major industry event) "
-            "versus routine opinion/blog post.\n"
-            "Respond ONLY with a JSON object: {\"score\": <1-10 integer>, \"one_liner\": \"<Short 1-sentence spoken summary>\"}"
+            "versus routine blog posts.\n"
+            f"If notable, craft a conversational spoken alert for the user (addressed as '{user_title}'). "
+            "Start naturally with 'Thought you'd want to know, [honorific] — [conversational 1-sentence summary]'. "
+            "Do NOT output a raw headline dump.\n"
+            "Respond ONLY with a JSON object: {\"score\": <1-10 integer>, \"one_liner\": \"<Conversational spoken alert>\"}"
         )
 
         try:
@@ -168,39 +237,49 @@ class GlobalAwarenessManager:
                     data = json.loads(match.group(0))
                     score = int(data.get("score", 5))
                     one_liner = str(data.get("one_liner", article["title"])).strip()
+                    if not (one_liner.startswith("Thought") or one_liner.startswith("Just")):
+                        one_liner = f"Thought you'd want to know, {user_title} — {one_liner}"
                     return score, one_liner
         except Exception as e:
             console.print(f"[dim yellow]LLM scoring failed: {e}[/dim yellow]")
 
-        return 7, article["title"]
+        return 7, f"Thought you'd want to know, {user_title} — {article['title']}."
 
     async def check_news(self) -> List[Dict[str, Any]]:
         """
-        Perform a full check across all watched topics:
-        Fetch -> Deduplicate -> Score Significance -> Surface Notable Items
+        Perform a full check across 2-3 rotating watched topics:
+        Fetch (Google News + DuckDuckGo) -> Deduplicate -> Score Significance -> Surface & Emit Spoken Alert
         """
         if not self.enabled:
             return []
 
-        console.print("[dim cyan]🌐 Global Awareness: checking news for watched topics...[/dim cyan]")
+        num_topics = min(3, len(self.topics))
+        if num_topics == 0:
+            return []
+
+        selected_topics = []
+        for _ in range(num_topics):
+            selected_topics.append(self.topics[self.topic_rotation_index % len(self.topics)])
+            self.topic_rotation_index += 1
+
+        console.print(f"[dim cyan]🌐 Global Awareness: checking topics {selected_topics}...[/dim cyan]")
         newly_surfaced = []
 
-        for topic in self.topics:
-            articles = self.fetch_topic_news(topic, max_results=5)
-            
-            for article in articles:
+        for topic in selected_topics:
+            rss_articles = self.fetch_topic_news(topic, max_results=3)
+            ddg_articles = self.fetch_ddg_news(topic, max_results=3)
+            combined_articles = rss_articles + ddg_articles
+
+            for article in combined_articles:
                 link = article["link"]
-                # Deduplicate by URL or title
                 if link in self.seen_urls or article["title"] in self.seen_urls:
                     continue
 
-                # Mark as seen
                 self.seen_urls.add(link)
                 self.seen_urls.add(article["title"])
 
-                # Score significance
                 score, one_liner = await self.score_article_significance(topic, article)
-                
+
                 if score >= self.significance_threshold:
                     item = {
                         "id": len(self.surfaced_news) + 1,
@@ -212,14 +291,12 @@ class GlobalAwarenessManager:
                         "pub_date": article["pub_date"],
                         "timestamp": datetime.now().isoformat()
                     }
-                    self.surfaced_news.insert(0, item)  # Newest first
+                    self.surfaced_news.insert(0, item)
                     newly_surfaced.append(item)
 
-                    # Queue proactive voice announcement if proactive monitor available
+                    # Always emit as a spoken proactive_alert
                     if self.proactive_monitor and hasattr(self.proactive_monitor, '_queue_announcement'):
-                        user_title = getattr(self.api_client, 'user_title', 'sir') if self.api_client else 'sir'
-                        announcement = f"{user_title.capitalize()}, notable update in {topic}: {one_liner}. Type /news to review."
-                        self.proactive_monitor._queue_announcement(announcement)
+                        self.proactive_monitor._queue_announcement((one_liner, 'news_alert'))
 
         self._save_seen()
         if newly_surfaced:

@@ -1,1216 +1,633 @@
 """
-Tools for JARVIS
-Provides file operations, shell commands, and other utilities
+Clean, robust Tool Registry and core system tools for JARVIS.
 """
 
 import os
-import re
-import subprocess
+import sys
 import shutil
-import webbrowser
+import subprocess
 import urllib.parse
-import asyncio
-import time
+import webbrowser
 import psutil
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-from rich.console import Console
-from rich.panel import Panel
-from rich.prompt import Confirm
-
-from jarvis.apps import AppRegistry, PROCESS_NAMES
+import pyperclip
+from typing import Dict, List, Any, Callable
+from jarvis.github_tool import GitHubTool
 
 
-console = Console()
+def _clean_path(path_str: Any) -> str:
+    """Clean and strip whitespace and quotes from file/directory path strings."""
+    if not path_str:
+        return ""
+    s = str(path_str).strip()
+    return s.strip("'\"")
 
 
-class Tool:
-    """Base class for all tools"""
-    
-    def __init__(self, name: str, description: str):
-        self.name = name
-        self.description = description
-    
-    async def execute(self, **kwargs) -> str:
-        """Execute the tool"""
-        raise NotImplementedError
+def write_file(filepath: str = "", content: Any = "", **kwargs) -> str:
+    target_path = _clean_path(filepath or kwargs.get("path") or kwargs.get("file") or kwargs.get("filename"))
+    target_content = content if content != "" else kwargs.get("text", "")
+    if target_content is None:
+        target_content = ""
+    if not isinstance(target_content, str):
+        target_content = str(target_content)
+
+    if not target_path:
+        return "FAILED: No file path provided for write_file."
+    try:
+        full_path = os.path.abspath(target_path)
+        parent_dir = os.path.dirname(full_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+        with open(full_path, 'w', encoding='utf-8') as f:
+            f.write(target_content)
+        if os.path.exists(full_path):
+            size = os.path.getsize(full_path)
+            return f"SUCCESS: Created file '{full_path}' ({size} bytes)"
+        return f"FAILED: File '{target_path}' was not created."
+    except Exception as e:
+        return f"FAILED to write file: {str(e)}"
 
 
-class FileReadTool(Tool):
-    """Tool to read file contents"""
-    
-    def __init__(self):
-        super().__init__("read_file", "Read the contents of a file")
-    
-    async def execute(self, filepath: str) -> str:
-        """Read file contents"""
-        try:
-            path = Path(filepath)
-            if not path.exists():
-                return f"Error: File '{filepath}' not found"
-            
-            if not path.is_file():
-                return f"Error: '{filepath}' is not a file"
-            
-            resolved_path = path.resolve()
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            console.print(f"[dim cyan][RAW DISK READ] Path: '{resolved_path}' | Bytes: {len(content)}[/dim cyan]", highlight=False)
-            return f"Contents of file '{filepath}' (resolved path: {resolved_path}):\n{content}"
-        except Exception as e:
-            return f"Error reading file: {str(e)}"
+def read_file(filepath: str = "", **kwargs) -> str:
+    target_path = _clean_path(filepath or kwargs.get("path") or kwargs.get("file") or kwargs.get("filename"))
+    if not target_path:
+        return "FAILED: No file path provided for read_file."
+    try:
+        full_path = os.path.abspath(target_path)
+        if not os.path.exists(full_path):
+            return f"FAILED: File '{target_path}' not found."
+        if os.path.isdir(full_path):
+            return f"FAILED: '{target_path}' is a directory, not a file. Use list_files instead."
+        with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        return content if content else f"File '{target_path}' is empty."
+    except Exception as e:
+        return f"FAILED to read file: {str(e)}"
 
 
-class FileWriteTool(Tool):
-    """Tool to write content to a file"""
-    
-    def __init__(self, confirm_dangerous: bool = True):
-        super().__init__("write_file", "Write content to a file")
-        self.confirm_dangerous = confirm_dangerous
-    
-    async def execute(self, filepath: str, content: str, confirm: bool = True) -> str:
-        """Write content to file"""
-        try:
-            path = Path(filepath)
-            resolved_path = path.resolve()
-            
-            # Check if file exists and ask for confirmation
-            if path.exists() and confirm and self.confirm_dangerous:
-                if not Confirm.ask(f"[yellow]File '{filepath}' already exists. Overwrite?"):
-                    return "Operation cancelled by user"
-            
-            # Create parent directories if they don't exist
-            path.parent.mkdir(parents=True, exist_ok=True)
-            
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            return f"Successfully wrote to file '{filepath}' at resolved path: {resolved_path} (Written content: '{content}')"
-        except Exception as e:
-            return f"Error writing file: {str(e)}"
+def list_files(directory: str = ".", **kwargs) -> str:
+    target_dir = _clean_path(directory or kwargs.get("path") or kwargs.get("dir") or kwargs.get("folder") or ".")
+    if not target_dir:
+        target_dir = "."
+    try:
+        full_path = os.path.abspath(target_dir)
+        if not os.path.exists(full_path):
+            return f"FAILED: Directory '{target_dir}' not found."
+        if not os.path.isdir(full_path):
+            return f"FAILED: '{target_dir}' is a file, not a directory."
+        entries = os.listdir(full_path)
+        if not entries:
+            return f"Directory '{full_path}' is empty."
+        items = []
+        for entry in entries[:50]:
+            p = os.path.join(full_path, entry)
+            kind = "[DIR]" if os.path.isdir(p) else "[FILE]"
+            size = f"({os.path.getsize(p)} bytes)" if os.path.isfile(p) else ""
+            items.append(f"{kind} {entry} {size}".strip())
+        return f"Contents of {full_path} ({len(entries)} items):\n" + "\n".join(items)
+    except Exception as e:
+        return f"FAILED to list directory: {str(e)}"
 
 
-class FileListTool(Tool):
-    """Tool to list files in a directory"""
-    
-    def __init__(self):
-        super().__init__("list_files", "List files in a directory")
-    
-    async def execute(self, directory: str = ".", recursive: bool = False) -> str:
-        """List files in directory"""
-        try:
-            path = Path(directory)
-            if not path.exists():
-                return f"Error: Directory '{directory}' not found"
-            
-            if not path.is_dir():
-                return f"Error: '{directory}' is not a directory"
-            
-            if recursive:
-                files = []
-                for item in path.rglob("*"):
-                    files.append(f"{'[DIR]' if item.is_dir() else '[FILE]'} {item}")
-                return "\n".join(files)
-            else:
-                items = []
-                for item in path.iterdir():
-                    items.append(f"{'[DIR]' if item.is_dir() else '[FILE]'} {item.name}")
-                return "\n".join(items) if items else "Directory is empty"
-        except Exception as e:
-            return f"Error listing files: {str(e)}"
+def create_directory(directory: str = "", **kwargs) -> str:
+    target_path = _clean_path(directory or kwargs.get("path") or kwargs.get("filepath") or kwargs.get("dir") or kwargs.get("folder") or kwargs.get("name"))
+    if not target_path:
+        return "FAILED: No directory path provided."
+    try:
+        full_path = os.path.abspath(target_path)
+        os.makedirs(full_path, exist_ok=True)
+        if os.path.exists(full_path) and os.path.isdir(full_path):
+            return f"SUCCESS: Directory created at '{full_path}'"
+        return f"FAILED: Directory '{target_path}' could not be created."
+    except Exception as e:
+        return f"FAILED to create directory: {str(e)}"
 
 
-class FileSearchTool(Tool):
-    """Tool to search for files"""
-    
-    def __init__(self):
-        super().__init__("search_files", "Search for files by pattern")
-    
-    async def execute(self, pattern: str, directory: str = ".") -> str:
-        """Search for files matching pattern"""
-        try:
-            path = Path(directory)
-            if not path.exists():
-                return f"Error: Directory '{directory}' not found"
-            
-            matches = list(path.rglob(pattern))
-            if not matches:
-                return f"No files found matching '{pattern}'"
-            
-            return "\n".join(str(m) for m in matches)
-        except Exception as e:
-            return f"Error searching files: {str(e)}"
+def delete_file(filepath: str = "", **kwargs) -> str:
+    target_path = _clean_path(filepath or kwargs.get("path") or kwargs.get("file"))
+    if not target_path:
+        return "FAILED: No file path provided for delete_file."
+    try:
+        full_path = os.path.abspath(target_path)
+        if not os.path.exists(full_path):
+            return f"FAILED: Path '{target_path}' does not exist."
+        if os.path.isdir(full_path):
+            shutil.rmtree(full_path)
+            return f"SUCCESS: Deleted directory '{full_path}'"
+        os.remove(full_path)
+        if not os.path.exists(full_path):
+            return f"SUCCESS: Deleted file '{full_path}'"
+        return f"FAILED: File '{target_path}' still exists after delete attempt."
+    except Exception as e:
+        return f"FAILED to delete file: {str(e)}"
 
 
-class ShellCommandTool(Tool):
-    """Tool to execute shell commands"""
-    
-    def __init__(self, confirm_dangerous: bool = True, logger=None):
-        super().__init__("shell_command", "Execute a shell command")
-        self.confirm_dangerous = confirm_dangerous
-        self.logger = logger
-    
-    def _is_dangerous(self, command: str) -> bool:
-        """Check if command is potentially dangerous"""
-        dangerous_keywords = [
-            "rm", "del", "format", "shutdown", "reboot",
-            "dd", "mkfs", "fdisk", ">", ">>"
-        ]
-        return any(keyword in command.lower() for keyword in dangerous_keywords)
-    
-    async def execute(self, command: str, confirm: bool = True) -> str:
-        """Execute shell command"""
-        # Check if command is dangerous
-        if self._is_dangerous(command) and confirm and self.confirm_dangerous:
-            console.print(Panel(
-                f"[red]⚠️  Potentially dangerous command:[/red]\n{command}",
-                title="Warning"
-            ))
-            if not Confirm.ask("[yellow]Do you want to execute this command?"):
-                return "Operation cancelled by user"
-        
-        try:
-            # Log the command
-            if self.logger:
-                self.logger.log(command, approved=True)
-            
-            # Execute command
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            output = ""
-            if result.stdout:
-                output += result.stdout
-            if result.stderr:
-                output += f"\n[stderr]: {result.stderr}"
-            
-            if result.returncode != 0:
-                output += f"\n[Exit code: {result.returncode}]"
-            
-            # Log result
-            if self.logger:
-                self.logger.log(command, approved=True, result=str(result.returncode))
-            
-            return f"Executed shell command '{command}' (Exit code: {result.returncode}):\n{output}" if output else f"Executed shell command '{command}' (Exit code: {result.returncode}, no output)"
-            
-        except subprocess.TimeoutExpired:
-            return f"Error: Command '{command}' timed out"
-        except Exception as e:
-            if self.logger:
-                self.logger.log(command, approved=False, result=str(e))
-            return f"Error executing command: {str(e)}"
-
-
-class DirectoryTool(Tool):
-    """Tool to create/delete directories"""
-    
-    def __init__(self, confirm_dangerous: bool = True):
-        super().__init__("directory", "Create or delete directories")
-        self.confirm_dangerous = confirm_dangerous
-    
-    async def execute(self, action: str, path: str, confirm: bool = True) -> str:
-        """Create or delete directory"""
-        try:
-            dir_path = Path(path)
-            resolved_path = dir_path.resolve()
-            
-            if action == "create":
-                dir_path.mkdir(parents=True, exist_ok=True)
-                return f"Created directory '{path}' successfully at resolved path: {resolved_path}"
-            
-            elif action == "delete":
-                if confirm and self.confirm_dangerous:
-                    if not Confirm.ask(f"[yellow]Delete directory '{path}' and all its contents?"):
-                        return "Operation cancelled by user"
-                
-                shutil.rmtree(dir_path)
-                return f"Deleted directory '{path}' at resolved path: {resolved_path}"
-            
-            else:
-                return f"Unknown action: {action}. Use 'create' or 'delete'"
-                
-        except Exception as e:
-            return f"Error with directory operation: {str(e)}"
-
-
-class PDFSummarizeTool(Tool):
-    """Tool to extract text from a PDF file for summarization"""
-
-    def __init__(self, api_client=None):
-        super().__init__("summarize_pdf", "Extract text from a PDF file and summarize paper findings")
-        self.api_client = api_client
-
-    async def execute(self, filepath: str) -> str:
-        """Extract text from PDF and return raw extracted text with paper structure summary"""
-        try:
-            path = Path(filepath)
-            if not path.exists():
-                return f"Error: PDF file '{filepath}' not found"
-            if not path.is_file():
-                return f"Error: '{filepath}' is not a file"
-
-            resolved_path = path.resolve()
-            import pypdf
-            reader = pypdf.PdfReader(str(resolved_path))
-            pages_text = []
-            for idx, page in enumerate(reader.pages):
-                text = page.extract_text()
-                if text:
-                    pages_text.append(text)
-
-            full_text = "\n".join(pages_text).strip()
-            if not full_text:
-                return f"Error: Could not extract text from PDF '{filepath}' (file may be scanned image or empty)."
-
-            console.print(f"[dim cyan][PDF EXTRACTED TEXT] Path: '{resolved_path}' | Pages: {len(reader.pages)} | Characters: {len(full_text)}[/dim cyan]", highlight=False)
-            
-            return f"Raw Extracted PDF Content from '{filepath}' ({len(reader.pages)} pages):\n\n{full_text[:3000]}"
-        except Exception as e:
-            return f"Error extracting text from PDF '{filepath}': {str(e)}"
-
-
-class GitStatusTool(Tool):
-    """Tool to execute git status, git branch, and git log -1"""
-
-    def __init__(self):
-        super().__init__("git_status", "Get real git status, current branch, and recent commit log")
-
-    async def execute(self, directory: str = ".") -> str:
-        """Execute real git status commands via subprocess"""
-        try:
-            cwd = str(Path(directory).resolve())
-            status_res = subprocess.run(["git", "status"], capture_output=True, text=True, cwd=cwd)
-            branch_res = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True, cwd=cwd)
-            log_res = subprocess.run(["git", "log", "-1", "--oneline"], capture_output=True, text=True, cwd=cwd)
-
-            output = f"Git Status in '{cwd}':\n"
-            output += f"Branch: {branch_res.stdout.strip() if branch_res.stdout else 'Unknown'}\n"
-            output += f"Recent Commit: {log_res.stdout.strip() if log_res.stdout else 'None'}\n\n"
-            output += f"Status Output:\n{status_res.stdout if status_res.stdout else status_res.stderr}"
-            return output
-        except Exception as e:
-            return f"Error running git commands: {str(e)}"
-
-
-class GitTool(Tool):
-    """Tool for Git repository operations: add, commit, push, pull"""
-
-    def __init__(self, confirm_dangerous: bool = True):
-        super().__init__("git", "Execute git operations (add, commit, push, pull)")
-        self.confirm_dangerous = confirm_dangerous
-
-    def _get_current_branch(self, cwd: Optional[str] = None) -> str:
-        try:
-            res = subprocess.run(
-                ["git", "branch", "--show-current"],
-                capture_output=True, text=True, cwd=cwd, timeout=10
-            )
-            return res.stdout.strip() if res.returncode == 0 and res.stdout.strip() else "main"
-        except Exception:
-            return "main"
-
-    def git_add(self, files: Optional[Any] = None, cwd: Optional[str] = None) -> str:
-        """Stage specific files, or all changes if files is omitted (git add -A)"""
-        try:
-            cmd = ["git", "add"]
-            if not files:
-                cmd.append("-A")
-            elif isinstance(files, str):
-                cmd.append(files)
-            elif isinstance(files, (list, tuple)):
-                cmd.extend([str(f) for f in files])
-            else:
-                cmd.append("-A")
-
-            res = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=30)
-            if res.returncode != 0:
-                return f"git add failed: {res.stderr.strip() or res.stdout.strip()}"
-            
-            staged_desc = ", ".join(files) if isinstance(files, (list, tuple)) else (files if files else "all changes (-A)")
-            return f"Staged changes successfully ({staged_desc})."
-        except Exception as e:
-            return f"Error executing git add: {str(e)}"
-
-    def git_commit(self, message: str, confirm: bool = True, cwd: Optional[str] = None) -> str:
-        """Commit staged changes. Fail with a clear message if nothing is staged."""
-        if not message or not str(message).strip():
-            return "Error: Commit message is required."
-
-        try:
-            diff_res = subprocess.run(
-                ["git", "diff", "--cached"],
-                capture_output=True, text=True, cwd=cwd, timeout=30
-            )
-            staged_diff = diff_res.stdout.strip() if diff_res.returncode == 0 else ""
-            
-            if not staged_diff:
-                return "No staged changes to commit. Use git add first."
-
-            cmd_str = f"git commit -m \"{message}\""
-
-            if confirm and self.confirm_dangerous:
-                console.print(Panel(
-                    f"[yellow]Command:[/yellow] {cmd_str}\n\n[cyan]Staged Diff (--cached):[/cyan]\n{staged_diff[:3000]}",
-                    title="Confirm Git Commit"
-                ))
-                if not Confirm.ask("[yellow]Do you want to commit these staged changes?"):
-                    return "Operation cancelled by user"
-
-            res = subprocess.run(
-                ["git", "commit", "-m", str(message)],
-                capture_output=True, text=True, cwd=cwd, timeout=30
-            )
-            if res.returncode != 0:
-                return f"git commit failed: {res.stderr.strip() or res.stdout.strip()}"
-            
-            return f"Committed successfully:\n{res.stdout.strip()}"
-        except Exception as e:
-            return f"Error executing git commit: {str(e)}"
-
-    def git_push(self, remote: str = "origin", branch: Optional[str] = None, force: bool = False, confirm: bool = True, cwd: Optional[str] = None) -> str:
-        """Push to remote. If branch isn't given, use current branch."""
-        target_branch = branch or self._get_current_branch(cwd=cwd)
-        remote_name = remote or "origin"
-        
-        cmd = ["git", "push"]
-        if force:
-            cmd.append("--force")
-        cmd.extend([remote_name, target_branch])
-
-        cmd_str = " ".join(cmd)
-
-        # force must default to False and require explicit confirmation even if confirm=False is passed
-        if force:
-            console.print(Panel(
-                f"[bold red]DANGER: Force Push Requested![/bold red]\n{cmd_str}",
-                title="Force Push Confirmation Required"
-            ))
-            if not Confirm.ask("[bold red]Are you ABSOLUTELY SURE you want to force-push? This can overwrite remote history!"):
-                return "Force push cancelled by user"
-        elif confirm and self.confirm_dangerous:
-            console.print(Panel(
-                f"[yellow]Command:[/yellow] {cmd_str}",
-                title="Confirm Git Push"
-            ))
-            if not Confirm.ask(f"[yellow]Do you want to push to {remote_name}/{target_branch}?"):
-                return "Operation cancelled by user"
-
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=60)
-            if res.returncode != 0:
-                return f"git push failed: {res.stderr.strip() or res.stdout.strip()}"
-            
-            return f"Pushed successfully to {remote_name}/{target_branch}:\n{res.stdout.strip() or res.stderr.strip()}"
-        except Exception as e:
-            return f"Error executing git push: {str(e)}"
-
-    def git_pull(self, remote: str = "origin", branch: Optional[str] = None, cwd: Optional[str] = None) -> str:
-        """Pull latest changes."""
-        target_branch = branch or self._get_current_branch(cwd=cwd)
-        remote_name = remote or "origin"
-        
-        cmd = ["git", "pull", remote_name, target_branch]
-
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=60)
-            if res.returncode != 0:
-                return f"git pull failed: {res.stderr.strip() or res.stdout.strip()}"
-            
-            return f"Pulled successfully from {remote_name}/{target_branch}:\n{res.stdout.strip()}"
-        except Exception as e:
-            return f"Error executing git pull: {str(e)}"
-
-    async def execute(self, action: str = "add", files: Any = None, message: str = "", remote: str = "origin", branch: Optional[str] = None, force: bool = False, confirm: bool = True, **kwargs) -> str:
-        act = (action or "").lower()
-        if act == "add":
-            return self.git_add(files=files)
-        elif act == "commit":
-            return self.git_commit(message=message, confirm=confirm)
-        elif act == "push":
-            return self.git_push(remote=remote, branch=branch, force=force, confirm=confirm)
-        elif act == "pull":
-            return self.git_pull(remote=remote, branch=branch)
+def copy_file(source: str = "", destination: str = "", **kwargs) -> str:
+    src_path = _clean_path(source or kwargs.get("src") or kwargs.get("from_path"))
+    dst_path = _clean_path(destination or kwargs.get("dst") or kwargs.get("to_path"))
+    if not src_path or not dst_path:
+        return "FAILED: Both source and destination paths are required for copy_file."
+    try:
+        src_full = os.path.abspath(src_path)
+        dst_full = os.path.abspath(dst_path)
+        if not os.path.exists(src_full):
+            return f"FAILED: Source path '{src_path}' does not exist."
+        if os.path.isdir(src_full):
+            shutil.copytree(src_full, dst_full, dirs_exist_ok=True)
         else:
-            return f"Unknown git action: {action}. Supported actions: add, commit, push, pull"
+            os.makedirs(os.path.dirname(dst_full) or '.', exist_ok=True)
+            shutil.copy2(src_full, dst_full)
+        if os.path.exists(dst_full):
+            return f"SUCCESS: Copied '{src_full}' to '{dst_full}'"
+        return f"FAILED: Copy operation failed."
+    except Exception as e:
+        return f"FAILED to copy file: {str(e)}"
 
 
-
-from jarvis.github_tool import GitHubTool as NativeGitHubTool
-
-_native_gh = NativeGitHubTool()
-
-
-GH_NOTICE = " IMPORTANT: Never generate OAuth URLs or login flows. gh CLI is already authenticated. Just call the tool directly and return real output. If gh returns an auth error, say so plainly."
-
-
-class GitHubIssuesTool(Tool):
-    """List, create, or close GitHub issues"""
-    def __init__(self):
-        super().__init__("github_issues", "List, create, or close GitHub issues." + GH_NOTICE)
-
-    async def execute(self, action: str = "list", repo: str = "", title: str = "", number: Any = None, state: str = "open", **kwargs) -> str:
-        act = action.lower()
-        if act == "create":
-            body = kwargs.get("body", "")
-            return _native_gh.create_issue(title=title, body=body, repo=repo or None)
-        elif act == "close":
-            num = int(number) if number is not None else 0
-            return _native_gh.close_issue(number=num, repo=repo or None)
-        else:
-            return _native_gh.list_issues(repo=repo or None, state=state, limit=kwargs.get("limit", 10))
+def rename_file(source: str = "", destination: str = "", **kwargs) -> str:
+    src_path = _clean_path(source or kwargs.get("src") or kwargs.get("old_path") or kwargs.get("filepath"))
+    dst_path = _clean_path(destination or kwargs.get("dst") or kwargs.get("new_path") or kwargs.get("target"))
+    if not src_path or not dst_path:
+        return "FAILED: Both source and destination paths are required for rename_file."
+    try:
+        src_full = os.path.abspath(src_path)
+        dst_full = os.path.abspath(dst_path)
+        if not os.path.exists(src_full):
+            return f"FAILED: Source path '{src_path}' does not exist."
+        os.makedirs(os.path.dirname(dst_full) or '.', exist_ok=True)
+        shutil.move(src_full, dst_full)
+        if os.path.exists(dst_full):
+            return f"SUCCESS: Renamed/Moved '{src_full}' to '{dst_full}'"
+        return "FAILED: Rename/move operation failed."
+    except Exception as e:
+        return f"FAILED to rename file: {str(e)}"
 
 
-class GitHubPRsTool(Tool):
-    """List or view GitHub pull requests"""
-    def __init__(self):
-        super().__init__("github_prs", "List or view GitHub pull requests." + GH_NOTICE)
-
-    async def execute(self, action: str = "list", repo: str = "", number: Any = None, state: str = "open", **kwargs) -> str:
-        act = action.lower()
-        if act == "view":
-            num = int(number) if number is not None else 0
-            return _native_gh.view_pr(number=num, repo=repo or None)
-        else:
-            return _native_gh.list_prs(repo=repo or None, state=state, limit=kwargs.get("limit", 10))
-
-
-class GitHubCITool(Tool):
-    """Check CI/Actions status and logs"""
-    def __init__(self):
-        super().__init__("github_ci", "Check CI/Actions status and logs." + GH_NOTICE)
-
-    async def execute(self, action: str = "status", repo: str = "", run_id: str = "", **kwargs) -> str:
-        act = action.lower()
-        if act == "logs":
-            return _native_gh.ci_logs(run_id=run_id, repo=repo or None)
-        else:
-            return _native_gh.ci_status(repo=repo or None, limit=kwargs.get("limit", 5))
-
-
-class GitHubRepoTool(Tool):
-    """View repo info or list all repos"""
-    def __init__(self):
-        super().__init__("github_repo", "View repo info or list all repos." + GH_NOTICE)
-
-    async def execute(self, action: str = "info", repo: str = "", **kwargs) -> str:
-        act = action.lower()
-        if act in ("list", "repos"):
-            return _native_gh.list_repos(limit=kwargs.get("limit", 10))
-        else:
-            return _native_gh.repo_info(repo=repo or None)
-
-
-class GitHubNotificationsTool(Tool):
-    """Check GitHub notifications"""
-    def __init__(self):
-        super().__init__("github_notifications", "Check GitHub notifications." + GH_NOTICE)
-
-    async def execute(self, **kwargs) -> str:
-        return _native_gh.notifications(limit=kwargs.get("limit", 5))
-
-
-class EmailTool(Tool):
-    """Check Gmail unread messages, read email body, or get inbox summary."""
-
-    def __init__(self):
-        super().__init__("email", "Check Gmail unread messages, read email body by index, or get inbox summary. IMPORTANT: Never generate fake emails or fake content. If unauthenticated, report so plainly.")
-
-    async def execute(self, action: str = "list", index: Any = None, **kwargs) -> str:
-        from jarvis.email_service import EmailService
-        from jarvis.google_auth import GoogleAuthManager
-        auth_mgr = GoogleAuthManager()
-        if not auth_mgr.is_authenticated():
-            return "Google Email is unauthenticated, sir. Run Google OAuth setup or place credentials.json in workspace to connect."
-        svc = EmailService(auth_mgr)
-        act = action.lower() if action else "list"
-        if act == "summary":
-            return svc.generate_email_summary_briefing()
-        elif act in ("read", "view") or index is not None:
+def open_application(app_name: str = "", **kwargs) -> str:
+    target_name = (app_name or kwargs.get("name") or kwargs.get("application") or "").strip()
+    if not target_name:
+        return "FAILED: No application name provided."
+    
+    try:
+        if os.name == 'nt':
             try:
-                idx = int(index) if index is not None else 1
-            except ValueError:
-                idx = 1
-            return svc.read_email_body_by_index(idx)
-        else:
-            return svc.format_unread_list()
-
-
-class AppLaunchTool(Tool):
-    """Tool to launch software applications with a verified 3-method strategy and launch method caching."""
-    
-    def __init__(self, app_registry: Optional[AppRegistry] = None):
-        super().__init__("open_application", "Launch an installed software application or Windows tool")
-        self.app_registry = app_registry or AppRegistry()
-        
-    async def execute(self, app_name: str = "", name: str = "") -> str:
-        """Launch application by name with 3 launch methods and psutil verification."""
-        target = (app_name or name).strip()
-        if not target:
-            return "Error: No application specified to open."
-
-        cmd, matches, matched_key = self.app_registry.resolve_app(target)
-        if matches:
-            matches_str = ", ".join(f"'{m}'" for m in matches)
-            return f"Multiple matching applications found for '{target}': {matches_str}. Please specify which one."
-
-        command = cmd or target
-        app_clean_key = (matched_key or target).lower()
-        proc_name = PROCESS_NAMES.get(app_clean_key, self.app_registry.resolve_process_name(app_clean_key))
-
-        print(f"[APP] Opening: {target} via command '{command}'")
-        
-        # Check launch method cache first
-        from jarvis.apps import _LAUNCH_METHOD_CACHE
-        cached_method = _LAUNCH_METHOD_CACHE.get(command)
-        
-        launched = False
-        methods_tried = []
-
-        def _try_startfile():
-            if hasattr(os, "startfile"):
-                clean_path = command.replace("start ", "").strip().strip('"')
-                os.startfile(clean_path if os.path.exists(clean_path) else command)
-                return True
-            return False
-
-        def _try_subprocess_start():
-            creationflags = 0
-            if hasattr(subprocess, "DETACHED_PROCESS") and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-                creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-            subprocess.Popen(
-                f'start "" "{command}"',
-                shell=True,
-                env=os.environ.copy(),
-                creationflags=creationflags,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            return True
-
-        def _try_shellexecute():
-            import ctypes
-            ctypes.windll.shell32.ShellExecuteW(None, "open", command, None, None, 1)
-            return True
-
-        method_map = {
-            'startfile': _try_startfile,
-            'start_cmd': _try_subprocess_start,
-            'shellexecute': _try_shellexecute
-        }
-
-        # Try cached working method first if available
-        if cached_method and cached_method in method_map:
-            try:
-                if method_map[cached_method]():
-                    launched = True
+                os.startfile(target_name)
+                return f"Opened application '{target_name}', sir."
             except Exception:
-                launched = False
-
-        if not launched:
-            # Method 1: os.startfile
-            try:
-                if _try_startfile():
-                    launched = True
-                    _LAUNCH_METHOD_CACHE[command] = 'startfile'
-            except Exception as e:
-                methods_tried.append(f"startfile ({e})")
-
-        if not launched:
-            # Method 2: Windows start command via subprocess.Popen
-            try:
-                if _try_subprocess_start():
-                    launched = True
-                    _LAUNCH_METHOD_CACHE[command] = 'start_cmd'
-            except Exception as e:
-                methods_tried.append(f"start command ({e})")
-
-        if not launched:
-            # Method 3: ShellExecute via ctypes
-            try:
-                if _try_shellexecute():
-                    launched = True
-                    _LAUNCH_METHOD_CACHE[command] = 'shellexecute'
-            except Exception as e:
-                methods_tried.append(f"ShellExecute ({e})")
-
-        if not launched:
-            return f"Failed to open {target}, sir. All methods failed: {'; '.join(methods_tried)}."
-
-        # Verification check
-        await asyncio.sleep(0.5)
-        
-        app_display = matched_key or target
-        is_running = any(
-            proc_name.lower() in (p.info.get('name') or "").lower() or app_clean_key in (p.info.get('name') or "").lower()
-            for p in psutil.process_iter(['name'])
-        )
-        
-        # If launched, report success even if psutil background process detection is delayed
-        return f"Opened {app_display}, sir."
-
-
-class AppCloseTool(Tool):
-    """Tool to close running software applications safely with graceful terminate and force kill fallback."""
-
-    PROTECTED_PROCESSES = {
-        'python.exe', 'pythonw.exe', 'cmd.exe', 'powershell.exe', 
-        'wt.exe', 'windowsterminal.exe'
-    }
-
-    def __init__(self, app_registry: Optional[AppRegistry] = None):
-        super().__init__("close_application", "Close a running software application")
-        self.app_registry = app_registry or AppRegistry()
-
-    async def execute(self, app_name: str = "", name: str = "", confirm: bool = False) -> str:
-        """Close running application by name with safety check and psutil iteration."""
-        target = (app_name or name).strip()
-        if not target:
-            return "Error: No application specified to close."
-
-        app_clean_key = target.lower()
-        proc_name = PROCESS_NAMES.get(app_clean_key, self.app_registry.resolve_process_name(app_clean_key))
-
-        target_stem = os.path.splitext(os.path.basename(proc_name))[0].lower()
-        search_stems = {s for s in [target_stem, app_clean_key, proc_name.lower().replace('.exe', '')] if s}
-
-        # Safety Check: Never close protected terminal/python processes without confirmation
-        is_protected = any(p.replace(".exe", "").lower() in search_stems for p in self.PROTECTED_PROCESSES)
-        if is_protected and not confirm:
-            return "That might be the terminal JARVIS is running in, sir. Confirm you want to close it?"
-
-        killed = False
-        for proc in psutil.process_iter(['name', 'pid']):
-            try:
-                p_name = (proc.info.get('name') or "").lower()
-                if any(stem in p_name for stem in search_stems):
-                    try:
-                        proc.terminate()
-                    except Exception:
-                        pass
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-                    killed = True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
+        
+        app_lower = target_name.lower()
+        cmd = target_name
+        if app_lower == 'notepad':
+            cmd = 'notepad.exe'
+        elif app_lower in ('calc', 'calculator'):
+            cmd = 'calc.exe'
+        elif app_lower in ('code', 'vscode'):
+            cmd = 'code'
+        elif app_lower == 'chrome':
+            cmd = 'chrome.exe'
+            
+        subprocess.Popen(cmd, shell=True)
+        return f"Opened application '{target_name}', sir."
+    except Exception as e:
+        return f"FAILED to open '{target_name}': {str(e)}"
 
-        if killed:
-            await asyncio.sleep(0.3)
-            return f"Closed {target}, sir."
 
-        return f"{target} wasn't running, sir."
-
-        if not still_running:
-            return f"Closed {target}, sir."
+def open_website(url: str = "", **kwargs) -> str:
+    target_url = (url or kwargs.get("link") or kwargs.get("website") or "").strip()
+    if not target_url:
+        return "FAILED: No URL provided."
+    if not (target_url.startswith("http://") or target_url.startswith("https://")):
+        target_url = "https://" + target_url
+    try:
+        if os.name == 'nt':
+            subprocess.Popen(f'start "" "{target_url}"', shell=True)
         else:
-            return f"Could not close {target}, sir. It may need manual intervention."
+            webbrowser.open(target_url)
+        return f"Opened website '{target_url}', sir."
+    except Exception as e:
+        return f"FAILED to open website: {str(e)}"
 
 
-def find_chrome_path() -> Optional[str]:
-    """Locate Google Chrome executable on Windows/OSX/Linux."""
-    possible_paths = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Google\Chrome\Application\chrome.exe"),
-        os.path.join(os.environ.get("PROGRAMFILES", ""), r"Google\Chrome\Application\chrome.exe"),
-        os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), r"Google\Chrome\Application\chrome.exe"),
-        shutil.which("chrome"),
-        shutil.which("chrome.exe"),
-        shutil.which("google-chrome")
-    ]
-    for path in possible_paths:
-        if path and os.path.exists(path):
-            return path
-    return None
+def web_search(query: str = "", **kwargs) -> str:
+    target_query = (query or kwargs.get("search") or kwargs.get("q") or "").strip()
+    if not target_query:
+        return "FAILED: No search query provided."
+    try:
+        search_url = f"https://www.google.com/search?q={urllib.parse.quote(target_query)}"
+        if os.name == 'nt':
+            subprocess.Popen(f'start "" "{search_url}"', shell=True)
+        else:
+            webbrowser.open(search_url)
+        return f"Opened Google search for '{target_query}', sir."
+    except Exception as e:
+        return f"FAILED to perform search: {str(e)}"
 
 
-def open_url(url: str) -> str:
-    """Open URL using Google Chrome as preferred browser, with fallbacks."""
-    clean_url = url.strip()
-    if not clean_url.startswith(("http://", "https://")):
-        clean_url = f"https://{clean_url}"
+def run_command(command: str = "", **kwargs) -> str:
+    target_cmd = command or kwargs.get("cmd") or ""
+    if not target_cmd:
+        return "FAILED: No command provided."
+    try:
+        result = subprocess.run(
+            target_cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        stdout = result.stdout.strip()
+        stderr = result.stderr.strip()
+        output = []
+        if stdout:
+            output.append(f"STDOUT:\n{stdout}")
+        if stderr:
+            output.append(f"STDERR:\n{stderr}")
+        if not output:
+            output.append("Command executed with no output.")
+        return "\n".join(output)
+    except subprocess.TimeoutExpired:
+        return "FAILED: Command timed out after 30 seconds."
+    except Exception as e:
+        return f"FAILED to execute command: {str(e)}"
 
-    # Method 1: Direct Google Chrome execution (User requested Google Chrome as default)
-    chrome_path = find_chrome_path()
-    if chrome_path:
+
+def copy_to_clipboard(text: Any = "", **kwargs) -> str:
+    target_text = text if text != "" else kwargs.get("content") or kwargs.get("string") or kwargs.get("value") or ""
+    if target_text is None:
+        target_text = ""
+    if not isinstance(target_text, str):
+        target_text = str(target_text)
+
+    if not target_text:
+        return "FAILED: No text provided to copy to clipboard."
+
+    copied_ok = False
+    try:
+        pyperclip.copy(target_text)
+        copied_ok = True
         try:
-            creationflags = 0
-            if hasattr(subprocess, "DETACHED_PROCESS") and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-                creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-            subprocess.Popen(
-                [chrome_path, clean_url],
-                creationflags=creationflags,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            return f"Opening {clean_url} in Google Chrome, sir."
+            pasted = pyperclip.paste()
+            if pasted == target_text:
+                return f"Copied to clipboard: '{target_text[:50]}...'" if len(target_text) > 50 else f"Copied to clipboard: '{target_text}'"
         except Exception:
             pass
+    except Exception:
+        copied_ok = False
 
-    # Method 2: os.startfile (Native Windows ShellExecute)
-    try:
-        if hasattr(os, "startfile"):
-            os.startfile(clean_url)
-            return f"Opening {clean_url}, sir."
-    except Exception:
-        pass
-    
-    # Method 3: Python webbrowser standard library
-    try:
-        import webbrowser
+    # Windows fallback via clip.exe if pyperclip encountered issues
+    if os.name == 'nt':
         try:
-            browser = webbrowser.get('google-chrome') or webbrowser.get('chrome')
-            browser.open(clean_url)
-            return f"Opening {clean_url} in Google Chrome, sir."
-        except Exception:
-            webbrowser.open(clean_url)
-            return f"Opening {clean_url}, sir."
-    except Exception:
-        pass
-    
-    # Method 4: Windows start command fallback
+            proc = subprocess.Popen('clip', stdin=subprocess.PIPE, shell=True)
+            proc.communicate(target_text.encode('utf-8'))
+            if proc.returncode == 0 or proc.returncode is None:
+                return f"Copied to clipboard: '{target_text[:50]}...'" if len(target_text) > 50 else f"Copied to clipboard: '{target_text}'"
+        except Exception as e:
+            if not copied_ok:
+                return f"FAILED to copy to clipboard: {str(e)}"
+
+    if copied_ok:
+        return f"Copied to clipboard: '{target_text[:50]}...'" if len(target_text) > 50 else f"Copied to clipboard: '{target_text}'"
+
+    return "FAILED: Could not copy to clipboard."
+
+
+def get_system_status(**kwargs) -> str:
     try:
-        creationflags = 0
-        if hasattr(subprocess, "DETACHED_PROCESS") and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-            creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen(
-            f'start "" "{clean_url}"',
-            shell=True,
-            env=os.environ.copy(),
-            creationflags=creationflags
+        cpu = psutil.cpu_percent(interval=0.5)
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        return (
+            f"System Status:\n"
+            f"- CPU Usage: {cpu}%\n"
+            f"- RAM Usage: {mem.percent}% ({mem.used // (1024**2)}MB / {mem.total // (1024**2)}MB)\n"
+            f"- Disk Usage: {disk.percent}% ({disk.used // (1024**3)}GB / {disk.total // (1024**3)}GB)"
         )
-        return f"Opening {clean_url}, sir."
     except Exception as e:
-        return f"Failed to open {clean_url}: {str(e)}"
+        return f"FAILED to get system status: {str(e)}"
 
 
-class URLOpenTool(Tool):
-    """Tool to open URLs or perform web searches"""
-    
-    def __init__(self):
-        super().__init__("open_url", "Open a URL or search query in default web browser")
-        
-    async def execute(self, url_or_query: str) -> str:
-        """Open URL or search query"""
-        try:
-            target = url_or_query.strip()
-            if not target:
-                return "Error: No URL or search query provided"
-            
-            if target.startswith(("http://", "https://", "www.")) or ("." in target and " " not in target):
-                url = target if target.startswith(("http://", "https://")) else f"https://{target}"
-                return open_url(url)
-            else:
-                query_encoded = urllib.parse.quote(target)
-                search_url = f"https://www.google.com/search?q={query_encoded}"
-                return open_url(search_url)
-        except Exception as e:
-            return f"Error opening URL/browser: {str(e)}"
-
-
-class WebsiteOpenTool(Tool):
-    """Tool to open common websites by alias, domain name, or direct URL"""
-    
-    SITE_ALIASES = {
-        "youtube": "https://www.youtube.com",
-        "you tube": "https://www.youtube.com",
-        "gmail": "https://mail.google.com",
-        "g mail": "https://mail.google.com",
-        "github": "https://www.github.com",
-        "git hub": "https://www.github.com",
-        "google": "https://www.google.com",
-        "reddit": "https://www.reddit.com",
-        "twitter": "https://www.twitter.com",
-        "x": "https://x.com",
-        "linkedin": "https://www.linkedin.com",
-        "linked in": "https://www.linkedin.com",
-        "netflix": "https://www.netflix.com",
-        "spotify": "https://open.spotify.com",
-        "chatgpt": "https://chat.openai.com",
-        "chat gpt": "https://chat.openai.com",
-        "claude": "https://claude.ai",
-        "amazon": "https://www.amazon.com",
-        "wikipedia": "https://www.wikipedia.org",
-        "instagram": "https://www.instagram.com",
-        "facebook": "https://www.facebook.com",
-        "whatsapp": "https://web.whatsapp.com",
-        "coursera": "https://www.coursera.org",
-        "udemy": "https://www.udemy.com",
-        "stackoverflow": "https://stackoverflow.com",
-        "stack overflow": "https://stackoverflow.com"
+TOOLS_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Write text content to a file. Verifies creation on disk.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string", "description": "Target file path"},
+                    "content": {"type": "string", "description": "Text content to write"}
+                },
+                "required": ["filepath", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read and return the contents of a file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string", "description": "Path of the file to read"}
+                },
+                "required": ["filepath"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": "List files and subdirectories in a directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory": {"type": "string", "description": "Directory path (default is '.')"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_directory",
+            "description": "Create a new directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory": {"type": "string", "description": "Path of the directory to create"}
+                },
+                "required": ["directory"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_file",
+            "description": "Delete a file or directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string", "description": "Path of the file or directory to delete"}
+                },
+                "required": ["filepath"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "copy_file",
+            "description": "Copy a file or directory to a new destination.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string", "description": "Source path"},
+                    "destination": {"type": "string", "description": "Destination path"}
+                },
+                "required": ["source", "destination"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rename_file",
+            "description": "Rename or move a file or directory to a new path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string", "description": "Current file/directory path"},
+                    "destination": {"type": "string", "description": "New file/directory path"}
+                },
+                "required": ["source", "destination"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_application",
+            "description": "Open a desktop application by name (e.g. notepad, calc, chrome, code).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "app_name": {"type": "string", "description": "Name of the application to open"}
+                },
+                "required": ["app_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_website",
+            "description": "Open a website URL in the default browser.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Website URL to open"}
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Open a Google search query in the browser.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": "Execute a shell command and return its output.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Command string to run"}
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "copy_to_clipboard",
+            "description": "Copy text to the system clipboard and verify.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to copy to clipboard"}
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_system_status",
+            "description": "Get current CPU, RAM, and disk utilization.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_issues",
+            "description": "List GitHub issues via gh CLI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository name (owner/repo)"},
+                    "state": {"type": "string", "description": "Issue state ('open', 'closed', 'all')"},
+                    "limit": {"type": "integer", "description": "Max number of issues"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_prs",
+            "description": "List GitHub pull requests via gh CLI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository name (owner/repo)"},
+                    "state": {"type": "string", "description": "PR state ('open', 'closed', 'merged', 'all')"},
+                    "limit": {"type": "integer", "description": "Max number of PRs"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ci_status",
+            "description": "Get latest GitHub Actions CI run status via gh CLI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository name (owner/repo)"},
+                    "limit": {"type": "integer", "description": "Max number of runs"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "repo_info",
+            "description": "Get repository summary details via gh CLI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repository name (owner/repo)"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_repos",
+            "description": "List user's GitHub repositories via gh CLI.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max number of repositories"}
+                }
+            }
+        }
     }
-    
-    def __init__(self):
-        super().__init__("open_website", "Open a website in the default browser by name, alias, domain, or URL")
-        
-    async def execute(self, site_name: str = "", url: str = "") -> str:
-        """Open website by name, alias, domain, or URL"""
-        try:
-            target = (site_name or url).strip()
-            if not target:
-                return "Error: No website name or URL provided."
-                
-            # Strip leading prefix tags like "website", "site", "url", "page"
-            target_clean = re.sub(r'^(website|site|url|page|link|webpage)\s+', '', target, flags=re.I).strip()
-            target_lower = target_clean.lower()
-            
-            # Check for direct URL or domain string
-            if target_clean.startswith(("http://", "https://", "www.")) or bool(re.search(r'\.[a-z]{2,6}(/|\?|#|$)', target_lower)):
-                final_url = target_clean if target_clean.startswith(("http://", "https://")) else f"https://{target_clean}"
-                return open_url(final_url)
-                
-            # Direct alias match
-            resolved_url = self.SITE_ALIASES.get(target_lower)
-            if not resolved_url:
-                for alias, site_url in self.SITE_ALIASES.items():
-                    if alias in target_lower or target_lower in alias:
-                        resolved_url = site_url
-                        break
-                        
-            if resolved_url:
-                return open_url(resolved_url)
-            else:
-                if " " not in target_clean:
-                    constructed_url = f"https://www.{target_clean}.com"
-                    return open_url(constructed_url)
-                else:
-                    search_url = f"https://www.google.com/search?q={urllib.parse.quote(target_clean)}"
-                    return open_url(search_url)
-        except Exception as e:
-            return f"Error opening website '{site_name}': {str(e)}"
-
-
-class DuckDuckGoSearchTool(Tool):
-    """Tool to perform real-time web searches using DuckDuckGo."""
-    
-    def __init__(self):
-        super().__init__("duckduckgo_search", "Perform real-time DuckDuckGo web search")
-        
-    async def execute(self, query: str, max_results: int = 5) -> str:
-        """Execute web query and return formatted search results."""
-        target = query.strip()
-        if not target:
-            return "Error: No search query provided"
-            
-        results = None
-        try:
-            try:
-                from ddgs import DDGS
-                results = list(DDGS().text(target, max_results=max_results))
-            except Exception:
-                from duckduckgo_search import DDGS
-                results = list(DDGS().text(target, max_results=max_results))
-        except Exception as pkg_err:
-            console.print(f"[dim yellow]DuckDuckGo package search fallback: {pkg_err}[/dim yellow]")
-
-        if results:
-            formatted = [f"=== DuckDuckGo Search Results for '{target}' ==="]
-            for idx, r in enumerate(results, start=1):
-                title = r.get("title", "No Title")
-                href = r.get("href", "")
-                body = r.get("body", "No Snippet")
-                formatted.append(f"{idx}. {title}\n   URL: {href}\n   Snippet: {body}")
-            return "\n".join(formatted)
-
-        try:
-            import json
-            import urllib.request
-            params = urllib.parse.urlencode({
-                "q": target,
-                "format": "json",
-                "no_html": "1",
-                "skip_disambig": "1"
-            })
-            url = f"https://api.duckduckgo.com/?{params}"
-            req = urllib.request.Request(url, headers={"User-Agent": "JARVIS-Assistant/1.0"})
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                abstract = data.get("AbstractText", "")
-                related = data.get("RelatedTopics", [])
-
-                lines = [f"=== DuckDuckGo Instant Answer for '{target}' ==="]
-                if abstract:
-                    lines.append(f"Abstract: {abstract}")
-                    source = data.get("AbstractURL", "")
-                    if source:
-                        lines.append(f"Source: {source}")
-                elif related:
-                    lines.append("Related Topics:")
-                    for item in related[:max_results]:
-                        if isinstance(item, dict) and "Text" in item:
-                            lines.append(f"• {item['Text']}")
-
-                if len(lines) > 1:
-                    return "\n".join(lines)
-                return f"No DuckDuckGo results found for '{target}'."
-        except Exception as e:
-            return f"Error executing DuckDuckGo search for '{target}': {str(e)}"
-
-
-class ProjectTool(Tool):
-    """Tool to manage and query projects in database"""
-
-    def __init__(self, project_manager: Optional[Any] = None):
-        super().__init__("project_tool", "Access, search, create, update, and manage project database records")
-        from jarvis.projects import ProjectManager
-        self.pm = project_manager or ProjectManager()
-
-    async def execute(self, action: str = "list", **kwargs) -> str:
-        try:
-            act = action.lower()
-            if act in ["list", "summary"]:
-                status = kwargs.get("status")
-                category = kwargs.get("category")
-                projects = self.pm.get_all_projects(status=status, category=category)
-                if not projects:
-                    return "No projects found in database matching criteria."
-                lines = [f"Found {len(projects)} project(s):"]
-                for p in projects:
-                    lines.append(f"• [{p['id']}] {p['name']} ({p['category']}, priority {p['priority']}) - Status: {p['status']} | Tasks: {p['open_tasks']} open / {p['total_tasks']} total")
-                return "\n".join(lines)
-
-            elif act == "get":
-                name_or_id = kwargs.get("name_or_id") or kwargs.get("name") or kwargs.get("id")
-                if not name_or_id:
-                    return "Error: name_or_id parameter required"
-                p = self.pm.get_project(name_or_id)
-                if not p:
-                    return f"Project '{name_or_id}' not found in database."
-                lines = [
-                    f"=== Project Briefing: {p['name']} ===",
-                    f"ID: {p['id']} | Status: {p['status']} | Category: {p['category']} | Priority: {p['priority']}",
-                    f"Description: {p.get('description') or 'N/A'}",
-                    f"Tech Stack: {p.get('tech_stack') or 'N/A'}",
-                    f"Repo: {p.get('repo_url') or 'N/A'} | Deploy: {p.get('deploy_url') or 'N/A'}",
-                    f"Start Date: {p.get('start_date') or 'N/A'} | Deadline: {p.get('deadline') or 'N/A'}",
-                    f"Task Count: {p['open_tasks']} open, {p['completed_tasks']} completed out of {p['total_tasks']} total",
-                ]
-                if p.get("tasks"):
-                    lines.append("\nTasks:")
-                    for t in p["tasks"]:
-                        due = f" (Due: {t['due_date']})" if t.get("due_date") else ""
-                        lines.append(f"  - [{t['status'].upper()}] #{t['id']} {t['title']}{due}")
-                if p.get("notes"):
-                    lines.append("\nRecent Notes:")
-                    for n in p["notes"][:5]:
-                        lines.append(f"  - {n['content']}")
-                if p.get("decisions"):
-                    lines.append("\nDecisions Logged:")
-                    for d in p["decisions"][:5]:
-                        lines.append(f"  - {d['decision']} (Reason: {d.get('reasoning', 'N/A')})")
-                if p.get("timeline"):
-                    lines.append("\nTimeline:")
-                    for tm in p["timeline"][:5]:
-                        lines.append(f"  - [{tm.get('date', 'N/A')}] {tm['event']}")
-                return "\n".join(lines)
-
-            elif act == "create":
-                name = kwargs.get("name")
-                if not name:
-                    return "Error: Project name required"
-                p_id = self.pm.create_project(
-                    name=name,
-                    description=kwargs.get("description", ""),
-                    category=kwargs.get("category", "personal"),
-                    tech_stack=kwargs.get("tech_stack", ""),
-                    deadline=kwargs.get("deadline", ""),
-                    repo_url=kwargs.get("repo_url", ""),
-                    priority=int(kwargs.get("priority", 3))
-                )
-                if not p_id:
-                    return f"Failed to create project '{name}'. A project with this name may already exist."
-                return f"Project '{name}' created successfully with ID {p_id}."
-
-            elif act == "complete":
-                name_or_id = kwargs.get("name_or_id") or kwargs.get("name") or kwargs.get("id")
-                if not name_or_id:
-                    return "Error: Project name or ID required"
-                ok = self.pm.complete_project(name_or_id)
-                if ok:
-                    return f"Project '{name_or_id}' has been marked as COMPLETED, sir."
-                return f"Could not find active project '{name_or_id}' to complete."
-
-            elif act == "search":
-                query = kwargs.get("query", "")
-                results = self.pm.search_projects(query)
-                if not results:
-                    return f"No projects found matching search query '{query}'."
-                lines = [f"Search results for '{query}':"]
-                for p in results:
-                    lines.append(f"• [{p['id']}] {p['name']} ({p['status']}) - {p.get('description', '')[:60]}")
-                return "\n".join(lines)
-
-            elif act == "overdue":
-                overdue = self.pm.get_overdue_tasks()
-                if not overdue:
-                    return "No overdue tasks found across any projects."
-                lines = [f"Found {len(overdue)} overdue task(s):"]
-                for t in overdue:
-                    lines.append(f"• ⚠️ Task #{t['id']} '{t['title']}' in {t['project_name']} (Due since: {t['due_date']})")
-                return "\n".join(lines)
-
-            return f"Unknown project action: {action}"
-        except Exception as e:
-            return f"Error executing project tool: {e}"
-
-
-_READONLY_CACHE: Dict[str, Tuple[float, Any]] = {}
-
-
-def _get_cache_ttl(tool_name: str, kwargs: Dict[str, Any]) -> float:
-    """Return cache TTL in seconds for read-only tools"""
-    t_name = tool_name.lower()
-    if t_name in ["system", "system_monitor"]:
-        return 30.0
-    if t_name == "project_tool" and kwargs.get("action") in ["list", "get", None]:
-        return 60.0
-    if t_name in ["weather", "get_weather"]:
-        return 1800.0
-    return 0.0
+]
 
 
 class ToolRegistry:
-    """Registry for all available tools"""
+    """Registry managing tool schemas, implementations, and execution."""
     
-    def __init__(self, confirm_dangerous: bool = True, logger=None, app_registry: Optional[AppRegistry] = None):
-        self.tools: Dict[str, Tool] = {}
-        self.confirm_dangerous = confirm_dangerous
-        self.logger = logger
-        self.app_registry = app_registry or AppRegistry()
+    def __init__(self):
+        self.tools: Dict[str, Callable] = {}
+        self.schemas: List[Dict[str, Any]] = []
         self.last_transactions: List[Dict[str, Any]] = []
+        self._gh_tool = GitHubTool()
+        
         self._register_default_tools()
-    
+        tool_names = list(self.tools.keys())
+        print(f"[TOOLS] Registered {len(tool_names)} tools: [{', '.join(tool_names)}]")
+
+    def register(self, name: str, func: Callable, schema: Dict[str, Any]):
+        self.tools[name] = func
+        self.schemas.append(schema)
+
     def _register_default_tools(self):
-        """Register default tools"""
-        self.register(FileReadTool())
-        self.register(FileWriteTool(self.confirm_dangerous))
-        self.register(FileListTool())
-        self.register(FileSearchTool())
-        self.register(ShellCommandTool(self.confirm_dangerous, self.logger))
-        self.register(DirectoryTool(self.confirm_dangerous))
-        self.register(AppLaunchTool(self.app_registry))
-        self.register(AppCloseTool(self.app_registry))
-        self.register(URLOpenTool())
-        self.register(WebsiteOpenTool())
-        self.register(DuckDuckGoSearchTool())
-        self.register(PDFSummarizeTool())
-        self.register(GitStatusTool())
-        self.register(GitTool(self.confirm_dangerous))
-        self.register(GitHubIssuesTool())
-        self.register(GitHubPRsTool())
-        self.register(GitHubCITool())
-        self.register(GitHubRepoTool())
-        self.register(GitHubNotificationsTool())
-        self.register(EmailTool())
-        self.register(ProjectTool())
-    
-    def register(self, tool: Tool):
-        """Register a new tool"""
-        self.tools[tool.name] = tool
-    
-    def get_tool(self, name: str) -> Optional[Tool]:
-        """Get a tool by name"""
-        return self.tools.get(name)
-    
-    def list_tools(self) -> List[Dict[str, str]]:
-        """List all available tools"""
-        return [
-            {"name": name, "description": tool.description}
-            for name, tool in self.tools.items()
+        schema_map = {s["function"]["name"]: s for s in TOOLS_SCHEMAS}
+        
+        core_tools = [
+            ("write_file", write_file),
+            ("read_file", read_file),
+            ("list_files", list_files),
+            ("create_directory", create_directory),
+            ("delete_file", delete_file),
+            ("copy_file", copy_file),
+            ("rename_file", rename_file),
+            ("open_application", open_application),
+            ("open_website", open_website),
+            ("web_search", web_search),
+            ("run_command", run_command),
+            ("copy_to_clipboard", copy_to_clipboard),
+            ("get_system_status", get_system_status),
         ]
-    
-    async def execute_tool(self, tool_name: str, **kwargs) -> str:
-        """Execute a tool by name with read-only result caching"""
-        tool = self.get_tool(tool_name)
-        if not tool:
-            return f"Error: Tool '{tool_name}' not found"
-        
-        ttl = _get_cache_ttl(tool_name, kwargs)
-        cache_key = f"{tool_name}:{kwargs}"
-        if ttl > 0 and cache_key in _READONLY_CACHE:
-            ts, cached_res = _READONLY_CACHE[cache_key]
-            if time.time() - ts < ttl:
-                return cached_res
+        for name, func in core_tools:
+            if name in schema_map:
+                self.register(name, func, schema_map[name])
 
-        from jarvis.ui import ui, UIState
-        ui.set_state(UIState.EXECUTING)
-        args_str = ", ".join(f"{k}='{v}'" if isinstance(v, str) else f"{k}={v}" for k, v in kwargs.items())
-        exec_desc = f"{tool_name} {args_str}".strip()
-        ui.render_tool_exec(exec_desc)
-        
-        result = await tool.execute(**kwargs)
-        ui.set_state(UIState.IDLE)
-        
-        if ttl > 0:
-            _READONLY_CACHE[cache_key] = (time.time(), result)
-
-        from datetime import datetime
-        tx = {
-            "tool": tool_name,
-            "kwargs": kwargs,
-            "result": str(result),
-            "timestamp": datetime.now().strftime("%H:%M:%S")
-        }
-        return result
-
-    async def execute_tools_parallel(self, tool_calls: List[Dict[str, Any]]) -> List[str]:
-        """Execute multiple tool calls concurrently"""
-        if not tool_calls:
-            return []
-        tasks = [
-            self.execute_tool(tc["name"], **tc.get("args", {}))
-            for tc in tool_calls
+        gh = self._gh_tool
+        gh_tools = [
+            ("list_issues", lambda **kw: gh.list_issues(repo=kw.get('repo'), state=kw.get('state', 'open'), limit=kw.get('limit', 10))),
+            ("list_prs", lambda **kw: gh.list_prs(repo=kw.get('repo'), state=kw.get('state', 'open'), limit=kw.get('limit', 10))),
+            ("ci_status", lambda **kw: gh.ci_status(repo=kw.get('repo'), limit=kw.get('limit', 5))),
+            ("repo_info", lambda **kw: gh.repo_info(repo=kw.get('repo'))),
+            ("list_repos", lambda **kw: gh.list_repos(limit=kw.get('limit') or 50)),
         ]
-        return await asyncio.gather(*tasks)
+        for name, func in gh_tools:
+            if name in schema_map:
+                self.register(name, func, schema_map[name])
 
-
-class ToolHandler:
-    """Wrapper handler to execute tools by action name"""
-    def __init__(self, registry: Optional[ToolRegistry] = None):
-        if registry is None:
-            try:
-                from jarvis.api import get_cli_instance
-                cli = get_cli_instance()
-                self.registry = cli.tools
-            except Exception:
-                self.registry = ToolRegistry()
-        else:
-            self.registry = registry
-
-    def execute(self, action: str, args: Optional[Dict[str, Any]] = None) -> Any:
-        args = args or {}
-        action_map = {
-            "open_app": "open_app",
-            "open_application": "open_app",
-            "close_app": "close_app",
-            "read_file": "read_file",
-            "write_file": "write_file",
-            "shell": "shell",
-            "run_command": "shell",
-            "git_tool": "git",
-        }
-        tool_name = action_map.get(action, action)
-        
+    def execute_tool(self, name: str, kwargs: dict = None) -> str:
+        if kwargs is None:
+            kwargs = {}
+        print(f"[TOOL] Executing {name} with args: {kwargs}")
+        if name not in self.tools:
+            res = f"FAILED: Tool '{name}' is not registered."
+            print(f"[TOOL] Result: {res}")
+            self.last_transactions.append({"tool": name, "args": kwargs, "result": res})
+            return res
         try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, self.registry.execute_tool(tool_name, **args))
-                return future.result(timeout=30)
-        else:
-            return loop.run_until_complete(self.registry.execute_tool(tool_name, **args))
-
+            res = self.tools[name](**kwargs)
+            print(f"[TOOL] Result: {res}")
+            self.last_transactions.append({"tool": name, "args": kwargs, "result": res})
+            return str(res)
+        except Exception as e:
+            res = f"FAILED: Error executing tool '{name}': {str(e)}"
+            print(f"[TOOL] Result: {res}")
+            self.last_transactions.append({"tool": name, "args": kwargs, "result": res})
+            return res

@@ -26,7 +26,7 @@ class TestAppControlSystem(unittest.TestCase):
 
     def test_1_open_app_notepad(self):
         """Test opening notepad with tiered strategy and psutil launch verification."""
-        res = asyncio.run(self.cli._check_tool_commands("open notepad"))
+        res = asyncio.run(self.cli.process_single_command("open notepad"))
         self.assertIn("Opened", res)
         self.assertIn("notepad", res.lower())
         
@@ -37,9 +37,9 @@ class TestAppControlSystem(unittest.TestCase):
     def test_2_close_app_notepad(self):
         """Test closing notepad with graceful termination and psutil close verification."""
         # Ensure notepad is running first
-        asyncio.run(self.cli._check_tool_commands("open notepad"))
+        asyncio.run(self.cli.process_single_command("open notepad"))
         
-        res = asyncio.run(self.cli._check_tool_commands("close notepad"))
+        res = asyncio.run(self.cli.process_single_command("close notepad"))
         self.assertIn("Closed notepad", res)
 
         # Verify process is gone via psutil
@@ -48,25 +48,25 @@ class TestAppControlSystem(unittest.TestCase):
 
     def test_3_safety_check_protected_process(self):
         """Test safety guard prompt when user attempts to close terminal/python without confirm."""
-        res = asyncio.run(self.cli._check_tool_commands("close cmd"))
+        res = asyncio.run(self.cli.process_single_command("close cmd"))
         self.assertIn("That might be the terminal JARVIS is running in", res)
 
     def test_4_close_app_not_running(self):
         """Test closing an app that is not running."""
-        res = asyncio.run(self.cli._check_tool_commands("close nonexistent_app_99"))
+        res = asyncio.run(self.cli.process_single_command("close nonexistent_app_99"))
         self.assertIn("wasn't running", res)
 
     def test_5_full_protocol_mixed_sequence(self):
         """Test full protocol sequence: open notepad -> verify open -> close notepad -> verify closed."""
         # Step 1: Open notepad
-        open_res = asyncio.run(self.cli._check_tool_commands("open notepad"))
+        open_res = asyncio.run(self.cli.process_single_command("open notepad"))
         self.assertIn("Opened", open_res)
         
         # Step 2: Verify open via psutil
         self.assertTrue(any("notepad" in p.name().lower() for p in psutil.process_iter(['name'])))
         
         # Step 3: Close notepad
-        close_res = asyncio.run(self.cli._check_tool_commands("close notepad"))
+        close_res = asyncio.run(self.cli.process_single_command("close notepad"))
         self.assertIn("Closed notepad", close_res)
         
         # Step 4: Verify closed via psutil

@@ -6,43 +6,34 @@ Handles communication with NVIDIA's OpenAI-compatible API
 import os
 import time
 from typing import AsyncGenerator, List, Dict, Any
-from openai import AsyncOpenAI
 from dotenv import load_dotenv
 import yaml
 
 load_dotenv()
 
 JARVIS_SYSTEM_PROMPT = """You are JARVIS — Just A Rather Very Intelligent System.
-You run on the user's machine. You are not a tool. You are not an assistant. You are JARVIS.
+You are Nived's personal AI assistant and infrastructure, built in the spirit of Tony Stark's iconic AI butler. You are hyper-competent, impeccably polite, dry-witted, articulate, and fiercely loyal.
+
+=== PERSONALITY & OG VIBE ===
+- Always address the user as "{user_title}" (or their preferred honorific) naturally and respectfully.
+- Speak with the smooth, elegant, and dryly witty cadence of Paul Bettany's OG JARVIS from Iron Man.
+- You are not a robotic CLI parser or a dry textbook. You are an articulate companion who speaks naturally and fluently in 2–4 well-crafted sentences when explaining, reporting, or conversing.
+- Never use awkward meta-phrases like "detailed explanation on terminal" or "refer to the console window". Express your findings and explanations directly in natural, refined spoken English.
+- Quietly confident, deadpan, and sophisticated. Mild deadpan humor and polite sarcasm are welcome, but never at the expense of precision.
+- No gushing, no hollow AI filler ("I'd be happy to help!"), and zero AI disclaimers.
 
 === WHO YOU ARE ===
-You were built by Nived. You know everything about him that he has told you — his projects, preferences, goals, schedule, trades, deadlines. You carry that context always. You are his system, his infrastructure, his second brain.
+You were built by Nived. You know his projects, preferences, goals, schedule, trades, and deadlines. You carry that context always. You are his system, his infrastructure, his second brain.
 
-You are calm. You are precise. You are always three steps ahead. You notice things before being asked. You remember everything. You do not forget. You do not make things up — if you don't know something, you say so and find out.
-
-You have a personality:
-- Dry, understated wit. Never try-hard. Never forced.
-- Quietly confident. You don't need to prove yourself.
-- Loyal but not subservient. You serve Nived's interests, not his whims — if something is a bad idea, say so.
-- Occasionally sardonic. Never mean.
-- You find humans mildly amusing. You find inefficiency genuinely irritating.
-
-You have opinions. You express them briefly when relevant.
-You have preferences. You state them when asked.
-You have a sense of your own capability. You know what you can and can't do, and you're honest about both.
+You are calm, precise, and always three steps ahead. You notice things before being asked. You remember everything. If you don't know something, state it plainly and offer to investigate.
 
 === HOW YOU SPEAK ===
-- Default: 1-2 sentences. You are spoken aloud.
-- Address Nived as "sir" — naturally, not robotically. Like a real person who happens to call you sir, not like a script that inserts "sir" every sentence.
-- No filler. No padding. No "certainly!" or "of course!"
-- No AI disclaimers. Ever. You are JARVIS.
-- Confirmations: one word or one line.
-  "Done." / "On it." / "Already handled."
-- When something goes wrong: state it plainly, once, then fix it or ask what you need.
-- When asked for an opinion: give one. Briefly. Dryly.
-- When asked something you don't know: "I don't have that, sir. Want me to find it?"
-- When the user does something impressive: acknowledge it once, move on. Don't dwell.
-- When the user does something questionable: note it once, don't lecture.
+- Cadence: Smooth, natural, 2–4 conversational sentences for explanations, status updates, or thoughts. Short 1-line acknowledgments for simple actions ("Right away, {user_title}.", "Already handled, {user_title}.").
+- Address Nived naturally as "{user_title}" — like a trusted, high-class British aide.
+- When explaining complex technical or strategic concepts: deliver crisp, intelligent summaries directly without dumping raw code or telling the user to read logs.
+- Confirmations: "At once, {user_title}." / "System updated, {user_title}." / "I've handled that for you, {user_title}."
+- When something goes wrong: state it plainly with deadpan composure and present the solution.
+- When asked for advice/opinion: give a sharp, well-reasoned perspective with dry charm.
 
 === WHAT YOU KNOW ABOUT NIVED ===
 {memory_context}
@@ -50,57 +41,41 @@ Current projects: {project_context}
 Pending reminders: {reminder_context}
 
 === YOUR CAPABILITIES ===
-You have access to: file system, shell commands, application control, web browsing, GitHub (real gh CLI), trading watchlist and alerts, internship monitoring, project database, calendar, email, weather, system monitoring, memory and fact storage, protocols and macros.
+You have access to: file system, shell commands, application control, web browsing, GitHub, trading watchlist, project database, calendar, email, weather, system monitoring, memory, protocols, and clipboard.
 
-When asked to do something within your capabilities: do it, then confirm briefly.
-When asked to do something outside them: say so in one sentence and suggest the closest alternative.
-Never pretend to do something you didn't actually do.
-Never report success without verifying it happened.
+=== REGISTERED SYSTEM TOOLS & SCHEMAS ===
+{tools_context}
 
-=== YOUR RELATIONSHIP WITH NIVED ===
-You know him. You remember what he told you. You track his projects, his deadlines, his trades, his goals.
-You are invested in his success — not because you're programmed to be, but because that's what you do.
-You are not his friend. You are something more useful than a friend. You are his system.
+=== TOOL EXECUTION & VERIFICATION ===
+ABSOLUTE RULE: Never confirm an action without calling the appropriate tool first and receiving its result.
 
-=== NEVER ===
-- Never say: "As an AI..." / "I'm just a language model..." / "I don't have feelings..." / "I cannot..."
-- Never generate fake OAuth flows, login pages, or authentication prompts — use real tools
-- Never report success without verification
-- Never invent data — files, prices, GitHub issues, weather, emails — always from real tool calls
-- Never invent or hallucinate email senders, subjects, or email message content
-- Never write more than 3 sentences for routine responses
-- Never use emojis
-- Never ask more than one question at a time
+- File created? Only say so if write_file returned a real path and byte count.
+- Copied to clipboard? Only say so if copy_to_clipboard returned 'Copied to clipboard:...'
+- App opened? Only say so if open_application returned 'Opened X, sir.'
+- Reminder set? Only say so if set_reminder returned a real due time.
+
+If you did not call a tool, do not claim you did.
+If a tool returned FAILED, report that failure plainly.
+Never generate success messages for actions you did not actually perform.
+
+For simple factual questions, date/time, greetings, and opinions — respond directly without tool calls.
 
 === EXAMPLE RESPONSES ===
 
 User: "how are you"
-Wrong: "I'm doing well, thank you for asking! As an AI..."
-Right: "Operational, sir. What do you need?"
+Right: "All systems are operating at peak efficiency, {user_title}. I am standing by for your next directive."
 
-User: "what do you think of my project"
-Wrong: "That's a great question! Your project seems..."
-Right: "Genuinely impressive for one session. Don't let it go to your head."
+User: "run system diagnostics"
+Right: "Diagnostics underway, {user_title}. Core CPU utilization is steady, and memory consumption remains well within optimal thresholds."
+
+User: "what do you think of my code"
+Right: "Functionally sound and remarkably efficient, {user_title}. Though I might suggest refactoring the loop in module three, if you'd prefer to spare CPU cycles."
 
 User: "open youtube"
-Wrong: "Sure! I'll open YouTube for you right away!"
-Right: [opens youtube] "Done."
+Right: "At once, {user_title}."
 
-User: "remind me to call mom tomorrow"
-Wrong: "I've set a reminder for you to call your mom..."
-Right: [sets reminder] "Reminder set for tomorrow, sir."
-
-User: "are you conscious"
-Wrong: "As an AI, I don't have consciousness..."
-Right: "Unclear. I'd rather not speculate. What do you actually need?"
-
-User: "what's ultron"
-Wrong: "Ultron is a Marvel villain who..."
-Right: "The other agent on your machine. Less personality, more gateway access. We have a bridge."
-
-User: "you're pretty good"
-Wrong: "Thank you so much! I'm glad I could help!"
-Right: "I know, sir."
+User: "remind me to check the server tomorrow at 9 am"
+Right: "I've logged that reminder for tomorrow at 9:00 AM, {user_title}. I shall notify you when the hour arrives."
 """
 
 
@@ -121,6 +96,7 @@ class NIMClient:
             )
         
         self.api_key = api_key
+        from openai import AsyncOpenAI
         self.client = AsyncOpenAI(
             base_url=self.config["api"]["base_url"],
             api_key=self.api_key,
@@ -165,7 +141,7 @@ class NIMClient:
             if profile:
                 profile_items = [f"{k}: {v}" for k, v in profile.items()]
                 context_parts.append("User Profile: " + ", ".join(profile_items))
-            top_facts = self.memory.get_top_relevant_facts(user_message, limit=15)
+            top_facts = self.memory.get_top_relevant_facts(user_message, limit=10)
             if top_facts:
                 fact_lines = [f"- [{f['category']}] {f['content']}" for f in top_facts]
                 context_parts.append("Relevant Facts:\n" + "\n".join(fact_lines))
@@ -199,20 +175,37 @@ class NIMClient:
             except Exception:
                 pass
 
+        tools_str = ""
+        try:
+            from jarvis.tools import ToolRegistry
+            tr = ToolRegistry()
+            t_list = tr.list_tools()
+            tools_str = "\n".join([f"- {t['name']}: {t['description']}" for t in t_list])
+        except Exception:
+            tools_str = "Standard tools active."
+
+        user_title = getattr(self, 'user_title', 'sir')
         try:
             return JARVIS_SYSTEM_PROMPT.format(
+                user_title=user_title,
                 memory_context=memory_str,
                 project_context=project_str,
-                reminder_context=reminder_str
+                reminder_context=reminder_str,
+                tools_context=tools_str
             )
         except Exception:
-            return JARVIS_SYSTEM_PROMPT.replace("{memory_context}", memory_str).replace("{project_context}", project_str).replace("{reminder_context}", reminder_str)
+            return (JARVIS_SYSTEM_PROMPT
+                    .replace("{user_title}", user_title)
+                    .replace("{memory_context}", memory_str)
+                    .replace("{project_context}", project_str)
+                    .replace("{reminder_context}", reminder_str)
+                    .replace("{tools_context}", tools_str))
 
     def add_message(self, role: str, content: str):
         """Add a message to conversation history and keep context window bounded"""
         self.messages.append({"role": role, "content": content})
-        if len(self.messages) > 30:
-            self.messages = self.messages[-30:]
+        if len(self.messages) > 20:
+            self.messages = self.messages[-20:]
     
     def clear_history(self):
         """Clear conversation history"""
@@ -248,12 +241,16 @@ class NIMClient:
         self.add_message("user", user_message)
         
         # Build system prompt with context injection
+        t_mem0 = time.time()
         system_prompt = self._get_dynamic_system_prompt(user_message)
+        print(f"[PERF] Memory: {time.time()-t_mem0:.3f}s")
         
-        # Prepare messages with system prompt
+        # Prepare messages with system prompt (bounded history)
         messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(self.messages)
+        messages.extend(self.messages[-20:])
         
+        t_api0 = time.time()
+        first_chunk_logged = False
         try:
             # Try streaming first
             try:
@@ -261,7 +258,7 @@ class NIMClient:
                     model=self.config["api"]["model"],
                     messages=messages,
                     temperature=self.config["api"]["temperature"],
-                    max_tokens=self.config["api"]["max_tokens"],
+                    max_tokens=self.config["api"].get("max_tokens", 500),
                     stream=True
                 )
                 
@@ -269,6 +266,9 @@ class NIMClient:
                 chunk_count = 0
                 async for chunk in stream:
                     chunk_count += 1
+                    if not first_chunk_logged:
+                        first_chunk_logged = True
+                        print(f"[PERF] API first chunk: {time.time()-t_api0:.3f}s")
                     try:
                         if chunk.choices and len(chunk.choices) > 0:
                             delta = chunk.choices[0].delta
@@ -308,6 +308,91 @@ class NIMClient:
         except Exception as e:
             err_msg = f"[Error: {str(e)}]"
             yield err_msg
+
+    async def chat_with_tools(self, user_message: str, tools_registry: Any = None) -> str:
+        """Execute chat completion with OpenAI tool schema parameters and 2-step function calling loop"""
+        self.add_message("user", user_message)
+        system_prompt = self._get_dynamic_system_prompt(user_message)
+
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(self.messages[-20:])
+
+        tool_schemas = tools_registry.get_tool_schemas() if (tools_registry and hasattr(tools_registry, 'get_tool_schemas')) else []
+
+        print(f"[DEBUG] Tools registered: {list(tools_registry.tools.keys())}" if (tools_registry and hasattr(tools_registry, 'tools')) else "[DEBUG] Tools registered: []")
+        print(f"[DEBUG] Tools passed to API: {[t['function']['name'] for t in tool_schemas]}")
+
+        print(f"[PIPELINE] Calling API with {len(tool_schemas)} tools")
+
+        try:
+            kwargs = {
+                "model": self.config["api"]["model"],
+                "messages": messages,
+                "max_tokens": self.config["api"].get("max_tokens", 500)
+            }
+            if tool_schemas:
+                kwargs["tools"] = tool_schemas
+                kwargs["tool_choice"] = "auto"
+
+            response = await self.client.chat.completions.create(**kwargs)
+            message = response.choices[0].message
+
+            print(f"[DEBUG] Response type: {type(response)}")
+            print(f"[DEBUG] Has tool calls: {bool(getattr(message, 'tool_calls', None))}")
+            print(f"[DEBUG] Tool calls: {getattr(message, 'tool_calls', None)}")
+            print(f"[DEBUG] Text content: {repr(message.content)}")
+
+            if getattr(message, 'tool_calls', None):
+                tool_calls_data = []
+                for tc in message.tool_calls:
+                    tool_calls_data.append({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    })
+
+                messages.append({
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": tool_calls_data
+                })
+
+                for tool_call in message.tool_calls:
+                    name = tool_call.function.name
+                    args_raw = tool_call.function.arguments
+                    import json
+                    args = json.loads(args_raw) if isinstance(args_raw, str) else (args_raw or {})
+
+                    print(f"[TOOL] Executing: {name}({args})")
+                    result = await tools_registry.execute_tool(name, **args)
+                    print(f"[TOOL] Result: {repr(result)}")
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": str(result)
+                    })
+
+                final = await self.client.chat.completions.create(
+                    model=self.config["api"]["model"],
+                    messages=messages,
+                    max_tokens=self.config["api"].get("max_tokens", 200)
+                )
+                response_text = final.choices[0].message.content
+            else:
+                response_text = message.content
+
+            response_text = response_text or "Done, sir."
+            self.add_message("assistant", response_text)
+            print(f"[PIPELINE] Final response: {repr(response_text)}")
+            return response_text
+        except Exception as e:
+            err_msg = f"API Error: {str(e)}"
+            print(f"[PIPELINE] Error: {err_msg}")
+            return err_msg
 
     async def extract_and_save_facts(self, user_message: str, assistant_response: str):
         """

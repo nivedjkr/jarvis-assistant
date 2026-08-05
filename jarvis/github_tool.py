@@ -192,35 +192,40 @@ class GitHubTool:
     # === REPO INFO ===
     def repo_info(self, repo=None) -> str:
         target_repo = repo or self.default_repo
-        cmd = ['gh', 'repo', 'view', target_repo, '--json', 'name,description,stargazerCount,forks,openIssues,url']
+        cmd = ['gh', 'repo', 'view', target_repo, '--json', 'name,description,stargazerCount,forkCount,url']
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
                 return f"Error: {result.stderr.strip() or result.stdout.strip()}"
             r = json.loads(result.stdout)
             return (f"{r['name']}: {r.get('description', '')}\n"
-                    f"Stars: {r['stargazerCount']} | "
-                    f"Forks: {r['forks']} | "
-                    f"Open issues: {r['openIssues']}\n"
+                    f"Stars: {r.get('stargazerCount', 0)} | "
+                    f"Forks: {r.get('forkCount', 0)}\n"
                     f"URL: {r['url']}")
         except Exception as e:
             return f"Error getting repo info: {str(e)}"
 
-    def list_repos(self, limit=10) -> str:
-        cmd = ['gh', 'repo', 'list', '--limit', str(limit), '--json', 'name,description,url,isPrivate']
+    def list_repos(self, limit=50, **kwargs) -> str:
+        try:
+            lim = int(limit) if (limit is not None and str(limit).isdigit()) else 50
+        except Exception:
+            lim = 50
+        cmd = ['gh', 'repo', 'list', '--limit', str(lim), '--json', 'name,nameWithOwner,description,url,isPrivate,primaryLanguage']
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             if result.returncode != 0:
-                return f"Error: {result.stderr.strip() or result.stdout.strip()}"
+                return f"Error listing repos: {result.stderr.strip() or result.stdout.strip()}"
             repos = json.loads(result.stdout)
             if not repos:
-                return "No repositories found, sir."
-            lines = [
-                f"{'[private]' if r['isPrivate'] else '[public]'} "
-                f"{r['name']}"
-                for r in repos
-            ]
-            return f"Your repos:\n" + "\n".join(lines)
+                return "No repositories found for your account, sir."
+            lines = []
+            for r in repos:
+                vis = "[private]" if r.get('isPrivate') else "[public]"
+                full_name = r.get('nameWithOwner') or r.get('name')
+                lang = f" ({r.get('primaryLanguage', {}).get('name')})" if r.get('primaryLanguage') and isinstance(r.get('primaryLanguage'), dict) and r.get('primaryLanguage', {}).get('name') else ""
+                desc = f" - {r['description']}" if r.get('description') else ""
+                lines.append(f"• {vis} {full_name}{lang}{desc}")
+            return f"Your Repositories ({len(repos)}):\n" + "\n".join(lines)
         except Exception as e:
             return f"Error listing repos: {str(e)}"
 

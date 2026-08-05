@@ -135,6 +135,81 @@ ipcMain.handle('send-slash-command', (event, command) => {
   }
 })
 
+ipcMain.handle('synthesize-speech', (event, text) => {
+  return new Promise((resolve) => {
+    if (!text || typeof text !== 'string') {
+      return resolve('')
+    }
+    const postData = JSON.stringify({ text })
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 8765,
+      path: '/tts',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, (res) => {
+      let data = ''
+      res.on('data', chunk => data += chunk)
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data)
+          resolve(parsed.audio || '')
+        } catch {
+          resolve('')
+        }
+      })
+    })
+    req.on('error', (err) => {
+      console.log('TTS request error:', err.message)
+      resolve('')
+    })
+    req.write(postData)
+    req.end()
+  })
+})
+
+const handleSynthesizeSentence = (event, sentence) => {
+  return new Promise((resolve) => {
+    if (!sentence || typeof sentence !== 'string') {
+      return resolve('')
+    }
+    const postData = JSON.stringify({ sentence })
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 8765,
+      path: '/tts_sentence',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, (res) => {
+      let data = ''
+      res.on('data', chunk => data += chunk)
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data)
+          resolve(parsed.audio || '')
+        } catch {
+          resolve('')
+        }
+      })
+    })
+    req.on('error', (err) => {
+      console.log('TTS sentence request error:', err.message)
+      resolve('')
+    })
+    req.write(postData)
+    req.end()
+  })
+}
+
+ipcMain.handle('jarvis:synthesizeSentence', handleSynthesizeSentence)
+ipcMain.handle('synthesize-sentence', handleSynthesizeSentence)
+
 ipcMain.handle('get-projects', () => fetchJson('http://127.0.0.1:8765/projects'))
 ipcMain.handle('get-reminders', () => fetchJson('http://127.0.0.1:8765/reminders'))
 ipcMain.handle('get-watchlist', () => fetchJson('http://127.0.0.1:8765/watchlist'))

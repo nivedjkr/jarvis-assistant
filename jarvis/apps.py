@@ -39,32 +39,27 @@ DEFAULT_APPS = {
     "edge": "msedge.exe"
 }
 
-DEFAULT_PROCESS_NAMES = {
-    "vscode": "Code.exe",
-    "vs code": "Code.exe",
-    "code": "Code.exe",
-    "visual studio code": "Code.exe",
-    "chrome": "chrome.exe",
-    "google chrome": "chrome.exe",
-    "notepad": "notepad.exe",
-    "calculator": "calc.exe",
-    "calc": "calc.exe",
-    "spotify": "Spotify.exe",
-    "discord": "Discord.exe",
-    "telegram": "Telegram.exe",
-    "word": "WINWORD.EXE",
-    "excel": "EXCEL.EXE",
-    "powerpoint": "POWERPNT.EXE",
-    "explorer": "explorer.exe",
-    "file explorer": "explorer.exe",
-    "paint": "mspaint.exe",
-    "task manager": "taskmgr.exe",
-    "terminal": "WindowsTerminal.exe",
-    "windows terminal": "WindowsTerminal.exe",
-    "cmd": "cmd.exe",
-    "command prompt": "cmd.exe",
-    "powershell": "powershell.exe"
+PROCESS_NAMES = {
+    'notepad':     'notepad.exe',
+    'calculator':  'Calculator.exe',
+    'calc':        'Calculator.exe',
+    'chrome':      'chrome.exe',
+    'vscode':      'Code.exe',
+    'code':        'Code.exe',
+    'visual studio code': 'Code.exe',
+    'explorer':    'explorer.exe',
+    'spotify':     'Spotify.exe',
+    'discord':     'Discord.exe',
+    'telegram':    'Telegram.exe',
+    'word':        'WINWORD.EXE',
+    'excel':       'EXCEL.EXE',
+    'terminal':    'WindowsTerminal.exe',
+    'cmd':         'cmd.exe',
+    'powershell':  'powershell.exe'
 }
+
+DEFAULT_PROCESS_NAMES = PROCESS_NAMES
+_LAUNCH_METHOD_CACHE: Dict[str, str] = {}
 
 
 class AppRegistry:
@@ -87,8 +82,8 @@ class AppRegistry:
                         merged.update(data)
             except (json.JSONDecodeError, IOError):
                 pass
-
-        self.save_apps_data(merged)
+        else:
+            self.save_apps_data(merged)
         return merged
 
     def save_apps_data(self, data: Dict[str, str]):

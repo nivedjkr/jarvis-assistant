@@ -117,11 +117,21 @@ class CalendarService:
             return []
 
     def get_today_summary(self) -> str:
-        """Generate boot greeting calendar summary string for today."""
+        """Generate boot greeting calendar summary string for today without blocking startup."""
         if not self.auth_manager.is_authenticated():
             return ""
 
-        today_events = self.get_events_for_day(date.today())
+        now_ts = time.time()
+        # Return cached events if available to eliminate network delay at boot
+        if self.cached_events and (now_ts - self.last_fetch_time) < self.cache_ttl_seconds:
+            today_str = str(date.today())
+            today_events = [e for e in self.cached_events if str(e.get("start", "")).startswith(today_str)]
+        else:
+            try:
+                today_events = self.get_events_for_day(date.today())
+            except Exception:
+                return ""
+
         if not today_events:
             return "No calendar events scheduled for today."
 

@@ -34,15 +34,33 @@ async def startup():
         if not (hasattr(cli.proactive_monitor, 'thread') and cli.proactive_monitor.thread and cli.proactive_monitor.thread.is_alive()):
             cli.proactive_monitor.start()
 
+async def get_audio_for_text(text: str) -> str:
+    """Synthesize audio to base64 using cached TTSEngine"""
+    if not text or not str(text).strip():
+        return ""
+    try:
+        cli = get_cli_instance()
+        if hasattr(cli, 'voice_manager') and cli.voice_manager and getattr(cli.voice_manager, 'tts', None):
+            return await cli.voice_manager.tts.synthesize_to_base64(str(text))
+        else:
+            from jarvis.voice import TTSEngine
+            tts = TTSEngine(engine="edge", voice="en-GB-RyanNeural")
+            return await tts.synthesize_to_base64(str(text))
+    except Exception as e:
+        print(f"[API] Audio synthesis helper warning: {e}")
+        return ""
+
 async def push_proactive_alert(alert_text: str, alert_type: str = 'reminder') -> bool:
     """Proactive alerts push to frontend over WebSocket without user asking."""
     global active_websocket
     if active_websocket:
         try:
+            audio_b64 = await get_audio_for_text(alert_text)
             await active_websocket.send_json({
                 'type': 'proactive_alert',
                 'text': alert_text,
-                'alert_type': alert_type
+                'alert_type': alert_type,
+                'audio': audio_b64
             })
             return True
         except Exception as e:
@@ -57,8 +75,9 @@ async def websocket_endpoint(websocket: WebSocket):
     active_websocket = websocket
     print("[API] Electron frontend connected")
     
-    # Generate dynamic boot greeting
+    # Generate fast dynamic boot greeting
     cli = get_cli_instance()
+    user_title = 'sir'
     greeting_text = "JARVIS online and standing by."
     if cli and hasattr(cli, 'proactive_monitor') and cli.proactive_monitor:
         try:
@@ -68,12 +87,26 @@ async def websocket_endpoint(websocket: WebSocket):
         except Exception as e:
             print(f"[API] Error generating boot greeting: {e}")
 
-    # Send boot status
+    # Send boot status immediately for fast HUD connection (<10ms)
     await websocket.send_json({
         'type': 'status',
         'status': 'connected',
-        'message': greeting_text
+        'message': greeting_text,
+        'audio': ""
     })
+
+    # Fetch greeting audio with tight timeout so network lag never blocks HUD startup
+    try:
+        greeting_audio = await asyncio.wait_for(get_audio_for_text(greeting_text), timeout=1.5)
+        if greeting_audio:
+            await websocket.send_json({
+                'type': 'response',
+                'text': greeting_text,
+                'audio': greeting_audio,
+                'status': 'speaking'
+            })
+    except Exception:
+        pass
     
     try:
         while True:
@@ -98,9 +131,13 @@ async def handle_chat_message(websocket: WebSocket, data: dict):
     
     try:
         cli = get_cli_instance()
+        if hasattr(cli, 'proactive_monitor') and cli.proactive_monitor:
+            cli.proactive_monitor.touch_user_activity()
         tx_before = len(getattr(cli.tools, 'last_transactions', []))
         
-        response_text = await cli.process_command(user_message)
+        # Process message via unified CLI process_single_command pipeline
+        response_text = await cli.process_single_command(user_message)
+
         if not response_text or not str(response_text).strip():
             response_text = "Done, sir."
 
@@ -113,19 +150,29 @@ async def handle_chat_message(websocket: WebSocket, data: dict):
                     'result': tx.get('result', '')
                 })
 
+        # Synthesize audio with max 1.5s timeout so network lag doesn't delay text delivery
+        audio_b64 = ""
+        try:
+            audio_b64 = await asyncio.wait_for(get_audio_for_text(str(response_text)), timeout=1.5)
+        except Exception:
+            pass
+
         await websocket.send_json({
             'type': 'response',
             'text': str(response_text),
+            'audio': audio_b64,
             'tool_calls': tool_calls,
-            'status': 'speaking'
+            'status': 'speaking' if audio_b64 else 'idle'
         })
         
     except Exception as e:
         import traceback
         traceback.print_exc()
+        err_msg = f'Something went wrong, sir. ({str(e)})'
         await websocket.send_json({
             'type': 'response',
-            'text': f'Something went wrong, sir. ({str(e)})',
+            'text': err_msg,
+            'audio': "",
             'status': 'idle'
         })
 
@@ -140,19 +187,25 @@ async def handle_slash_command(websocket: WebSocket, data: dict):
         if not result or not str(result).strip():
             result = "Command executed, sir."
             
+        audio_b64 = await get_audio_for_text(str(result))
+
         await websocket.send_json({
             'type': 'command_response',
             'text': str(result),
             'command': command,
+            'audio': audio_b64,
             'status': 'idle'
         })
     except Exception as e:
         import traceback
         traceback.print_exc()
+        err_msg = f'Error executing slash command: ({str(e)})'
+        err_audio = await get_audio_for_text(err_msg)
         await websocket.send_json({
             'type': 'command_response',
-            'text': f'Error executing slash command: ({str(e)})',
+            'text': err_msg,
             'command': command,
+            'audio': err_audio,
             'status': 'idle'
         })
 
@@ -161,6 +214,49 @@ async def handle_voice_input(websocket: WebSocket, data: dict):
     if voice_text:
         data['message'] = voice_text
         await handle_chat_message(websocket, data)
+
+# TTS Neural Speech Synthesis Endpoint
+@app.post("/tts")
+async def tts_endpoint(request: dict):
+    # Accepts: { "text": "..." }
+    # Synthesizes neural TTS audio using edge-tts
+    # Returns: { "audio": "data:audio/mp3;base64,..." }
+    text = request.get('text', '')
+    if not text:
+        return {"audio": ""}
+    
+    try:
+        cli = get_cli_instance()
+        if hasattr(cli, 'voice_manager') and cli.voice_manager and getattr(cli.voice_manager, 'tts', None):
+            audio_data = await cli.voice_manager.tts.synthesize_to_base64(text)
+            return {"audio": audio_data}
+        else:
+            from jarvis.voice import TTSEngine
+            tts = TTSEngine(engine="edge", voice="en-GB-RyanNeural")
+            audio_data = await tts.synthesize_to_base64(text)
+            return {"audio": audio_data}
+    except Exception as e:
+        print(f"[API] TTS endpoint error: {e}")
+        return {"audio": "", "error": str(e)}
+
+@app.post("/tts_sentence")
+async def tts_sentence_endpoint(request: dict):
+    sentence = request.get('sentence', '') or request.get('text', '')
+    if not sentence:
+        return {"audio": ""}
+    try:
+        cli = get_cli_instance()
+        if hasattr(cli, 'voice_manager') and cli.voice_manager and getattr(cli.voice_manager, 'tts', None):
+            audio_data = await cli.voice_manager.tts.synthesize_sentence(sentence)
+            return {"audio": audio_data}
+        else:
+            from jarvis.voice import TTSEngine
+            tts = TTSEngine(engine="edge", voice="en-GB-RyanNeural")
+            audio_data = await tts.synthesize_sentence(sentence)
+            return {"audio": audio_data}
+    except Exception as e:
+        print(f"[API] TTS sentence endpoint error: {e}")
+        return {"audio": "", "error": str(e)}
 
 # External chat API endpoints
 @app.post("/chat")

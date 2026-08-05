@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('jarvis', {
   sendMessage: (text) => ipcRenderer.invoke('send-message', text),
   sendSlashCommand: (command) => ipcRenderer.invoke('send-slash-command', command),
+  synthesizeSpeech: (text) => ipcRenderer.invoke('synthesize-speech', text),
+  synthesizeSentence: (sentence) => ipcRenderer.invoke('jarvis:synthesizeSentence', sentence),
   onResponse: (cb) => {
     ipcRenderer.removeAllListeners('jarvis-response')
     ipcRenderer.on('jarvis-response', (_, data) => cb(data))

@@ -55,19 +55,19 @@ class TestWebsiteOpening(unittest.TestCase):
         self.assertIn("https://chat.openai.com", res)
 
     @patch("jarvis.tools.subprocess.Popen")
-    def test_cli_check_tool_commands_google_dot_com(self, mock_popen):
-        """Verify _check_tool_commands 'open google.com' routes to Google Chrome."""
+    def test_cliprocess_single_command_google_dot_com(self, mock_popen):
+        """Verify process_single_command 'open google.com' routes to Google Chrome."""
         async def run_test():
-            res = await self.cli._check_tool_commands("open google.com")
+            res = await self.cli.process_single_command("open google.com")
             self.assertIn("Google Chrome", res)
 
         asyncio.run(run_test())
 
     @patch("jarvis.tools.subprocess.Popen")
-    def test_cli_check_tool_commands_full_url(self, mock_popen):
-        """Verify _check_tool_commands 'open https://github.com/nivedjkr' routes to Google Chrome."""
+    def test_cliprocess_single_command_full_url(self, mock_popen):
+        """Verify process_single_command 'open https://github.com/nivedjkr' routes to Google Chrome."""
         async def run_test():
-            res = await self.cli._check_tool_commands("open https://github.com/nivedjkr")
+            res = await self.cli.process_single_command("open https://github.com/nivedjkr")
             self.assertIn("Google Chrome", res)
 
         asyncio.run(run_test())

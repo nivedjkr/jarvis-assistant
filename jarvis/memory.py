@@ -8,8 +8,22 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
+
+
+_DB_CONNECTIONS: Dict[str, sqlite3.Connection] = {}
+
+
+def get_shared_db_connection(db_path: str = "jarvis/data/jarvis.db") -> sqlite3.Connection:
+    """Get cached shared SQLite database connection with Row factory"""
+    global _DB_CONNECTIONS
+    norm_path = os.path.normpath(db_path)
+    if norm_path not in _DB_CONNECTIONS:
+        conn = sqlite3.connect(norm_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        _DB_CONNECTIONS[norm_path] = conn
+    return _DB_CONNECTIONS[norm_path]
 
 
 class Memory:
@@ -24,15 +38,15 @@ class Memory:
         self.db_path = db_path
         path = Path(db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        self._profile_cache: Optional[Dict[str, str]] = None
+        self._facts_cache: Optional[Tuple[float, List[Dict]]] = None
         
         self._init_db()
         self._migrate_legacy_json()
     
     def _get_connection(self) -> sqlite3.Connection:
         """Get database connection with Row factory"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return get_shared_db_connection(self.db_path)
 
     def test_connection(self) -> tuple[bool, str]:
         """Test SQLite database connection with a real query"""
@@ -46,9 +60,16 @@ class Memory:
             return False, f"Database error: {e}"
     
     def _init_db(self):
-        """Initialize database schema"""
+        """Initialize database schema with WAL mode enabled for high performance"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL;")
+                cursor.execute("PRAGMA synchronous=NORMAL;")
+                cursor.execute("PRAGMA cache_size=-64000;")
+                cursor.execute("PRAGMA temp_store=MEMORY;")
+            except Exception:
+                pass
             
             # Profile table: static identity facts
             cursor.execute("""
@@ -230,6 +251,7 @@ class Memory:
     def set_profile_value(self, key: str, value: str):
         """Set or update a profile entry"""
         now = datetime.now().isoformat()
+        self._profile_cache = None
         with self._get_connection() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO profile (key, value, updated_at)
@@ -238,10 +260,13 @@ class Memory:
             conn.commit()
 
     def get_profile(self) -> Dict[str, str]:
-        """Get all profile key-values"""
+        """Get all profile key-values with memory caching"""
+        if self._profile_cache is not None:
+            return self._profile_cache.copy()
         with self._get_connection() as conn:
             rows = conn.execute("SELECT key, value FROM profile").fetchall()
-            return {row["key"]: row["value"] for row in rows}
+            self._profile_cache = {row["key"]: row["value"] for row in rows}
+            return self._profile_cache.copy()
 
     def get_preference(self, key: str, default: Any = None) -> Any:
         """Get preference from profile table for backward compatibility"""
@@ -285,6 +310,7 @@ class Memory:
             
             fact_id = cursor.lastrowid
             conn.commit()
+            self.invalidate_facts_cache()
             
             return {
                 "id": fact_id,
@@ -295,8 +321,20 @@ class Memory:
                 "confidence": confidence
             }
 
+    def invalidate_facts_cache(self):
+        """Invalidate in-memory facts cache"""
+        self._facts_cache = None
+
     def get_facts(self, category: Optional[str] = None) -> List[Dict]:
-        """Get stored facts, optionally filtered by category"""
+        """Get stored facts with short in-memory caching for uncategorized queries"""
+        import time
+        now_ts = time.time()
+        facts_cache = getattr(self, '_facts_cache', None)
+        if not category and facts_cache is not None:
+            cache_ts, cached_list = facts_cache
+            if (now_ts - cache_ts) < 10.0:  # 10s TTL cache
+                return [dict(item) for item in cached_list]
+
         with self._get_connection() as conn:
             if category:
                 rows = conn.execute(
@@ -305,7 +343,11 @@ class Memory:
                 ).fetchall()
             else:
                 rows = conn.execute("SELECT * FROM facts ORDER BY id DESC").fetchall()
-            return [dict(row) for row in rows]
+            
+            result = [dict(row) for row in rows]
+            if not category:
+                self._facts_cache = (now_ts, result)
+            return result
 
     def search_facts(self, keyword: str) -> List[Dict]:
         """Search facts matching keyword"""
@@ -330,6 +372,7 @@ class Memory:
                 ids
             )
             conn.commit()
+        self.invalidate_facts_cache()
         return matches
 
     def delete_fact_by_id(self, fact_id: int) -> bool:
@@ -342,16 +385,18 @@ class Memory:
     def get_top_relevant_facts(self, prompt: str, limit: int = 15) -> List[Dict]:
         """
         Rank and return top relevant facts for context injection.
-        Prioritizes recency and keyword matching with prompt words.
+        Prioritizes recency and keyword matching with prompt words across recent facts.
         """
         facts = self.get_facts()
         if not facts:
             return []
         
+        # Limit scoring to top 50 recent facts for speed
+        recent_facts = facts[:50]
         prompt_words = set(re.findall(r'\w+', prompt.lower()))
         
         scored_facts = []
-        for idx, fact in enumerate(reversed(facts)):  # Recent facts first
+        for idx, fact in enumerate(reversed(recent_facts)):  # Recent facts first
             content_words = set(re.findall(r'\w+', fact["content"].lower()))
             overlap = len(prompt_words.intersection(content_words))
             # Base score + overlap bonus + recency bonus
