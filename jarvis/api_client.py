@@ -148,6 +148,15 @@ class NIMClient:
             if context_parts:
                 memory_str = "\n".join(context_parts)
 
+        # Retrieve relevant Obsidian notes via semantic search / fallback
+        try:
+            from jarvis.tools import obsidian_semantic_search
+            obs_res = obsidian_semantic_search(query=user_message, limit=3)
+            if obs_res and not obs_res.startswith("FAILED") and not obs_res.startswith("No Obsidian notes found"):
+                memory_str += f"\n\n=== OBSIDIAN SEMANTIC MEMORY ===\n{obs_res}"
+        except Exception:
+            pass
+
         project_str = "No active projects currently listed."
         if self.project_manager:
             try:

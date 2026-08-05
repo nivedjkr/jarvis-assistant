@@ -14,6 +14,7 @@ import psutil
 import pyperclip
 from typing import Dict, List, Any, Callable, Tuple
 from jarvis.github_tool import GitHubTool
+from jarvis.mcp_client import ObsidianMCPClient
 
 
 def _clean_path(path_str: Any) -> str:
@@ -170,6 +171,22 @@ def open_application(app_name: str = "", **kwargs) -> str:
         return "FAILED: No application name provided."
     
     try:
+        from jarvis.apps import AppRegistry
+        registry = AppRegistry()
+        cmd, matches, resolved_name = registry.resolve_app(target_name)
+        
+        if cmd:
+            clean_cmd = cmd.strip('"\'')
+            if os.name == 'nt' and os.path.exists(clean_cmd):
+                try:
+                    os.startfile(clean_cmd)
+                    return f"Opened application '{target_name}', sir."
+                except Exception:
+                    pass
+            subprocess.Popen(cmd, shell=True)
+            return f"Opened application '{target_name}', sir."
+        
+        # Windows direct launcher fallback
         if os.name == 'nt':
             try:
                 os.startfile(target_name)
@@ -177,18 +194,7 @@ def open_application(app_name: str = "", **kwargs) -> str:
             except Exception:
                 pass
         
-        app_lower = target_name.lower()
-        cmd = target_name
-        if app_lower == 'notepad':
-            cmd = 'notepad.exe'
-        elif app_lower in ('calc', 'calculator'):
-            cmd = 'calc.exe'
-        elif app_lower in ('code', 'vscode'):
-            cmd = 'code'
-        elif app_lower == 'chrome':
-            cmd = 'chrome.exe'
-            
-        subprocess.Popen(cmd, shell=True)
+        subprocess.Popen(target_name, shell=True)
         return f"Opened application '{target_name}', sir."
     except Exception as e:
         return f"FAILED to open '{target_name}': {str(e)}"
@@ -589,6 +595,206 @@ def git_push(remote: str = "origin", branch: str = None, force: bool = False, co
         return f"FAILED to execute git push: {str(e)}"
 
 
+def _obsidian_grep_search(query: str, vault_path: str, limit: int = 3) -> str:
+    """Fallback grep-based search across markdown files in Obsidian vault."""
+    if not vault_path or not os.path.exists(vault_path):
+        return f"FAILED: Obsidian vault path '{vault_path}' not found."
+
+    query_lower = query.lower()
+    keywords = [k.strip() for k in query_lower.split() if len(k.strip()) > 2]
+    if not keywords:
+        keywords = [query_lower]
+
+    matches = []
+    try:
+        for root, _, files in os.walk(vault_path):
+            for file in files:
+                if file.endswith('.md') and not file.endswith('.bak'):
+                    full_p = os.path.join(root, file)
+                    rel_p = os.path.relpath(full_p, vault_path)
+                    try:
+                        with open(full_p, 'r', encoding='utf-8', errors='replace') as f:
+                            text = f.read()
+                        text_lower = text.lower()
+                        score = sum(text_lower.count(kw) for kw in keywords)
+                        if any(kw in file.lower() for kw in keywords):
+                            score += 5
+                        if score > 0:
+                            lines = text.splitlines()
+                            snippet_lines = [l for l in lines if any(kw in l.lower() for kw in keywords)]
+                            snippet = "\n".join(snippet_lines[:3]) if snippet_lines else text[:200]
+                            matches.append({
+                                'title': file[:-3],
+                                'path': rel_p,
+                                'score': score,
+                                'snippet': snippet
+                            })
+                    except Exception:
+                        continue
+        if not matches:
+            return f"No Obsidian notes found matching '{query}' in vault."
+
+        matches.sort(key=lambda x: x['score'], reverse=True)
+        top_matches = matches[:limit]
+        out_lines = [f"Obsidian Vault Search Results (Fallback - {len(top_matches)} notes):"]
+        for m in top_matches:
+            out_lines.append(f"\nNote: {m['title']} ({m['path']})\nExcerpt:\n{m['snippet']}")
+        return "\n".join(out_lines)
+    except Exception as e:
+        return f"FAILED: Error searching Obsidian vault: {str(e)}"
+
+
+def obsidian_semantic_search(query: str = "", limit: int = 3, **kwargs) -> str:
+    """Semantic search over Obsidian notes via Smart Connections MCP server with grep fallback."""
+    search_query = (query or kwargs.get("q") or kwargs.get("search") or "").strip()
+    if not search_query:
+        return "FAILED: No query provided for obsidian_semantic_search."
+
+    cfg = _load_tool_config()
+    obs_cfg = cfg.get("obsidian", {})
+    vault_path = _clean_path(obs_cfg.get("vault_path", "C:/Users/nived/Obsidian/Vault"))
+    mcp_url = obs_cfg.get("smart_connections_mcp_url", "http://127.0.0.1:3000")
+    limit_num = int(limit) if str(limit).isdigit() else 3
+
+    # Try MCP Client
+    try:
+        mcp_client = ObsidianMCPClient(mcp_url=mcp_url, timeout=3.0)
+        results = mcp_client.search_notes(search_query, limit=limit_num)
+        if results:
+            out = [f"Obsidian Semantic Memory Search Results ({len(results)} notes via Smart Connections MCP):"]
+            for r in results:
+                out.append(f"\nNote: {r['title']} ({r.get('path', 'n/a')})\nSimilarity Score: {r.get('score', 0.0):.2f}\nExcerpt:\n{r.get('content', '')}")
+            return "\n".join(out)
+    except Exception as e:
+        print(f"[TOOLS] MCP semantic search unavailable ({e}), using vault fallback...")
+
+    # Fallback to local grep search
+    return _obsidian_grep_search(search_query, vault_path, limit=limit_num)
+
+
+def obsidian_create_note(title: str = "", content: Any = "", folder: str = "", **kwargs) -> str:
+    """Create a new markdown note directly in Obsidian vault."""
+    note_title = _clean_path(title or kwargs.get("filename") or kwargs.get("name") or kwargs.get("note_title") or kwargs.get("note_name") or kwargs.get("file") or kwargs.get("title_or_filename"))
+    
+    note_content = content
+    if note_content == "":
+        note_content = kwargs.get("text") or kwargs.get("body") or kwargs.get("note_content") or kwargs.get("data") or ""
+        
+    folder_path = _clean_path(folder or kwargs.get("dir") or kwargs.get("subfolder") or kwargs.get("directory") or kwargs.get("folder_path") or "")
+
+    if not note_title:
+        return "FAILED: Note title/filename is required."
+    if not isinstance(note_content, str):
+        note_content = str(note_content)
+
+    if not note_title.lower().endswith(".md"):
+        note_title += ".md"
+
+    cfg = _load_tool_config()
+    vault_path = _clean_path(cfg.get("obsidian", {}).get("vault_path", "C:/Users/nived/Obsidian/Vault"))
+    if not vault_path:
+        return "FAILED: Obsidian vault_path not configured in config.yaml."
+
+    try:
+        target_dir = os.path.join(vault_path, folder_path) if folder_path else vault_path
+        os.makedirs(target_dir, exist_ok=True)
+        full_path = os.path.join(target_dir, note_title)
+
+        with open(full_path, 'w', encoding='utf-8') as f:
+            f.write(note_content)
+
+        if os.path.exists(full_path):
+            size = os.path.getsize(full_path)
+            return f"SUCCESS: Created Obsidian note '{full_path}' ({size} bytes)"
+        return f"FAILED: Obsidian note '{full_path}' was not created."
+    except Exception as e:
+        return f"FAILED to create Obsidian note: {str(e)}"
+
+
+def obsidian_daily_note(content: Any = "", heading: str = "", **kwargs) -> str:
+    """Create or append content to today's Obsidian daily note."""
+    note_content = content
+    if note_content == "":
+        note_content = kwargs.get("text") or kwargs.get("body") or kwargs.get("note_content") or kwargs.get("entry") or ""
+        
+    note_heading = (heading or kwargs.get("title") or kwargs.get("section") or kwargs.get("header") or "").strip()
+    if not isinstance(note_content, str):
+        note_content = str(note_content)
+
+    cfg = _load_tool_config()
+    vault_path = _clean_path(cfg.get("obsidian", {}).get("vault_path", "C:/Users/nived/Obsidian/Vault"))
+    if not vault_path:
+        return "FAILED: Obsidian vault_path not configured in config.yaml."
+
+    try:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        daily_dir = os.path.join(vault_path, "Daily")
+        os.makedirs(daily_dir, exist_ok=True)
+        daily_path = os.path.join(daily_dir, f"{today_str}.md")
+
+        mode = 'a' if os.path.exists(daily_path) else 'w'
+        with open(daily_path, mode, encoding='utf-8') as f:
+            if mode == 'w':
+                f.write(f"# Daily Note - {today_str}\n\n")
+            if note_heading:
+                f.write(f"## {note_heading}\n")
+            f.write(f"{note_content}\n\n")
+
+        size = os.path.getsize(daily_path)
+        return f"SUCCESS: Updated Obsidian Daily Note '{daily_path}' ({size} bytes)"
+    except Exception as e:
+        return f"FAILED to update Obsidian daily note: {str(e)}"
+
+
+def obsidian_edit_note(filepath: str = "", content: Any = "", append: bool = False, **kwargs) -> str:
+    """Edit an existing note in Obsidian vault with automatic .bak backup creation."""
+    target_path = _clean_path(filepath or kwargs.get("filename") or kwargs.get("title") or kwargs.get("path") or kwargs.get("name") or kwargs.get("note_name") or kwargs.get("note_title"))
+    
+    note_content = content
+    if note_content == "":
+        note_content = kwargs.get("text") or kwargs.get("body") or kwargs.get("new_content") or kwargs.get("note_content") or ""
+        
+    is_append = bool(append or kwargs.get("append_mode") or kwargs.get("is_append") or kwargs.get("append_text"))
+
+    if not target_path:
+        return "FAILED: Note filepath is required for obsidian_edit_note."
+    if not isinstance(note_content, str):
+        note_content = str(note_content)
+
+    cfg = _load_tool_config()
+    vault_path = _clean_path(cfg.get("obsidian", {}).get("vault_path", "C:/Users/nived/Obsidian/Vault"))
+
+    if not os.path.isabs(target_path) and vault_path:
+        full_path = os.path.join(vault_path, target_path)
+    else:
+        full_path = target_path
+
+    if not full_path.lower().endswith(".md"):
+        full_path += ".md"
+
+    try:
+        full_path = os.path.abspath(full_path)
+        if not os.path.exists(full_path):
+            return f"FAILED: Note '{full_path}' does not exist."
+
+        # Automatic backup creation before editing
+        backup_path = f"{full_path}.bak"
+        shutil.copy2(full_path, backup_path)
+
+        mode = 'a' if is_append else 'w'
+        with open(full_path, mode, encoding='utf-8') as f:
+            if is_append:
+                f.write(f"\n{note_content}")
+            else:
+                f.write(note_content)
+
+        size = os.path.getsize(full_path)
+        action_word = "Appended to" if is_append else "Edited"
+        return f"SUCCESS: {action_word} Obsidian note '{full_path}' ({size} bytes). Backup saved at '{backup_path}'."
+    except Exception as e:
+        return f"FAILED to edit Obsidian note: {str(e)}"
+
+
 TOOLS_SCHEMAS = [
     {
         "type": "function",
@@ -823,6 +1029,68 @@ TOOLS_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "obsidian_semantic_search",
+            "description": "Perform local semantic memory search over Obsidian notes via Smart Connections MCP server (with vault grep fallback).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Natural language search query"},
+                    "limit": {"type": "integer", "description": "Max number of relevant notes to return (default: 3)"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "obsidian_create_note",
+            "description": "Create a new Markdown note directly in Obsidian vault.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Title or filename of note"},
+                    "content": {"type": "string", "description": "Markdown content for the note"},
+                    "folder": {"type": "string", "description": "Optional subfolder inside vault"}
+                },
+                "required": ["title", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "obsidian_daily_note",
+            "description": "Create or append content to today's Obsidian daily note.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "Text content to append to daily note"},
+                    "heading": {"type": "string", "description": "Optional section heading"}
+                },
+                "required": ["content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "obsidian_edit_note",
+            "description": "Edit an existing note in Obsidian vault with automatic .bak backup file creation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string", "description": "Path or filename of target note"},
+                    "content": {"type": "string", "description": "New content or text to append"},
+                    "append": {"type": "boolean", "description": "Set to true to append to existing note instead of overwriting"}
+                },
+                "required": ["filepath", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "list_issues",
             "description": "List GitHub issues via gh CLI.",
             "parameters": {
@@ -930,6 +1198,10 @@ class ToolRegistry:
             ("git_add", git_add),
             ("git_commit", git_commit),
             ("git_push", git_push),
+            ("obsidian_semantic_search", obsidian_semantic_search),
+            ("obsidian_create_note", obsidian_create_note),
+            ("obsidian_daily_note", obsidian_daily_note),
+            ("obsidian_edit_note", obsidian_edit_note),
         ]
         for name, func in core_tools:
             if name in schema_map:

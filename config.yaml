@@ -71,3 +71,11 @@ github:
   watch_repos:
     - "nivedjkr/jarvis-assistant"
   check_interval_minutes: 30
+
+# Obsidian Memory Settings
+obsidian:
+  enabled: true
+  vault_path: "C:/Users/nived/Obsidian/Vault"
+  smart_connections_mcp_url: "http://127.0.0.1:3000"
+  fallback_to_grep: true
+

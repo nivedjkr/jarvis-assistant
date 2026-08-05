@@ -117,8 +117,9 @@ def handle_slash_command(command: str, messages: list, registry: ToolRegistry = 
             "content": (
                 "You are JARVIS, Nived's personal AI assistant. "
                 "You have access to tools for file operations, running commands, web search, "
-                "system status, opening applications/websites, and GitHub. "
-                "Always call the appropriate tool when asked to perform actions."
+                "system status, opening applications/websites, GitHub, and Obsidian note management "
+                "(obsidian_create_note, obsidian_daily_note, obsidian_edit_note, obsidian_semantic_search). "
+                "Always call the appropriate tool when asked to perform actions or manage Obsidian notes."
             )
         })
         return True, "Conversation history cleared, sir."
@@ -133,10 +134,11 @@ def handle_slash_command(command: str, messages: list, registry: ToolRegistry = 
             "• System Telemetry     - Monitor real CPU %, RAM %, and Disk utilization\n"
             "• Clipboard Control    - Copy text to system clipboard with fail-proof verification\n"
             "• Desktop & Web        - Launch applications (notepad, calc, chrome, code), websites, and Google search\n"
-            "• Full GitHub Suite    - Full account access for repos, issues, PRs, CI status, and notifications\n\n"
+            "• Full GitHub Suite    - Full account access for repos, issues, PRs, CI status, and notifications\n"
+            "• Obsidian Memory      - Local semantic search, note creation, daily notes, and note edits with backups\n\n"
             "SLASH COMMANDS:\n"
             "• /help, /h      - Display this system capability summary\n"
-            "• /tools         - List all 18 registered system tools\n"
+            "• /tools         - List all 25 registered system tools\n"
             "• /status        - Query live CPU, RAM, and Disk vitals\n"
             "• /projects      - View active projects database summary\n"
             "• /reminders     - View pending reminders\n"
@@ -206,8 +208,9 @@ class JARVISCLI:
                 "content": (
                     "You are JARVIS, Nived's personal AI assistant. "
                     "You have access to tools for file operations, running commands, web search, "
-                    "system status, opening applications/websites, and GitHub. "
-                    "When requested to perform an action, call the appropriate tool."
+                    "system status, opening applications/websites, GitHub, and Obsidian note management "
+                    "(obsidian_create_note, obsidian_daily_note, obsidian_edit_note, obsidian_semantic_search). "
+                    "When requested to create, edit, search, or update Obsidian notes, YOU MUST call the appropriate Obsidian tool."
                 )
             }
         ]
@@ -253,9 +256,10 @@ def main():
             "content": (
                 "You are JARVIS, Nived's personal AI assistant. "
                 "You have access to tools for file operations, running commands, web search, "
-                "system status, opening applications/websites, and GitHub. "
-                "When requested to perform an action (such as opening applications, creating files, "
-                "reading files, running shell commands, or querying GitHub), call the appropriate tool."
+                "system status, opening applications/websites, GitHub, and Obsidian note management "
+                "(obsidian_create_note, obsidian_daily_note, obsidian_edit_note, obsidian_semantic_search). "
+                "When requested to perform an action (such as creating Obsidian notes, editing notes, "
+                "running shell commands, or querying GitHub), call the appropriate tool."
             )
         }
     ]

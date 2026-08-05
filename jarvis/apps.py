@@ -36,7 +36,8 @@ DEFAULT_APPS = {
     "command prompt": "cmd.exe",
     "powershell": "powershell.exe",
     "settings": "start ms-settings:",
-    "edge": "msedge.exe"
+    "edge": "msedge.exe",
+    "obsidian": f'"{os.path.join(os.environ.get("LOCALAPPDATA", "C:/Users/nived/AppData/Local"), "Programs", "obsidian", "Obsidian.exe")}"'
 }
 
 PROCESS_NAMES = {
@@ -55,7 +56,8 @@ PROCESS_NAMES = {
     'excel':       'EXCEL.EXE',
     'terminal':    'WindowsTerminal.exe',
     'cmd':         'cmd.exe',
-    'powershell':  'powershell.exe'
+    'powershell':  'powershell.exe',
+    'obsidian':    'Obsidian.exe'
 }
 
 DEFAULT_PROCESS_NAMES = PROCESS_NAMES
