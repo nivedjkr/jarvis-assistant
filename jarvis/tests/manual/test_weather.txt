@@ -1,7 +1,0 @@
-Error (exit 1): [openclaw] Could not start the CLI.
-[openclaw] Reason: Unknown command: openclaw skill. No built-in command or plugin CLI metadata owns "skill".
-Did you mean this?
-  openclaw skills
-[openclaw] Debug: set OPENCLAW_DEBUG=1 to include the stack trace.
-[openclaw] Try: openclaw doctor
-[openclaw] Help: openclaw --help

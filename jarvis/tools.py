@@ -8,9 +8,11 @@ import shutil
 import subprocess
 import urllib.parse
 import webbrowser
+import re
+from datetime import datetime
 import psutil
 import pyperclip
-from typing import Dict, List, Any, Callable
+from typing import Dict, List, Any, Callable, Tuple
 from jarvis.github_tool import GitHubTool
 
 
@@ -223,10 +225,104 @@ def web_search(query: str = "", **kwargs) -> str:
         return f"FAILED to perform search: {str(e)}"
 
 
-def run_command(command: str = "", **kwargs) -> str:
-    target_cmd = command or kwargs.get("cmd") or ""
+DANGEROUS_PATTERNS = [
+    # File deletion & directory removal
+    r'\brm\b', r'\bdel\b', r'\berase\b', r'\brd\b', r'\brmdir\b', r'\bshred\b',
+    # Formatting, disk partitioning & raw write
+    r'\bformat\b', r'\bdd\b', r'\bmkfs\b', r'\bfdisk\b', r'\bdiskpart\b', r'\bparted\b',
+    # System power state
+    r'\bshutdown\b', r'\breboot\b', r'\binit\s+[06]\b', r'\bstop-computer\b', r'\brestart-computer\b',
+    # File movement, owner/permission overrides
+    r'\bmv\b', r'\bmove\b', r'\bchmod\b', r'\bchown\b', r'\bicacls\b', r'\btakeown\b', r'\bsudo\b',
+    # Process killing
+    r'\bkill\b', r'\btaskkill\b', r'\bstop-process\b', r'\bpkill\b', r'\bkillall\b',
+    # File redirection & overwriting
+    r'>', r'>>',
+    # Download / arbitrary code execution
+    r'\bcurl\b', r'\bwget\b', r'\binvoke-webrequest\b', r'\biwr\b', r'\binvoke-expression\b', r'\biex\b',
+    # Registry & service deletion
+    r'\breg\s+delete\b', r'\bsc\s+delete\b', r'\bremove-item\b',
+    # Destructive git commands
+    r'\bgit\s+reset\s+--hard\b', r'\bgit\s+clean\b', r'\bgit\s+push\s+.*--force\b'
+]
+
+
+def _load_tool_config(config_path: str = "config.yaml") -> dict:
+    try:
+        import yaml
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    except Exception:
+        pass
+    return {
+        "tools": {
+            "confirm_dangerous": True,
+            "log_commands": True
+        },
+        "memory": {
+            "log_file": "jarvis_commands.log"
+        }
+    }
+
+
+def _check_dangerous_command(command: str) -> Tuple[bool, List[str]]:
+    matched = []
+    cmd_lower = command.lower()
+    for pattern in DANGEROUS_PATTERNS:
+        if re.search(pattern, cmd_lower):
+            display_name = pattern.replace(r'\b', '').replace(r'\s+', ' ')
+            if display_name not in matched:
+                matched.append(display_name)
+    return len(matched) > 0, matched
+
+
+def _log_command_execution(command: str, status: str, log_file: str = "jarvis_commands.log"):
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}] STATUS: {status} | CMD: {command}\n"
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(log_entry)
+    except Exception as e:
+        print(f"[TOOLS] Warning logging command: {e}")
+
+
+def run_command(command: str = "", confirm: Any = False, **kwargs) -> str:
+    target_cmd = command or kwargs.get("cmd") or kwargs.get("command_string") or ""
     if not target_cmd:
         return "FAILED: No command provided."
+
+    cfg = _load_tool_config()
+    tools_cfg = cfg.get("tools", {})
+    confirm_dangerous = tools_cfg.get("confirm_dangerous", True)
+    log_commands = tools_cfg.get("log_commands", True)
+    memory_cfg = cfg.get("memory", {})
+    log_file = memory_cfg.get("log_file", "jarvis_commands.log")
+
+    # Check if confirmation is provided in parameters
+    confirm_val = confirm if confirm != False else kwargs.get("confirmed") or kwargs.get("confirm") or False
+    if isinstance(confirm_val, bool):
+        is_confirmed = confirm_val
+    elif isinstance(confirm_val, str):
+        is_confirmed = confirm_val.lower() in ("true", "yes", "y", "1", "confirmed")
+    else:
+        is_confirmed = False
+
+    # Check for dangerous command patterns
+    is_dangerous, matched_patterns = _check_dangerous_command(target_cmd)
+
+    if is_dangerous and confirm_dangerous and not is_confirmed:
+        status_msg = f"BLOCKED (Awaiting confirmation - matched: {', '.join(matched_patterns)})"
+        if log_commands:
+            _log_command_execution(target_cmd, status_msg, log_file)
+        
+        return (
+            f"CONFIRMATION_REQUIRED: The command '{target_cmd}' contains dangerous operations "
+            f"({', '.join(matched_patterns)}). Execution has been blocked. "
+            f"Please explicitly confirm execution by re-calling run_command with confirm=True."
+        )
+
+    # Execute command
     try:
         result = subprocess.run(
             target_cmd,
@@ -237,6 +333,11 @@ def run_command(command: str = "", **kwargs) -> str:
         )
         stdout = result.stdout.strip()
         stderr = result.stderr.strip()
+        
+        status_str = f"EXECUTED (Exit code: {result.returncode}, Confirmed: {is_confirmed})"
+        if log_commands:
+            _log_command_execution(target_cmd, status_str, log_file)
+
         output = []
         if stdout:
             output.append(f"STDOUT:\n{stdout}")
@@ -245,9 +346,14 @@ def run_command(command: str = "", **kwargs) -> str:
         if not output:
             output.append("Command executed with no output.")
         return "\n".join(output)
+
     except subprocess.TimeoutExpired:
+        if log_commands:
+            _log_command_execution(target_cmd, "TIMED_OUT", log_file)
         return "FAILED: Command timed out after 30 seconds."
     except Exception as e:
+        if log_commands:
+            _log_command_execution(target_cmd, f"ERROR ({str(e)})", log_file)
         return f"FAILED to execute command: {str(e)}"
 
 
@@ -304,6 +410,183 @@ def get_system_status(**kwargs) -> str:
         )
     except Exception as e:
         return f"FAILED to get system status: {str(e)}"
+
+
+def git_add(files: Any = None, **kwargs) -> str:
+    """Stage specific files or all changes (-A) if files is omitted/empty."""
+    target_files = files if files is not None else kwargs.get("filepaths") or kwargs.get("file") or kwargs.get("path")
+    
+    cmd = ["git", "add"]
+    if not target_files:
+        cmd.append("-A")
+        desc = "all changes (-A)"
+    else:
+        if isinstance(target_files, str):
+            target_files = [f.strip("'\" ") for f in target_files.split(",") if f.strip()]
+        elif isinstance(target_files, list):
+            target_files = [str(f).strip("'\" ") for f in target_files if str(f).strip()]
+        else:
+            target_files = [str(target_files)]
+            
+        if not target_files:
+            cmd.append("-A")
+            desc = "all changes (-A)"
+        else:
+            cmd.extend(target_files)
+            desc = ", ".join(target_files)
+
+    cfg = _load_tool_config()
+    log_commands = cfg.get("tools", {}).get("log_commands", True)
+    log_file = cfg.get("memory", {}).get("log_file", "jarvis_commands.log")
+    cmd_str = " ".join(cmd)
+
+    try:
+        res = subprocess.run(cmd, shell=False, capture_output=True, text=True, timeout=30)
+        if res.returncode == 0:
+            status_msg = f"SUCCESS: Staged {desc}"
+            if log_commands:
+                _log_command_execution(cmd_str, "EXECUTED (git_add)", log_file)
+            return status_msg
+        else:
+            err_msg = res.stderr.strip() or res.stdout.strip()
+            if log_commands:
+                _log_command_execution(cmd_str, f"FAILED ({err_msg})", log_file)
+            return f"FAILED: git add returned error: {err_msg}"
+    except Exception as e:
+        if log_commands:
+            _log_command_execution(cmd_str, f"ERROR ({str(e)})", log_file)
+        return f"FAILED to run git add: {str(e)}"
+
+
+def git_commit(message: str = "", confirm: Any = False, **kwargs) -> str:
+    """Commit staged changes; fail clearly if nothing is staged. Requires confirmation preview."""
+    commit_msg = (message or kwargs.get("msg") or kwargs.get("m") or "").strip()
+    if not commit_msg:
+        return "FAILED: Commit message is required."
+
+    cfg = _load_tool_config()
+    tools_cfg = cfg.get("tools", {})
+    confirm_dangerous = tools_cfg.get("confirm_dangerous", True)
+    log_commands = tools_cfg.get("log_commands", True)
+    log_file = cfg.get("memory", {}).get("log_file", "jarvis_commands.log")
+
+    try:
+        diff_res = subprocess.run(["git", "diff", "--cached"], shell=False, capture_output=True, text=True, timeout=15)
+        staged_diff = diff_res.stdout.strip()
+        if not staged_diff:
+            return "FAILED: Nothing staged to commit. Use git_add first."
+    except Exception as e:
+        return f"FAILED checking staged changes: {str(e)}"
+
+    confirm_val = confirm if confirm != False else kwargs.get("confirmed") or kwargs.get("confirm") or False
+    if isinstance(confirm_val, bool):
+        is_confirmed = confirm_val
+    elif isinstance(confirm_val, str):
+        is_confirmed = confirm_val.lower() in ("true", "yes", "y", "1", "confirmed")
+    else:
+        is_confirmed = False
+
+    cmd_str = f'git commit -m "{commit_msg}"'
+
+    if confirm_dangerous and not is_confirmed:
+        preview_diff = staged_diff[:1500] + ("\n... [diff truncated]" if len(staged_diff) > 1500 else "")
+        status_msg = "BLOCKED (Awaiting commit confirmation)"
+        if log_commands:
+            _log_command_execution(cmd_str, status_msg, log_file)
+        
+        return (
+            f"CONFIRMATION_REQUIRED: Preparing to commit staged changes.\n"
+            f"Commit Message: \"{commit_msg}\"\n\n"
+            f"STAGED DIFF PREVIEW:\n{preview_diff}\n\n"
+            f"Please confirm execution by re-calling git_commit with confirm=True."
+        )
+
+    try:
+        res = subprocess.run(["git", "commit", "-m", commit_msg], shell=False, capture_output=True, text=True, timeout=30)
+        stdout = res.stdout.strip()
+        stderr = res.stderr.strip()
+        if res.returncode == 0:
+            if log_commands:
+                _log_command_execution(cmd_str, "EXECUTED (git_commit)", log_file)
+            return f"SUCCESS: Committed changes.\n{stdout}"
+        else:
+            err = stderr or stdout
+            if log_commands:
+                _log_command_execution(cmd_str, f"FAILED ({err})", log_file)
+            return f"FAILED to commit: {err}"
+    except Exception as e:
+        if log_commands:
+            _log_command_execution(cmd_str, f"ERROR ({str(e)})", log_file)
+        return f"FAILED to execute git commit: {str(e)}"
+
+
+def git_push(remote: str = "origin", branch: str = None, force: bool = False, confirm: Any = False, **kwargs) -> str:
+    """Push committed changes to remote repository. force=True ALWAYS requires confirm=True."""
+    target_remote = (remote or kwargs.get("remote_name") or "origin").strip()
+    target_branch = branch or kwargs.get("branch_name")
+
+    if not target_branch:
+        try:
+            b_res = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], shell=False, capture_output=True, text=True, timeout=10)
+            if b_res.returncode == 0 and b_res.stdout.strip():
+                target_branch = b_res.stdout.strip()
+        except Exception:
+            pass
+        if not target_branch:
+            target_branch = "main"
+
+    is_force = bool(force or kwargs.get("force_push"))
+
+    cfg = _load_tool_config()
+    tools_cfg = cfg.get("tools", {})
+    confirm_dangerous = tools_cfg.get("confirm_dangerous", True)
+    log_commands = tools_cfg.get("log_commands", True)
+    log_file = cfg.get("memory", {}).get("log_file", "jarvis_commands.log")
+
+    confirm_val = confirm if confirm != False else kwargs.get("confirmed") or kwargs.get("confirm") or False
+    if isinstance(confirm_val, bool):
+        is_confirmed = confirm_val
+    elif isinstance(confirm_val, str):
+        is_confirmed = confirm_val.lower() in ("true", "yes", "y", "1", "confirmed")
+    else:
+        is_confirmed = False
+
+    cmd = ["git", "push", target_remote, target_branch]
+    if is_force:
+        cmd.append("--force")
+    cmd_str = " ".join(cmd)
+
+    requires_confirm = is_force or confirm_dangerous
+
+    if requires_confirm and not is_confirmed:
+        status_msg = f"BLOCKED (Awaiting push confirmation {'[FORCE PUSH]' if is_force else ''})"
+        if log_commands:
+            _log_command_execution(cmd_str, status_msg, log_file)
+        
+        warn_text = " [WARNING: FORCE PUSH WILL OVERWRITE REMOTE HISTORY]" if is_force else ""
+        return (
+            f"CONFIRMATION_REQUIRED: Preparing to execute '{cmd_str}'{warn_text}.\n"
+            f"Target Remote: {target_remote} | Branch: {target_branch}\n"
+            f"Please confirm execution by re-calling git_push with confirm=True."
+        )
+
+    try:
+        res = subprocess.run(cmd, shell=False, capture_output=True, text=True, timeout=30)
+        stdout = res.stdout.strip()
+        stderr = res.stderr.strip()
+        if res.returncode == 0:
+            if log_commands:
+                _log_command_execution(cmd_str, "EXECUTED (git_push)", log_file)
+            return f"SUCCESS: Pushed to {target_remote}/{target_branch}.\n{stderr or stdout}"
+        else:
+            err = stderr or stdout
+            if log_commands:
+                _log_command_execution(cmd_str, f"FAILED ({err})", log_file)
+            return f"FAILED to push: {err}"
+    except Exception as e:
+        if log_commands:
+            _log_command_execution(cmd_str, f"ERROR ({str(e)})", log_file)
+        return f"FAILED to execute git push: {str(e)}"
 
 
 TOOLS_SCHEMAS = [
@@ -453,11 +736,12 @@ TOOLS_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "run_command",
-            "description": "Execute a shell command and return its output.",
+            "description": "Execute a shell command and return its output. Dangerous operations (rm, del, mv, kill, shutdown, curl, >, etc.) require confirm=True.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "description": "Command string to run"}
+                    "command": {"type": "string", "description": "Command string to execute"},
+                    "confirm": {"type": "boolean", "description": "Set to true to explicitly confirm execution of dangerous operations"}
                 },
                 "required": ["command"]
             }
@@ -485,6 +769,54 @@ TOOLS_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_add",
+            "description": "Stage files for Git commit. Omit files or pass empty to stage all changes (-A).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of file paths to stage. Omit to stage all changes (-A)."
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_commit",
+            "description": "Commit staged changes with a commit message. Shows staged diff and requires confirm=True.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "Commit message"},
+                    "confirm": {"type": "boolean", "description": "Set to true to confirm commit execution after previewing diff"}
+                },
+                "required": ["message"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_push",
+            "description": "Push committed changes to remote repository. Force push ALWAYS requires confirm=True.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "remote": {"type": "string", "description": "Remote name (default: 'origin')"},
+                    "branch": {"type": "string", "description": "Branch name (default: current branch)"},
+                    "force": {"type": "boolean", "description": "Set to true for force push (ALWAYS requires confirm=True)"},
+                    "confirm": {"type": "boolean", "description": "Set to true to confirm push execution"}
+                }
             }
         }
     },
@@ -595,6 +927,9 @@ class ToolRegistry:
             ("run_command", run_command),
             ("copy_to_clipboard", copy_to_clipboard),
             ("get_system_status", get_system_status),
+            ("git_add", git_add),
+            ("git_commit", git_commit),
+            ("git_push", git_push),
         ]
         for name, func in core_tools:
             if name in schema_map:

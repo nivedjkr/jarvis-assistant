@@ -43,9 +43,9 @@ Not a wrapper. Not a chatbot. A personal operating system.
 ### PC Control
 - Open/close applications by name
 - Browse websites and URLs
-- File read/write/create/delete
-- Shell command execution with confirmation
-- Directory operations
+- File and directory operations (create, write, read, copy, rename, move, delete)
+- Shell command execution with safety confirmation & logging (`tools.confirm_dangerous`)
+- Clipboard control with fail-proof verification and fallbacks
 
 ### Protocols & Automation
 - Named macro sequences ("work mode", "backup protocol")
@@ -66,11 +66,10 @@ Not a wrapper. Not a chatbot. A personal operating system.
 - `/flashcard add`, `/review`, `/summarize <pdf>`
 
 ### Developer Tools
-- GitHub integration (real gh CLI — issues, PRs, CI status)
-- Git status awareness
+- GitHub integration via native `gh` CLI (`list_repos`, `list_issues`, `list_prs`, `ci_status`, `repo_info`)
+- Git workflow tools (`git_add`, `git_commit`, `git_push` with confirmation gates & diff previews)
 - Error explainer — paste stack trace, get plain English fix
 - Project switcher — per-project venv, folder, TODOs
-- Claude Code handoff for real coding tasks
 - Code snippet library
 
 ### Project Database

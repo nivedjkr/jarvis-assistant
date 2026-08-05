@@ -33,8 +33,13 @@ jarvis_memory.json
 jarvis_commands.log
 jarvis/data/
 *.db
+*.bak
 credentials.json
 google_token.json
+
+# Test scratch artifacts
+jarvis/tests/manual/*.txt
+jarvis/tests/manual/*.bat
 
 # IDE
 .vscode/
