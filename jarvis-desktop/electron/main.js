@@ -37,7 +37,7 @@ function checkPortInUse(port, host = '127.0.0.1') {
 function freePort8765() {
   return new Promise((resolve) => {
     if (process.platform === 'win32') {
-      const cmd = `cmd /c "for /f \\"tokens=5\\" %a in ('netstat -aon ^| findstr :8765 ^| findstr LISTENING') do taskkill /F /PID %a"`
+      const cmd = `powershell -Command "Get-Process -Id (Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue).OwningProcess -ErrorAction SilentlyContinue | Stop-Process -Force"`
       exec(cmd, (err, stdout) => {
         if (stdout && stdout.trim()) {
           console.log('[ELECTRON] Freed port 8765:', stdout.trim())
@@ -48,6 +48,26 @@ function freePort8765() {
       exec(`lsof -ti :8765 | xargs kill -9`, () => resolve())
     }
   })
+}
+
+async function ensurePortFree(port = 8765) {
+  let isOccupied = await checkPortInUse(port)
+  if (!isOccupied) return true
+
+  console.warn(`[ELECTRON] Port ${port} is currently in use. Freeing port...`)
+  await freePort8765()
+
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    await new Promise(r => setTimeout(r, 300))
+    isOccupied = await checkPortInUse(port)
+    if (!isOccupied) {
+      console.log(`[ELECTRON] Port ${port} successfully freed on attempt ${attempt}.`)
+      return true
+    }
+  }
+
+  console.error(`[ELECTRON] Warning: Port ${port} is still in use after port cleanup attempts.`)
+  return false
 }
 
 function killBackendProcess() {
@@ -93,6 +113,54 @@ function createWindow() {
   }
 }
 
+function getPythonExecutable(jarvisPath) {
+  if (process.env.PYTHON_PATH && fs.existsSync(process.env.PYTHON_PATH)) {
+    console.log('[ELECTRON] Using PYTHON_PATH from env:', process.env.PYTHON_PATH)
+    return process.env.PYTHON_PATH
+  }
+
+  const isWin = process.platform === 'win32'
+
+  // 1. Check local virtual environments first (venv or .venv)
+  const venvPaths = isWin
+    ? [
+        path.join(jarvisPath, 'venv', 'Scripts', 'python.exe'),
+        path.join(jarvisPath, '.venv', 'Scripts', 'python.exe')
+      ]
+    : [
+        path.join(jarvisPath, 'venv', 'bin', 'python'),
+        path.join(jarvisPath, '.venv', 'bin', 'python')
+      ]
+
+  for (const p of venvPaths) {
+    if (fs.existsSync(p)) {
+      console.log('[ELECTRON] Found Python virtual environment:', p)
+      return p
+    }
+  }
+
+  // 2. On Windows, avoid WindowsApps redirector alias (which exits with code 1)
+  if (isWin) {
+    const knownWinPaths = [
+      'C:\\msys64\\ucrt64\\bin\\python.exe',
+      'C:\\Python311\\python.exe',
+      'C:\\Python310\\python.exe',
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python311', 'python.exe'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python310', 'python.exe')
+    ]
+    for (const candidate of knownWinPaths) {
+      if (candidate && fs.existsSync(candidate)) {
+        console.log('[ELECTRON] Found Windows Python installation:', candidate)
+        return candidate
+      }
+    }
+  }
+
+  const defaultCmd = isWin ? 'python' : 'python3'
+  console.log('[ELECTRON] Using default system command:', defaultCmd)
+  return defaultCmd
+}
+
 async function startJarvisBackend() {
   const defaultPath = path.resolve(__dirname, '..', '..')
   const jarvisPath = process.env.JARVIS_BACKEND_PATH || defaultPath
@@ -112,22 +180,21 @@ async function startJarvisBackend() {
     return
   }
 
-  // Pre-spawn check: clear orphaned processes bound to port 8765
-  const portOccupied = await checkPortInUse(8765)
-  if (portOccupied) {
-    console.warn('[ELECTRON] Port 8765 is in use by an orphaned process. Freeing port...')
-    await freePort8765()
-    await new Promise(r => setTimeout(r, 600))
-  }
+  // Pre-spawn check: clear orphaned processes bound to port 8765 and wait until port is free
+  await ensurePortFree(8765)
   
+  const pythonBin = getPythonExecutable(jarvisPath)
+  console.log(`[ELECTRON] Spawning Python backend with executable: ${pythonBin}`)
+
   // Spawn Python backend directly without shell wrapper for clean PID tracking
   jarvisProcess = spawn(
-    'python', ['-m', 'jarvis.api'],
+    pythonBin, ['-m', 'jarvis.api'],
     {
       cwd: jarvisPath,
       env: { 
         ...process.env,
-        PYTHONPATH: jarvisPath
+        PYTHONPATH: jarvisPath,
+        PYTHONUNBUFFERED: '1'
       },
       shell: false
     }
@@ -135,14 +202,18 @@ async function startJarvisBackend() {
 
   console.log(`[ELECTRON] Python backend spawned with PID ${jarvisProcess.pid}`)
   
+  const handleServerOutput = (text) => {
+    if (text.includes('Uvicorn running') || text.includes('Application startup complete.')) {
+      console.log('[WS] Server ready, connecting...')
+      connectWebSocket()
+    }
+  }
+
   if (jarvisProcess.stdout) {
     jarvisProcess.stdout.on('data', (data) => {
       const text = data.toString()
       console.log('[PYTHON]', text)
-      if (text.includes('Uvicorn running') || text.includes('Application startup')) {
-        console.log('[WS] Server ready, connecting...')
-        connectWebSocket()
-      }
+      handleServerOutput(text)
     })
   }
   
@@ -150,10 +221,7 @@ async function startJarvisBackend() {
     jarvisProcess.stderr.on('data', (data) => {
       const text = data.toString()
       console.log('[PYTHON ERR]', text)
-      if (text.includes('Uvicorn running') || text.includes('Application startup')) {
-        console.log('[WS] Server ready, connecting...')
-        connectWebSocket()
-      }
+      handleServerOutput(text)
     })
   }
   
