@@ -67,7 +67,7 @@ Not a wrapper. Not a chatbot. A personal operating system.
 
 ### Developer Tools
 - GitHub integration via native `gh` CLI (`list_repos`, `list_issues`, `list_prs`, `ci_status`, `repo_info`)
-- Git workflow tools (`git_add`, `git_commit`, `git_push` with confirmation gates & diff previews)
+- Git workflow tools (`git_add_commit_push` with confirmation gates & diff previews)
 - Error explainer — paste stack trace, get plain English fix
 - Project switcher — per-project venv, folder, TODOs
 - Code snippet library
