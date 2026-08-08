@@ -55,6 +55,74 @@ def validate_tool_schemas(registry):
                   f"tool schemas valid [OK]")
         return True
 
+DANGEROUS_KEYWORDS = [
+    "rm", "del", "format", "shutdown", "reboot", "dd", "mkfs", "fdisk",
+    "mv", "chmod", "kill", ">", ">>", "curl", "wget"
+]
+
+def _load_config():
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    config_path = os.path.join(base_dir, "config.yaml")
+    if not os.path.exists(config_path):
+        config_path = "config.yaml"
+    if os.path.exists(config_path):
+        try:
+            import yaml
+            with open(config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            pass
+    return {}
+
+def _log_command(command: str, confirmed: bool):
+    try:
+        cfg = _load_config()
+        if not cfg.get("tools", {}).get("log_commands", True):
+            return
+        log_rel = cfg.get("memory", {}).get("log_file", "jarvis_commands.log")
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        log_path = os.path.join(base_dir, log_rel)
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] Command: '{command}' | Confirmed: {confirmed}\n")
+    except Exception:
+        pass
+
+def _is_dangerous_command(command: str):
+    import re
+    cmd_str = command.strip()
+    if ">>" in cmd_str:
+        return True, ">>"
+    if ">" in cmd_str:
+        return True, ">"
+        
+    word_keywords = ["rm", "del", "format", "shutdown", "reboot", "dd", "mkfs", "fdisk", "mv", "chmod", "kill", "curl", "wget"]
+    pattern = r'\b(' + '|'.join(re.escape(k) for k in word_keywords) + r')\b'
+    match = re.search(pattern, cmd_str, re.IGNORECASE)
+    if match:
+        return True, match.group(1)
+        
+    return False, ""
+
+def _get_repo_path(path: str = "") -> str:
+    if path and os.path.exists(path):
+        return path
+    try:
+        r_top = subprocess.run(
+            ['git', 'rev-parse', '--show-toplevel'],
+            capture_output=True, text=True, timeout=5, cwd=os.getcwd()
+        )
+        if r_top.returncode == 0 and r_top.stdout.strip():
+            return r_top.stdout.strip()
+    except Exception:
+        pass
+    cfg = _load_config()
+    cfg_path = cfg.get("github", {}).get("repo_path")
+    if cfg_path and os.path.exists(cfg_path):
+        return cfg_path
+    return os.getcwd()
+
 class ToolRegistry:
     def __init__(self):
         self.tools = {}   # name -> async callable
@@ -409,19 +477,32 @@ class ToolRegistry:
     
     def _register_system_tools(self):
         
-        def run_command(command: str) -> str:
+        def run_command(command: str, confirmed: bool = False) -> str:
+            cfg = _load_config()
+            confirm_dangerous = cfg.get("tools", {}).get("confirm_dangerous", True)
+            
+            is_danger, matched_kw = _is_dangerous_command(command)
+            if confirm_dangerous and is_danger and not confirmed:
+                return (
+                    f"CONFIRMATION REQUIRED: Running '{command}' contains potentially dangerous operation "
+                    f"('{matched_kw}'). Reply with 'confirm' or re-run with confirmed=True to proceed."
+                )
+            
             try:
                 result = subprocess.run(
                     command, shell=True,
                     capture_output=True, text=True,
                     timeout=30, env=os.environ.copy()
                 )
+                _log_command(command, confirmed=confirmed or (not is_danger))
                 out = result.stdout or result.stderr
                 return out[:2000] if out \
                        else "Command completed, no output."
             except subprocess.TimeoutExpired:
+                _log_command(command, confirmed=confirmed)
                 return "Command timed out."
             except Exception as e:
+                _log_command(command, confirmed=confirmed)
                 return f"FAILED: {e}"
         
         def get_system_status() -> str:
@@ -437,10 +518,14 @@ class ToolRegistry:
                 return f"FAILED: {e}"
         
         self._add("run_command", run_command,
-            "Run a real shell command and return output. "
-            "Use for git commands, system info, etc.",
+            "Run a real shell command on the host OS. "
+            "Requires confirmation for dangerous commands.",
             {"command": {"type": "string",
-                         "description": "Shell command"}})
+                         "description": "Shell command to execute"},
+             "confirmed": {"type": "boolean",
+                          "default": False,
+                          "description": "Set to true after explicit user confirmation"}},
+            required=["command"])
         
         self._add("get_system_status", get_system_status,
             "Get real CPU, RAM, and disk usage.",
@@ -692,76 +777,118 @@ class ToolRegistry:
         # === GIT OPERATIONS ===
         def git_add_commit_push(
             message: str,
-            path: str = 'D:\\JARVIS') -> str:
-            cmds = [
-                (['git', 'add', '.'], 'Stage'),
-                (['git', 'commit', '-m', message], 'Commit'),
-                (['git', 'push'], 'Push')
-            ]
-            results = []
-            for cmd, label in cmds:
-                r = subprocess.run(
-                    cmd, capture_output=True, text=True,
-                    cwd=path, env=os.environ.copy()
+            path: str = "",
+            confirmed: bool = False) -> str:
+            
+            target_path = _get_repo_path(path)
+            
+            # Step 1: git add .
+            r1 = subprocess.run(
+                ['git', 'add', '.'],
+                capture_output=True, text=True, cwd=target_path, env=os.environ.copy()
+            )
+            if r1.returncode != 0:
+                return f"FAILED at git add: {r1.stderr}"
+            
+            # Step 2: git diff --cached --stat
+            r_diff = subprocess.run(
+                ['git', 'diff', '--cached', '--stat'],
+                capture_output=True, text=True, cwd=target_path, env=os.environ.copy()
+            )
+            diff_stat = r_diff.stdout.strip()
+            
+            # Check if there's anything staged
+            r_check = subprocess.run(
+                ['git', 'status', '--porcelain'],
+                capture_output=True, text=True, cwd=target_path, env=os.environ.copy()
+            )
+            if not r_check.stdout.strip():
+                return "Nothing to commit, sir."
+            
+            # Step 3: Confirmation check
+            if not confirmed:
+                return (
+                    f"Staged changes:\n{diff_stat}\n\n"
+                    f"CONFIRMATION REQUIRED: Please confirm committing and pushing with message: '{message}'. Re-run with confirmed=True to proceed."
                 )
-                if r.returncode != 0:
-                    if 'nothing to commit' in \
-                       r.stdout + r.stderr:
-                        return "Nothing to commit, sir."
-                    return f"FAILED at {label}: {r.stderr}"
-                results.append(f"✓ {label}")
-            return "\n".join(results)
+            
+            # Step 4: git commit
+            r2 = subprocess.run(
+                ['git', 'commit', '-m', message],
+                capture_output=True, text=True, cwd=target_path, env=os.environ.copy()
+            )
+            if r2.returncode != 0:
+                if "nothing to commit" in (r2.stdout + r2.stderr).lower():
+                    return "Nothing to commit, sir."
+                return f"FAILED at git commit: {r2.stderr}"
+            
+            # Step 5: git push
+            r3 = subprocess.run(
+                ['git', 'push'],
+                capture_output=True, text=True, cwd=target_path, env=os.environ.copy()
+            )
+            if r3.returncode != 0:
+                return f"FAILED at git push: {r3.stderr}\nCommitted locally but not pushed."
+            
+            _log_command(f"git commit -m '{message}' && git push", confirmed=True)
+            return f"✓ Staged changes\n✓ Committed: {message}\n✓ Pushed to GitHub"
         
-        def git_status(path: str = 'D:\\JARVIS') -> str:
+        def git_status(path: str = "") -> str:
+            target_path = _get_repo_path(path)
             r = subprocess.run(
                 ['git', 'status'],
-                capture_output=True, text=True, cwd=path
+                capture_output=True, text=True, cwd=target_path
             )
             return r.stdout if r.returncode == 0 \
                    else f"FAILED: {r.stderr}"
         
-        def git_pull(path: str = 'D:\\JARVIS') -> str:
+        def git_pull(path: str = "") -> str:
+            target_path = _get_repo_path(path)
             r = subprocess.run(
                 ['git', 'pull'],
-                capture_output=True, text=True, cwd=path
+                capture_output=True, text=True, cwd=target_path
             )
             return r.stdout if r.returncode == 0 \
                    else f"FAILED: {r.stderr}"
         
         def git_log(
             limit: int = 10,
-            path: str = 'D:\\JARVIS') -> str:
+            path: str = "") -> str:
+            target_path = _get_repo_path(path)
             r = subprocess.run(
                 ['git', 'log', '--oneline', f'-{limit}'],
-                capture_output=True, text=True, cwd=path
+                capture_output=True, text=True, cwd=target_path
             )
             return r.stdout if r.returncode == 0 \
                    else f"FAILED: {r.stderr}"
         
-        def git_diff(path: str = 'D:\\JARVIS') -> str:
+        def git_diff(path: str = "") -> str:
+            target_path = _get_repo_path(path)
             r = subprocess.run(
                 ['git', 'diff', '--stat'],
-                capture_output=True, text=True, cwd=path
+                capture_output=True, text=True, cwd=target_path
             )
             return r.stdout or "No changes." \
                    if r.returncode == 0 else f"FAILED: {r.stderr}"
         
         def git_create_branch(
             branch: str,
-            path: str = 'D:\\JARVIS') -> str:
+            path: str = "") -> str:
+            target_path = _get_repo_path(path)
             r = subprocess.run(
                 ['git', 'checkout', '-b', branch],
-                capture_output=True, text=True, cwd=path
+                capture_output=True, text=True, cwd=target_path
             )
             return f"Created branch: {branch}" \
                    if r.returncode == 0 else f"FAILED: {r.stderr}"
         
         def git_switch_branch(
             branch: str,
-            path: str = 'D:\\JARVIS') -> str:
+            path: str = "") -> str:
+            target_path = _get_repo_path(path)
             r = subprocess.run(
                 ['git', 'checkout', branch],
-                capture_output=True, text=True, cwd=path
+                capture_output=True, text=True, cwd=target_path
             )
             return f"Switched to: {branch}" \
                    if r.returncode == 0 else f"FAILED: {r.stderr}"
@@ -960,11 +1087,16 @@ class ToolRegistry:
         # === REGISTER ALL ===
         self._add("git_add_commit_push", 
             git_add_commit_push,
-            "Stage all changes, commit, push to GitHub. "
+            "Stage all changes, preview diff, and require confirmation before commit and push. "
             "Call when user says push, commit, save to github.",
-            {"message": {"type": "string"},
+            {"message": {"type": "string",
+                         "description": "Commit message"},
              "path": {"type": "string",
-                      "default": "D:\\JARVIS"}},
+                      "default": "",
+                      "description": "Repository path (auto-detected if empty)"},
+             "confirmed": {"type": "boolean",
+                           "default": False,
+                           "description": "Set to true after explicit user confirmation of diff"}},
             required=["message"])
         
         self._add("gh_list_repos", gh_list_repos,
