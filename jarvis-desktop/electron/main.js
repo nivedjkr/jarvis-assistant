@@ -37,7 +37,7 @@ function checkPortInUse(port, host = '127.0.0.1') {
 function freePort8765() {
   return new Promise((resolve) => {
     if (process.platform === 'win32') {
-      const cmd = `powershell -Command "Get-Process -Id (Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue).OwningProcess -ErrorAction SilentlyContinue | Stop-Process -Force"`
+      const cmd = `cmd /c "for /f \\"tokens=5\\" %a in ('netstat -aon ^| findstr :8765 ^| findstr LISTENING') do taskkill /F /PID %a"`
       exec(cmd, (err, stdout) => {
         if (stdout && stdout.trim()) {
           console.log('[ELECTRON] Freed port 8765:', stdout.trim())
