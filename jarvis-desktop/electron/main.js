@@ -1,15 +1,75 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
-const { spawn } = require('child_process')
+const { spawn, exec } = require('child_process')
 const path = require('path')
 const WebSocket = require('ws')
 const http = require('http')
-
+const net = require('net')
 const fs = require('fs')
 
 let mainWindow
 let jarvisProcess
 let ws
 let backendFailed = false
+
+function checkPortInUse(port, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const socket = new net.Socket()
+    socket.setTimeout(400)
+    
+    socket.on('connect', () => {
+      socket.destroy()
+      resolve(true)
+    })
+    
+    socket.on('timeout', () => {
+      socket.destroy()
+      resolve(false)
+    })
+    
+    socket.on('error', () => {
+      resolve(false)
+    })
+    
+    socket.connect(port, host)
+  })
+}
+
+function freePort8765() {
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      const cmd = `cmd /c "for /f \\"tokens=5\\" %a in ('netstat -aon ^| findstr :8765 ^| findstr LISTENING') do taskkill /F /PID %a"`
+      exec(cmd, (err, stdout) => {
+        if (stdout && stdout.trim()) {
+          console.log('[ELECTRON] Freed port 8765:', stdout.trim())
+        }
+        resolve()
+      })
+    } else {
+      exec(`lsof -ti :8765 | xargs kill -9`, () => resolve())
+    }
+  })
+}
+
+function killBackendProcess() {
+  if (jarvisProcess && jarvisProcess.pid) {
+    const pid = jarvisProcess.pid
+    console.log(`[ELECTRON] Killing backend process tree (PID: ${pid})...`)
+    if (process.platform === 'win32') {
+      try {
+        exec(`taskkill /pid ${pid} /T /F`, (err) => {
+          if (err) console.log('[ELECTRON] taskkill info:', err.message)
+        })
+      } catch (e) {
+        console.error('[ELECTRON] Error executing taskkill:', e)
+      }
+    } else {
+      try {
+        jarvisProcess.kill('SIGTERM')
+      } catch (e) {}
+    }
+    jarvisProcess = null
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -33,7 +93,7 @@ function createWindow() {
   }
 }
 
-function startJarvisBackend() {
+async function startJarvisBackend() {
   const defaultPath = path.resolve(__dirname, '..', '..')
   const jarvisPath = process.env.JARVIS_BACKEND_PATH || defaultPath
   console.log('[ELECTRON] Resolving JARVIS backend path:', jarvisPath)
@@ -51,7 +111,16 @@ function startJarvisBackend() {
     }
     return
   }
+
+  // Pre-spawn check: clear orphaned processes bound to port 8765
+  const portOccupied = await checkPortInUse(8765)
+  if (portOccupied) {
+    console.warn('[ELECTRON] Port 8765 is in use by an orphaned process. Freeing port...')
+    await freePort8765()
+    await new Promise(r => setTimeout(r, 600))
+  }
   
+  // Spawn Python backend directly without shell wrapper for clean PID tracking
   jarvisProcess = spawn(
     'python', ['-m', 'jarvis.api'],
     {
@@ -60,9 +129,11 @@ function startJarvisBackend() {
         ...process.env,
         PYTHONPATH: jarvisPath
       },
-      shell: true
+      shell: false
     }
   )
+
+  console.log(`[ELECTRON] Python backend spawned with PID ${jarvisProcess.pid}`)
   
   if (jarvisProcess.stdout) {
     jarvisProcess.stdout.on('data', (data) => {
@@ -106,7 +177,7 @@ function startJarvisBackend() {
         mainWindow.webContents.send('connection-status', 'disconnected')
         mainWindow.webContents.send('jarvis-response', {
           type: 'response',
-          text: `JARVIS backend process exited with code ${code}. Please verify Python environment and dependencies.`
+          text: `JARVIS backend process exited with code ${code}. Check terminal/console for error log.`
         })
       }
     }
@@ -302,16 +373,12 @@ ipcMain.handle('get-vitals', () => fetchJson('http://127.0.0.1:8765/vitals'))
 
 ipcMain.handle('window-minimize', () => mainWindow && mainWindow.minimize())
 ipcMain.handle('window-close', () => {
-  if (jarvisProcess) {
-    try { jarvisProcess.kill('SIGTERM') } catch (e) {}
-  }
+  killBackendProcess()
   app.quit()
 })
 
 app.on('will-quit', () => {
-  if (jarvisProcess) {
-    try { jarvisProcess.kill('SIGTERM') } catch (e) {}
-  }
+  killBackendProcess()
 })
 
 app.whenReady().then(() => {

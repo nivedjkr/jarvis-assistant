@@ -214,5 +214,16 @@ async def vitals_endpoint():
 if __name__ == "__main__":
     print("[API] Starting JARVIS WebSocket server...")
     print("[API] Electron can connect at ws://127.0.0.1:8765/ws")
-    uvicorn.run(app, host="127.0.0.1", port=8765, 
-                log_level="info")
+    try:
+        uvicorn.run(app, host="127.0.0.1", port=8765, log_level="info")
+    except (OSError, Exception) as e:
+        err_str = str(e)
+        if "10048" in err_str or "98" in err_str or "address already in use" in err_str.lower():
+            sys.stderr.write(
+                "\n[API ERROR] Port 8765 already in use — a previous JARVIS backend process may still be running.\n"
+            )
+            sys.stderr.flush()
+        else:
+            sys.stderr.write(f"\n[API ERROR] Failed to start server: {e}\n")
+            sys.stderr.flush()
+        sys.exit(1)
