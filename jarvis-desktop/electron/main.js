@@ -4,9 +4,12 @@ const path = require('path')
 const WebSocket = require('ws')
 const http = require('http')
 
+const fs = require('fs')
+
 let mainWindow
 let jarvisProcess
 let ws
+let backendFailed = false
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -31,7 +34,23 @@ function createWindow() {
 }
 
 function startJarvisBackend() {
-  const jarvisPath = 'D:\\JARVIS'
+  const defaultPath = path.resolve(__dirname, '..', '..')
+  const jarvisPath = process.env.JARVIS_BACKEND_PATH || defaultPath
+  console.log('[ELECTRON] Resolving JARVIS backend path:', jarvisPath)
+  
+  if (!fs.existsSync(jarvisPath)) {
+    const errorMsg = `JARVIS backend path directory does not exist: ${jarvisPath}`
+    console.error('[PYTHON ERROR]', errorMsg)
+    backendFailed = true
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('connection-status', 'disconnected')
+      mainWindow.webContents.send('jarvis-response', {
+        type: 'response',
+        text: `Error: ${errorMsg}`
+      })
+    }
+    return
+  }
   
   jarvisProcess = spawn(
     'python', ['-m', 'jarvis.api'],
@@ -68,18 +87,48 @@ function startJarvisBackend() {
   }
   
   jarvisProcess.on('error', (err) => {
-    console.error('[PYTHON] Failed to start:', err)
+    console.error('[PYTHON PROCESS ERROR] Failed to start:', err.message)
+    backendFailed = true
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('connection-status', 'disconnected')
+      mainWindow.webContents.send('jarvis-response', {
+        type: 'response',
+        text: `Failed to launch Python backend process: ${err.message}`
+      })
+    }
+  })
+
+  jarvisProcess.on('exit', (code, signal) => {
+    if (code !== 0 && code !== null) {
+      console.error(`[PYTHON PROCESS EXIT] Backend exited with code ${code}, signal ${signal}`)
+      backendFailed = true
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('connection-status', 'disconnected')
+        mainWindow.webContents.send('jarvis-response', {
+          type: 'response',
+          text: `JARVIS backend process exited with code ${code}. Please verify Python environment and dependencies.`
+        })
+      }
+    }
   })
   
   setTimeout(() => {
     if (!ws || ws.readyState !== 1) {
-      console.log('[WS] Fallback connection attempt')
-      connectWebSocket()
+      if (!backendFailed) {
+        console.log('[WS] Fallback connection attempt')
+        connectWebSocket()
+      } else {
+        console.warn('[WS] Skipping fallback connection: Backend failed to start.')
+      }
     }
   }, 5000)
 }
 
 function connectWebSocket() {
+  if (backendFailed) {
+    console.warn('[WS] Backend process failed. Skipping WebSocket connection retry.')
+    return
+  }
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return
   }
@@ -112,6 +161,10 @@ function connectWebSocket() {
     })
     
     ws.on('close', () => {
+      if (backendFailed) {
+        console.warn('[WS] Connection closed. Not retrying since backend failed.')
+        return
+      }
       console.log('[WS] Disconnected — retrying in 3s')
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('connection-status', 'disconnected')

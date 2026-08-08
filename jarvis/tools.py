@@ -1133,40 +1133,46 @@ class ToolRegistry:
         self._add("git_status", git_status,
             "Check git status of JARVIS project.",
             {"path": {"type": "string",
-                      "default": "D:\\JARVIS"}},
+                      "default": "",
+                      "description": "Repository path (auto-detected if empty)"}},
             required=[])
         
         self._add("git_pull", git_pull,
             "Pull latest from GitHub.",
             {"path": {"type": "string",
-                      "default": "D:\\JARVIS"}},
+                      "default": "",
+                      "description": "Repository path (auto-detected if empty)"}},
             required=[])
         
         self._add("git_log", git_log,
             "Show recent commit history.",
             {"limit": {"type": "integer", "default": 10},
              "path": {"type": "string",
-                      "default": "D:\\JARVIS"}},
+                      "default": "",
+                      "description": "Repository path (auto-detected if empty)"}},
             required=[])
         
         self._add("git_diff", git_diff,
             "Show what files changed since last commit.",
             {"path": {"type": "string",
-                      "default": "D:\\JARVIS"}},
+                      "default": "",
+                      "description": "Repository path (auto-detected if empty)"}},
             required=[])
         
         self._add("git_create_branch", git_create_branch,
             "Create a new git branch.",
             {"branch": {"type": "string"},
              "path": {"type": "string",
-                      "default": "D:\\JARVIS"}},
+                      "default": "",
+                      "description": "Repository path (auto-detected if empty)"}},
             required=["branch"])
         
         self._add("git_switch_branch", git_switch_branch,
             "Switch to an existing git branch.",
             {"branch": {"type": "string"},
              "path": {"type": "string",
-                      "default": "D:\\JARVIS"}},
+                      "default": "",
+                      "description": "Repository path (auto-detected if empty)"}},
             required=["branch"])
         
         self._add("gh_list_issues", gh_list_issues,
