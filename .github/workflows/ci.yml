@@ -36,14 +36,11 @@ jobs:
         NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
     
     - name: Run tool tests
-      run: |
-        pytest jarvis/tests/test_tools.py -v \
-          --tb=short
+      run: python -m pytest jarvis/tests/test_tools.py -v --tb=short
       env:
         NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
     
     - name: Check no sensitive files tracked
+      shell: bash
       run: |
-        git ls-files | grep -E "\.env$|\.db$|token" && 
-        echo "FAIL: sensitive files tracked" && exit 1 || 
-        echo "OK: no sensitive files"
+        git ls-files | grep -E "\.env$|\.db$|token" && echo "FAIL: sensitive files tracked" && exit 1 || echo "OK: no sensitive files"
