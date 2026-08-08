@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
-const { spawn, exec } = require('child_process')
+const { spawn, exec, execFile } = require('child_process')
 const path = require('path')
 const WebSocket = require('ws')
 const http = require('http')
@@ -37,12 +37,15 @@ function checkPortInUse(port, host = '127.0.0.1') {
 function freePort8765() {
   return new Promise((resolve) => {
     if (process.platform === 'win32') {
-      const cmd = `cmd /c "for /f \\"tokens=5\\" %a in ('netstat -aon ^| findstr :8765 ^| findstr LISTENING') do taskkill /F /PID %a"`
-      exec(cmd, (err, stdout) => {
-        if (stdout && stdout.trim()) {
-          console.log('[ELECTRON] Freed port 8765:', stdout.trim())
-        }
-        resolve()
+      const psCmd = 'Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }'
+      execFile('powershell.exe', ['-NoProfile', '-Command', psCmd], () => {
+        const cmd = `cmd /c "for /f \\"tokens=5\\" %a in ('netstat -aon ^| findstr :8765 ^| findstr LISTENING') do taskkill /F /PID %a"`
+        exec(cmd, (err, stdout) => {
+          if (stdout && stdout.trim()) {
+            console.log('[ELECTRON] Freed port 8765:', stdout.trim())
+          }
+          resolve()
+        })
       })
     } else {
       exec(`lsof -ti :8765 | xargs kill -9`, () => resolve())
@@ -206,8 +209,11 @@ async function startJarvisBackend() {
 
   console.log(`[ELECTRON] Python backend spawned with PID ${jarvisProcess.pid}`)
   
+  let wsConnecting = false
   const handleServerOutput = (text) => {
-    if (text.includes('Uvicorn running') || text.includes('Application startup complete.')) {
+    if (wsConnecting) return
+    if (text.includes('Uvicorn running on http://') || text.includes('Uvicorn running')) {
+      wsConnecting = true
       console.log('[WS] Server ready, connecting...')
       connectWebSocket()
     }
