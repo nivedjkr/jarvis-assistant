@@ -462,6 +462,81 @@ class ToolRegistry:
             return open_url(
                 f'https://www.google.com/search?q={q_url}')
         
+        def web_search_live(query: str, max_results: int = 5) -> str:
+            try:
+                try:
+                    max_results = int(max_results)
+                except (ValueError, TypeError):
+                    max_results = 5
+
+                results = []
+                try:
+                    try:
+                        from ddgs import DDGS
+                    except ImportError:
+                        from duckduckgo_search import DDGS
+                    with DDGS() as ddgs:
+                        for r in ddgs.text(query, max_results=max_results):
+                            results.append(
+                                f"Title: {r.get('title', '')}\n"
+                                f"URL: {r.get('href', '')}\n"
+                                f"Summary: {r.get('body', '')}\n"
+                            )
+                except Exception:
+                    pass
+
+                if not results:
+                    import urllib.request, urllib.parse, html, re
+                    encoded_q = urllib.parse.quote(query)
+                    url = f"https://html.duckduckgo.com/html/?q={encoded_q}"
+                    req = urllib.request.Request(
+                        url,
+                        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        body_html = resp.read().decode('utf-8', errors='ignore')
+                    
+                    snippets = re.findall(r'<a class="result__snippet[^>]*>(.*?)</a>', body_html, re.DOTALL)
+                    links = re.findall(r'<a class="result__url"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', body_html, re.DOTALL)
+                    titles = re.findall(r'<a class="result__title"[^>]*>(.*?)</a>', body_html, re.DOTALL)
+                    
+                    for i in range(min(len(snippets), max_results)):
+                        clean_snip = re.sub(r'<[^>]+>', '', html.unescape(snippets[i])).strip()
+                        clean_title = re.sub(r'<[^>]+>', '', html.unescape(titles[i])).strip() if i < len(titles) else "Result"
+                        clean_url = links[i][0] if i < len(links) else ""
+                        if clean_snip:
+                            results.append(f"Title: {clean_title}\nURL: {clean_url}\nSummary: {clean_snip}\n")
+
+                if not results:
+                    return "No results found."
+                return f"Search results for '{query}':\n\n" + "\n---\n".join(results)
+            except Exception as e:
+                return f"Search failed: {str(e)}"
+
+        def get_webpage_content(url: str) -> str:
+            try:
+                import urllib.request
+                import html
+                import re
+                
+                req = urllib.request.Request(
+                    url,
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    content = r.read().decode('utf-8', errors='ignore')
+                
+                # Strip HTML tags
+                content = re.sub(r'<[^>]+>', ' ', content)
+                content = html.unescape(content)
+                content = re.sub(r'\s+', ' ', content).strip()
+                
+                # Return first 3000 chars
+                return content[:3000] if content \
+                       else "No content found."
+            except Exception as e:
+                return f"Failed to fetch page: {str(e)}"
+        
         self._add("open_url", open_url,
             "Open a URL in the browser.",
             {"url": {"type": "string",
@@ -476,6 +551,23 @@ class ToolRegistry:
             "Search Google for explicit user search queries. Do NOT call for greetings, hi, or casual chat.",
             {"query": {"type": "string",
                        "description": "Search terms"}})
+        
+        self._add("web_search_live", web_search_live,
+            "Search the web for real-time information — "
+            "current events, latest news, recent movies, "
+            "prices, anything that may have changed recently. "
+            "Call this whenever the user asks about something "
+            "current or recent that the model may not know.",
+            {"query": {"type": "string",
+                       "description": "Search query"},
+             "max_results": {"type": "integer",
+                             "default": 5}},
+            required=["query"])
+        
+        self._add("get_webpage_content", get_webpage_content,
+            "Fetch and read the content of a webpage URL.",
+            {"url": {"type": "string",
+                     "description": "URL to fetch"}})
     
     def _register_system_tools(self):
         
