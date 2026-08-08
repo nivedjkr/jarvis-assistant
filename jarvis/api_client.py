@@ -2,6 +2,9 @@ from openai import AsyncOpenAI
 import os
 import json
 import asyncio
+import time
+import uuid
+from typing import Dict, List, Optional
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -32,6 +35,52 @@ async def with_retry(coro_func, max_retries: int = 3, base_delay: float = 1.0):
     raise last_exception
 
 
+class ConversationSession:
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.messages = []
+        self.created_at = time.time()
+        self.last_active = time.time()
+        self.max_messages = 40
+        self.token_budget = 4000
+    
+    def add_message(self, role: str, content: str):
+        self.messages.append({"role": role, "content": content})
+        self.last_active = time.time()
+        self._trim_history()
+    
+    def _trim_history(self):
+        # Keep last 40 messages (20 exchanges)
+        if len(self.messages) > self.max_messages:
+            # Summarize oldest messages before dropping
+            old_messages = self.messages[:-30]
+            if old_messages:
+                summary = self._summarize_old_context(old_messages)
+                # Replace old messages with summary
+                self.messages = [{
+                    "role": "system",
+                    "content": f"Earlier conversation summary: {summary}"
+                }] + self.messages[-30:]
+    
+    def _summarize_old_context(self, messages: list) -> str:
+        user_msgs = [
+            m.get('content', '') for m in messages 
+            if isinstance(m, dict) and m.get('role') == 'user'
+        ][-5:]
+        return "User previously discussed: " + "; ".join(user_msgs[:200])
+
+    def get_token_estimate(self) -> int:
+        total_chars = sum(
+            len(str(m.get('content', '')))
+            for m in self.messages
+        )
+        return total_chars // 4
+
+    def clear_history(self):
+        self.messages = []
+        print(f"[CONTEXT] History cleared for session '{self.session_id}'.")
+
+
 class JarvisAPIClient:
     def __init__(self):
         self.client = AsyncOpenAI(
@@ -40,10 +89,35 @@ class JarvisAPIClient:
             timeout=30.0
         )
         self.model = "nvidia/nemotron-3-ultra-550b-a55b"
-        self.messages = []
         self.system_prompt = self._load_system_prompt()
+        self.max_messages = 40      # keep last 20 exchanges
+        self.token_budget = 4000    # rough token estimate
+        self.sessions: Dict[str, ConversationSession] = {}
+        self.default_session = "cli"
+        
+        try:
+            from jarvis.semantic_memory import SemanticMemory
+            self.semantic_memory = SemanticMemory()
+        except Exception:
+            self.semantic_memory = None
+            
         print(f"[API] Model: {self.model}")
     
+    @property
+    def messages(self) -> list:
+        return self.get_session().messages
+
+    @messages.setter
+    def messages(self, val: list):
+        self.get_session().messages = val
+
+    def get_session(self, session_id: str = None) -> ConversationSession:
+        sid = session_id or self.default_session
+        if sid not in self.sessions:
+            self.sessions[sid] = ConversationSession(sid)
+            print(f"[SESSION] New session: {sid}")
+        return self.sessions[sid]
+
     def _load_system_prompt(self) -> str:
         return """You are JARVIS — Just A Rather Very Intelligent System.
 Built by Nived. Running on his machine.
@@ -76,23 +150,52 @@ NEVER:
 - Write more than 3 sentences for routine responses
 - Use emojis"""
     
-    def add_user_message(self, content: str):
-        self.messages.append({"role": "user", "content": content})
-        # Keep last 20 exchanges
-        if len(self.messages) > 40:
-            self.messages = self.messages[-40:]
+    def add_user_message(self, content: str, session_id: str = None):
+        self.get_session(session_id).add_message("user", content)
     
-    def add_assistant_message(self, content: str):
-        self.messages.append({
-            "role": "assistant", 
-            "content": content
-        })
-    
-    def get_messages(self) -> list:
+    def add_assistant_message(self, content: str, session_id: str = None):
+        self.get_session(session_id).add_message("assistant", content)
+
+    def _trim_history(self, session_id: str = None):
+        self.get_session(session_id)._trim_history()
+
+    def _summarize_old_context(self, messages: list) -> str:
+        user_msgs = [
+            m.get('content', '') for m in messages 
+            if isinstance(m, dict) and m.get('role') == 'user'
+        ][-5:]
+        return "User previously discussed: " + "; ".join(user_msgs[:200])
+
+    def get_messages(self, session_id: str = None) -> list:
+        session = self.get_session(session_id)
         return [
             {"role": "system", "content": self.system_prompt}
-        ] + self.messages[-20:]
-    
+        ] + session.messages[-20:]
+
+    def get_messages_with_memory(self, user_message: str, session_id: str = None) -> list:
+        if hasattr(self, 'semantic_memory') and self.semantic_memory:
+            try:
+                context = self.semantic_memory.get_relevant_context(user_message)
+                if context:
+                    memory_msg = {
+                        "role": "system",
+                        "content": context
+                    }
+                    session = self.get_session(session_id)
+                    return [
+                        {"role": "system", "content": self.system_prompt},
+                        memory_msg
+                    ] + session.messages[-18:]
+            except Exception as e:
+                print(f"[SEMANTIC] Context fetch error: {e}")
+        return self.get_messages(session_id)
+
+    def get_token_estimate(self, session_id: str = None) -> int:
+        return self.get_session(session_id).get_token_estimate()
+
+    def clear_history(self, session_id: str = None):
+        self.get_session(session_id).clear_history()
+
     async def _stream_response(self, messages: list, max_tokens: int = 300) -> str:
         async def _do_stream():
             full_text = ""
@@ -112,25 +215,33 @@ NEVER:
         
         return await with_retry(_do_stream)
 
-    async def chat(self, tool_schemas: list = None) -> str:
+    async def chat(self, tool_schemas: list = None, session_id: str = None) -> str:
         """Simple chat without tools"""
         try:
-            return await self._stream_response(self.get_messages(), max_tokens=300)
+            return await self._stream_response(self.get_messages(session_id), max_tokens=300)
         except Exception as e:
             print(f"[API] Error: {e}")
             return f"API error: {str(e)}"
     
     async def chat_with_tools(
         self, tool_schemas: list, 
-        tool_executor) -> str:
-        """Full tool-calling pipeline"""
-        messages = self.get_messages()
+        tool_executor,
+        session_id: str = None) -> str:
+        """Full tool-calling pipeline with session isolation"""
+        session = self.get_session(session_id)
+        user_last = ""
+        if session.messages:
+            for m in reversed(session.messages):
+                if m.get('role') == 'user':
+                    user_last = m.get('content', '')
+                    break
+
+        messages = self.get_messages_with_memory(user_last, session_id)
         
-        print(f"[PIPELINE] Calling API with "
+        print(f"[PIPELINE] Calling API for session '{session.session_id}' with "
               f"{len(tool_schemas)} tools")
         
         async def _do_chat():
-            # First call — with tools
             kwargs = {
                 "model": self.model,
                 "messages": messages,
@@ -150,7 +261,6 @@ NEVER:
                   f"{bool(message.tool_calls)}")
             
             if message.tool_calls:
-                # Add assistant message with tool calls
                 tool_calls_data = []
                 for tc in message.tool_calls:
                     tool_calls_data.append({
@@ -167,7 +277,6 @@ NEVER:
                     "tool_calls": tool_calls_data
                 })
                 
-                # Execute each tool
                 for tc in message.tool_calls:
                     name = tc.function.name
                     try:
@@ -185,7 +294,6 @@ NEVER:
                         "content": str(result)
                     })
                 
-                # Second call — get final response with streaming (150 max tokens)
                 response_text = await self._stream_response(messages, max_tokens=150)
             
             else:
@@ -196,7 +304,7 @@ NEVER:
                     response_text = await self._stream_response(messages, max_tokens=300)
             
             response_text = response_text or "Done, sir."
-            self.add_assistant_message(response_text)
+            self.add_assistant_message(response_text, session_id=session_id)
             print(f"[PIPELINE] Response: {repr(response_text)}")
             return response_text
         

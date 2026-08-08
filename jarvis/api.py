@@ -58,8 +58,11 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+import uuid
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    session_id = f"electron_{uuid.uuid4().hex[:8]}"
     await manager.connect(ws)
     
     # Send connected confirmation
@@ -85,11 +88,12 @@ async def websocket_endpoint(ws: WebSocket):
                 })
                 
                 # Process through JARVIS pipeline
-                api_client.add_user_message(user_msg)
+                api_client.add_user_message(user_msg, session_id=session_id)
                 
                 response = await api_client.chat_with_tools(
                     tool_schemas=tool_registry.schemas,
-                    tool_executor=tool_registry.execute
+                    tool_executor=tool_registry.execute,
+                    session_id=session_id
                 )
                 
                 # Send response back to Electron
@@ -136,12 +140,15 @@ async def status():
 async def chat_endpoint(request: dict):
     message = request.get("message", "")
     source = request.get("source", "api")
+    request_id = uuid.uuid4().hex[:8]
+    session_id = f"api_{request_id}"
     print(f"[HTTP] Chat from {source}: {message}")
     
-    api_client.add_user_message(message)
+    api_client.add_user_message(message, session_id=session_id)
     response = await api_client.chat_with_tools(
         tool_schemas=tool_registry.schemas,
-        tool_executor=tool_registry.execute
+        tool_executor=tool_registry.execute,
+        session_id=session_id
     )
     
     # Push to all connected WebSocket clients

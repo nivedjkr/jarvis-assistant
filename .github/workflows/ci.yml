@@ -9,17 +9,41 @@ on:
 jobs:
   test:
     runs-on: windows-latest
+    
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python
+    
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
+    
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-    - name: Test imports
-      run: python -m pytest jarvis/tests/ -v
+        pip install pytest pytest-asyncio
+    
+    - name: Run tool schema validation
+      run: |
+        python -c "
+        from jarvis.tools import ToolRegistry, validate_tool_schemas
+        r = ToolRegistry()
+        assert validate_tool_schemas(r), 'Schema validation failed'
+        print(f'OK: {len(r.tools)} tools validated')
+        "
       env:
-        NVIDIA_NIM_API_KEY: test_key
+        NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+    
+    - name: Run tool tests
+      run: |
+        pytest jarvis/tests/test_tools.py -v \
+          --tb=short
+      env:
+        NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+    
+    - name: Check no sensitive files tracked
+      run: |
+        git ls-files | grep -E "\.env$|\.db$|token" && 
+        echo "FAIL: sensitive files tracked" && exit 1 || 
+        echo "OK: no sensitive files"

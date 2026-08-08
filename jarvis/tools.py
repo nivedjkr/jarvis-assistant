@@ -3,14 +3,65 @@ import subprocess
 import time
 import psutil
 import webbrowser
-from typing import Callable
-import json
+import inspect
+from pydantic import BaseModel, ValidationError
+
+def validate_tool_schemas(registry):
+    errors = []
+    for name, func in registry.tools.items():
+        # Get schema for this tool
+        schema = next(
+            (s for s in registry.schemas 
+             if s.get('function', {}).get('name') == name), 
+            None
+        )
+        if not schema:
+            errors.append(f"No schema for tool: {name}")
+            continue
+        
+        # Check function is callable
+        if not callable(func):
+            errors.append(f"Tool not callable: {name}")
+            continue
+        
+        # Check required params exist in function
+        sig = inspect.signature(func)
+        schema_params = schema['function']['parameters']\
+            .get('properties', {}).keys()
+        func_params = sig.parameters.keys()
+        
+        for param in schema['function']['parameters']\
+            .get('required', []):
+            if param not in func_params:
+                errors.append(
+                    f"Tool {name}: required param "
+                    f"'{param}' not in function signature"
+                )
+    
+    if errors:
+        print("[SCHEMA] Validation errors:")
+        for e in errors:
+            try:
+                print(f"  ✗ {e}")
+            except UnicodeEncodeError:
+                print(f"  [X] {e}")
+        return False
+    else:
+        try:
+            print(f"[SCHEMA] All {len(registry.tools)} "
+                  f"tool schemas valid ✓")
+        except UnicodeEncodeError:
+            print(f"[SCHEMA] All {len(registry.tools)} "
+                  f"tool schemas valid [OK]")
+        return True
 
 class ToolRegistry:
     def __init__(self):
         self.tools = {}   # name -> async callable
         self.schemas = [] # OpenAI tool schemas
         self._register_all()
+        # Validate schemas on startup
+        validate_tool_schemas(self)
     
     def _register_all(self):
         self._register_file_tools()
@@ -21,6 +72,7 @@ class ToolRegistry:
         self._register_github_tools()
         self._register_github_full_tools()
         self._register_system_file_tools()
+        self._register_semantic_memory_tools()
         print(f"[TOOLS] Registered {len(self.tools)} tools: "
               f"{list(self.tools.keys())}")
     
@@ -1167,3 +1219,32 @@ class ToolRegistry:
             "Get real disk space usage.",
             {"path": {"type": "string", "default": "C:\\"}},
             required=[])
+
+    def _register_semantic_memory_tools(self):
+        def remember_fact(fact: str, category: str = "") -> str:
+            try:
+                from jarvis.semantic_memory import SemanticMemory
+                mem = SemanticMemory()
+                return mem.add_fact(fact, category)
+            except Exception as e:
+                return f"FAILED: {e}"
+
+        def search_memory(query: str) -> str:
+            try:
+                from jarvis.semantic_memory import SemanticMemory
+                mem = SemanticMemory()
+                return str(mem.search(query))
+            except Exception as e:
+                return f"FAILED: {e}"
+
+        self._add("remember_fact", remember_fact,
+            "Store a fact in semantic memory for later recall.",
+            {"fact": {"type": "string"},
+             "category": {"type": "string", "default": ""}},
+            required=["fact"])
+
+        self._add("search_memory", search_memory,
+            "Search memory semantically — finds relevant facts "
+            "even without exact keyword match.",
+            {"query": {"type": "string"}},
+            required=["query"])

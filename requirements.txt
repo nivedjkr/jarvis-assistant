@@ -18,7 +18,10 @@ google-api-python-client>=2.0.0
 duckduckgo-search>=6.0.0
 ddgs>=9.0.0
 pytest>=7.0.0
+pytest-asyncio>=0.21.0
 pyperclip>=1.8.0
 fastapi>=0.100.0
 uvicorn>=0.20.0
+faiss-cpu>=1.7.4
+sentence-transformers>=2.2.0
 

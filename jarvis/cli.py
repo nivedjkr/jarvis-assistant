@@ -155,6 +155,14 @@ class JarvisAssistant:
                    else "No history."
         elif cmd == '/diagnose':
             return await self._diagnose()
+        elif cmd == '/context':
+            count = len(self.api.get_session("cli").messages)
+            tokens = self.api.get_token_estimate("cli")
+            return (f"Context: {count} messages, "
+                    f"~{tokens} tokens estimated")
+        elif cmd == '/context clear':
+            self.api.clear_history("cli")
+            return "Context cleared, sir."
         elif cmd == '/speak off':
             self.voice_enabled = False
             return "Voice disabled, sir."
@@ -215,6 +223,8 @@ class JarvisAssistant:
 /clear        - Clear screen  
 /tools        - List all tools
 /history      - Recent conversation
+/context      - Check context usage
+/context clear - Clear context history
 /diagnose     - System health check
 /speak on|off - Toggle voice output
 
@@ -238,10 +248,11 @@ Natural language — just talk:
                 user_input)
         
         # Everything goes through LLM tool pipeline
-        self.api.add_user_message(user_input)
+        self.api.add_user_message(user_input, session_id="cli")
         return await self.api.chat_with_tools(
             tool_schemas=self.tools.schemas,
-            tool_executor=self._execute_tool
+            tool_executor=self._execute_tool,
+            session_id="cli"
         )
     
     async def run(self):
