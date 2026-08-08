@@ -441,22 +441,26 @@ class ToolRegistry:
                 except:
                     return f"FAILED: {e}"
         
+        GREETINGS = {'hey', 'hello', 'hi', 'hey jarvis', 'jarvis', 'thanks', 'thank you', 'ok', 'okay'}
+        
         def open_website(site: str) -> str:
             s = site.lower().strip()
+            if s in GREETINGS:
+                return "Greeting acknowledged."
             url = SITES.get(s)
             if url:
                 return open_url(url)
             if '.' in site:
                 return open_url(site)
-            # Treat as search
-            q = site.replace(' ', '+')
-            return open_url(
-                f'https://www.google.com/search?q={q}')
+            return f"Not a valid website name or URL. Use web_search for Google searches."
         
         def web_search(query: str) -> str:
-            q = query.replace(' ', '+')
+            q = query.strip()
+            if q.lower() in GREETINGS:
+                return "Greeting acknowledged."
+            q_url = q.replace(' ', '+')
             return open_url(
-                f'https://www.google.com/search?q={q}')
+                f'https://www.google.com/search?q={q_url}')
         
         self._add("open_url", open_url,
             "Open a URL in the browser.",
@@ -464,14 +468,12 @@ class ToolRegistry:
                      "description": "URL to open"}})
         
         self._add("open_website", open_website,
-            "Open a website by name (youtube, github, "
-            "gmail etc) or search Google.",
+            "Open a specific website by name (youtube, github, gmail, google, reddit, twitter, linkedin, netflix, spotify, etc) or domain URL. Do NOT call for greetings or casual chat.",
             {"site": {"type": "string",
-                      "description": "Site name or "
-                      "search query"}})
+                      "description": "Site name or domain URL"}})
         
         self._add("web_search", web_search,
-            "Search Google for a query.",
+            "Search Google for explicit user search queries. Do NOT call for greetings, hi, or casual chat.",
             {"query": {"type": "string",
                        "description": "Search terms"}})
     

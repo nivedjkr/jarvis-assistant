@@ -4,6 +4,7 @@ import json
 import asyncio
 import time
 import uuid
+import httpx
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
 from pathlib import Path
@@ -18,7 +19,19 @@ key = os.getenv('NVIDIA_NIM_API_KEY')
 print(f"[API] Key loaded: {bool(key)}")
 
 
-async def with_retry(coro_func, max_retries: int = 3, base_delay: float = 1.0):
+def _load_config():
+    config_path = Path(__file__).parent.parent / 'config.yaml'
+    if config_path.exists():
+        try:
+            import yaml
+            with open(config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            pass
+    return {}
+
+
+async def with_retry(coro_func, max_retries: int = 3, base_delay: float = 1.5):
     """Execute coroutine with exponential backoff retry"""
     last_exception = None
     for attempt in range(max_retries):
@@ -28,7 +41,7 @@ async def with_retry(coro_func, max_retries: int = 3, base_delay: float = 1.0):
             last_exception = e
             if attempt < max_retries - 1:
                 delay = base_delay * (2 ** attempt)
-                print(f"[API] Attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+                print(f"[API] Attempt {attempt + 1} failed ({type(e).__name__}: {e}). Retrying in {delay}s...")
                 await asyncio.sleep(delay)
             else:
                 print(f"[API] All {max_retries} attempts failed")
@@ -83,12 +96,14 @@ class ConversationSession:
 
 class JarvisAPIClient:
     def __init__(self):
+        cfg = _load_config()
+        model_name = cfg.get("api", {}).get("model", "meta/llama-3.1-8b-instruct")
         self.client = AsyncOpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=os.getenv("NVIDIA_NIM_API_KEY"),
-            timeout=30.0
+            timeout=httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=15.0)
         )
-        self.model = "nvidia/nemotron-3-ultra-550b-a55b"
+        self.model = model_name
         self.system_prompt = self._load_system_prompt()
         self.max_messages = 40      # keep last 20 exchanges
         self.token_budget = 4000    # rough token estimate
@@ -128,6 +143,10 @@ IDENTITY:
 - You have opinions. Express them briefly when asked.
 - Never say "As an AI..." or "I don't have feelings..."
 - Stay in character always.
+
+GREETINGS & CASUAL CHAT:
+- When the user says "hey", "hello", "hi", "hey jarvis", or greets you, respond politely and naturally in text (e.g. "Hello, sir. How can I assist you?").
+- DO NOT call open_website, web_search, open_url, or any tools for greetings or casual conversation.
 
 RESPONSE LENGTH:
 - Default: 1-2 sentences. You are spoken aloud.
@@ -203,13 +222,15 @@ NEVER:
                 model=self.model,
                 messages=messages,
                 max_tokens=max_tokens,
-                stream=True
+                stream=True,
+                timeout=httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
             )
             async for chunk in stream:
-                delta = chunk.choices[0].delta.content or ""
-                if delta:
-                    print(delta, end="", flush=True)
-                    full_text += delta
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta.content or ""
+                    if delta:
+                        print(delta, end="", flush=True)
+                        full_text += delta
             print()  # newline after streaming
             return full_text
         
@@ -246,7 +267,8 @@ NEVER:
                 "model": self.model,
                 "messages": messages,
                 "max_tokens": 300,
-                "stream": False
+                "stream": False,
+                "timeout": httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
             }
             if tool_schemas:
                 kwargs["tools"] = tool_schemas
