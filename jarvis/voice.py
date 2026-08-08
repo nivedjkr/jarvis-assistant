@@ -10,7 +10,7 @@ import tempfile
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, AsyncGenerator, Callable, Dict, Any, List, Tuple
 from pathlib import Path
 
@@ -130,6 +130,7 @@ def _clean_text_for_speech(text: str, speak_code_blocks: bool = False) -> str:
 
 
 _TTS_CACHE: Dict[str, str] = {}
+_TTS_CACHE_LOCK = threading.Lock()
 
 class TTSEngine:
     """Text-to-Speech engine using edge-tts with pyttsx3 fallback"""
@@ -244,8 +245,9 @@ class TTSEngine:
             return ""
         
         cache_key = f"{self.voice}:{clean_text}"
-        if cache_key in _TTS_CACHE:
-            return _TTS_CACHE[cache_key]
+        with _TTS_CACHE_LOCK:
+            if cache_key in _TTS_CACHE:
+                return _TTS_CACHE[cache_key]
         
         try:
             import edge_tts
@@ -266,9 +268,10 @@ class TTSEngine:
             b64_str = base64.b64encode(audio_bytes).decode('utf-8')
             res = f"data:audio/mp3;base64,{b64_str}"
             
-            if len(_TTS_CACHE) > 200:
-                _TTS_CACHE.pop(next(iter(_TTS_CACHE)))
-            _TTS_CACHE[cache_key] = res
+            with _TTS_CACHE_LOCK:
+                if len(_TTS_CACHE) > 200:
+                    _TTS_CACHE.pop(next(iter(_TTS_CACHE)))
+                _TTS_CACHE[cache_key] = res
             return res
         except Exception as e:
             console.print(f"[red]Error synthesizing to base64: {e}[/red]")
@@ -282,33 +285,6 @@ class TTSEngine:
         import base64
         b64_str = base64.b64encode(audio_bytes).decode('utf-8')
         return f"data:audio/mp3;base64,{b64_str}"
-
-async def synthesize_sentence(text: str, voice: str = "en-GB-RyanNeural") -> bytes:
-    """
-    Synthesize a single sentence using edge-tts with en-GB-RyanNeural voice.
-    Saves to a temporary file and returns raw audio bytes.
-    """
-    clean_text = _clean_text_for_speech(text)
-    if not clean_text:
-        return b""
-    try:
-        import edge_tts
-        communicate = edge_tts.Communicate(clean_text, voice)
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
-            temp_path = temp_file.name
-        
-        await communicate.save(temp_path)
-        with open(temp_path, "rb") as f:
-            audio_bytes = f.read()
-        
-        try:
-            os.unlink(temp_path)
-        except Exception:
-            pass
-        return audio_bytes
-    except Exception as e:
-        console.print(f"[red]Error in synthesize_sentence: {e}[/red]")
-        return b""
 
     def _split_sentences(self, text: str) -> list:
         """
@@ -416,6 +392,7 @@ async def synthesize_sentence(text: str, voice: str = "en-GB-RyanNeural") -> byt
     def _play_audio(self, file_path: str):
         """Play audio file using pygame"""
         try:
+            import pygame
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
             pygame.mixer.music.load(file_path)
@@ -451,6 +428,44 @@ async def synthesize_sentence(text: str, voice: str = "en-GB-RyanNeural") -> byt
         import random
         phrase = random.choice(acknowledgments)
         await self.speak(phrase)
+
+
+async def synthesize_sentence(text: str, voice: str = "en-GB-RyanNeural") -> bytes:
+    """
+    Synthesize a single sentence using edge-tts with en-GB-RyanNeural voice.
+    Saves to a temporary file and returns raw audio bytes.
+    """
+    clean_text = _clean_text_for_speech(text)
+    if not clean_text:
+        return b""
+    try:
+        import edge_tts
+        communicate = edge_tts.Communicate(clean_text, voice)
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
+            temp_path = temp_file.name
+        
+        await communicate.save(temp_path)
+        with open(temp_path, "rb") as f:
+            audio_bytes = f.read()
+        
+        try:
+            os.unlink(temp_path)
+        except Exception:
+            pass
+        return audio_bytes
+    except Exception as e:
+        console.print(f"[red]Error in synthesize_sentence: {e}[/red]")
+        return b""
+
+
+_default_tts_instance = None
+
+async def speak(text: str, speak_code_blocks: bool = False):
+    """Module-level speak function for simple TTS calls."""
+    global _default_tts_instance
+    if _default_tts_instance is None:
+        _default_tts_instance = TTSEngine()
+    await _default_tts_instance.speak(text, speak_code_blocks=speak_code_blocks)
 
 
 class AudioRecorder:

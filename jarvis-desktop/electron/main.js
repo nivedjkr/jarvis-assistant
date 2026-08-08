@@ -31,36 +31,63 @@ function createWindow() {
 }
 
 function startJarvisBackend() {
-  const rootDir = path.resolve(__dirname, '..', '..')
-  jarvisProcess = spawn('python', ['-m', 'jarvis.api'], {
-    cwd: rootDir,
-    env: { ...process.env }
-  })
+  const jarvisPath = 'D:\\JARVIS'
   
-  jarvisProcess.on('error', (err) => {
-    console.log('Backend spawn error:', err.message)
-  })
-
+  jarvisProcess = spawn(
+    'python', ['-m', 'jarvis.api'],
+    {
+      cwd: jarvisPath,
+      env: { 
+        ...process.env,
+        PYTHONPATH: jarvisPath
+      },
+      shell: true
+    }
+  )
+  
   if (jarvisProcess.stdout) {
     jarvisProcess.stdout.on('data', (data) => {
-      console.log('JARVIS:', data.toString())
+      const text = data.toString()
+      console.log('[PYTHON]', text)
+      if (text.includes('Uvicorn running') || text.includes('Application startup')) {
+        console.log('[WS] Server ready, connecting...')
+        connectWebSocket()
+      }
     })
   }
-
+  
   if (jarvisProcess.stderr) {
     jarvisProcess.stderr.on('data', (data) => {
-      console.error('JARVIS STDERR:', data.toString())
+      const text = data.toString()
+      console.log('[PYTHON ERR]', text)
+      if (text.includes('Uvicorn running') || text.includes('Application startup')) {
+        console.log('[WS] Server ready, connecting...')
+        connectWebSocket()
+      }
     })
   }
-
-  setTimeout(connectWebSocket, 2000)
+  
+  jarvisProcess.on('error', (err) => {
+    console.error('[PYTHON] Failed to start:', err)
+  })
+  
+  setTimeout(() => {
+    if (!ws || ws.readyState !== 1) {
+      console.log('[WS] Fallback connection attempt')
+      connectWebSocket()
+    }
+  }, 5000)
 }
 
 function connectWebSocket() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return
+  }
   try {
     ws = new WebSocket('ws://127.0.0.1:8765/ws')
     
     ws.on('open', () => {
+      console.log('[WS] Connected to JARVIS backend')
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('connection-status', 'connected')
       }
@@ -72,23 +99,27 @@ function connectWebSocket() {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('jarvis-response', parsed)
         }
-      } catch (err) {
-        console.log('WS parse error:', err.message)
+      } catch (e) {
+        console.error('[WS] Parse error:', e)
+      }
+    })
+    
+    ws.on('error', (err) => {
+      console.error('[WS] Error:', err.message)
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('connection-status', 'disconnected')
       }
     })
     
     ws.on('close', () => {
+      console.log('[WS] Disconnected — retrying in 3s')
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('connection-status', 'disconnected')
       }
       setTimeout(connectWebSocket, 3000)
     })
-
-    ws.on('error', (err) => {
-      console.log('WebSocket error (waiting for backend):', err.message)
-    })
-  } catch (err) {
-    console.log('WebSocket init error:', err.message)
+  } catch (e) {
+    console.error('[WS] Init error:', e)
   }
 }
 

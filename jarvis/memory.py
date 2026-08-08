@@ -7,23 +7,26 @@ import sqlite3
 import json
 import os
 import re
+import threading
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 
 
 _DB_CONNECTIONS: Dict[str, sqlite3.Connection] = {}
+_DB_CONNECTIONS_LOCK = threading.Lock()
 
 
 def get_shared_db_connection(db_path: str = "jarvis/data/jarvis.db") -> sqlite3.Connection:
     """Get cached shared SQLite database connection with Row factory"""
     global _DB_CONNECTIONS
     norm_path = os.path.normpath(db_path)
-    if norm_path not in _DB_CONNECTIONS:
-        conn = sqlite3.connect(norm_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        _DB_CONNECTIONS[norm_path] = conn
-    return _DB_CONNECTIONS[norm_path]
+    with _DB_CONNECTIONS_LOCK:
+        if norm_path not in _DB_CONNECTIONS:
+            conn = sqlite3.connect(norm_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            _DB_CONNECTIONS[norm_path] = conn
+        return _DB_CONNECTIONS[norm_path]
 
 
 class Memory:
@@ -769,6 +772,8 @@ class CommandLogger:
         if not os.path.exists(self.log_file):
             return []
         
+        with open(self.log_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
         return lines[-limit:]
 
 

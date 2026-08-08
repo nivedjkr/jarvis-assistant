@@ -1,292 +1,287 @@
-"""
-Clean, robust Command Line Interface (CLI) for JARVIS.
-Core chat pipeline driven strictly by LLM tool calling via NVIDIA NIM API.
-"""
-
+import asyncio
 import os
 import sys
-import json
-import yaml
+import time
+import subprocess
 from dotenv import load_dotenv
-from openai import OpenAI
+from pathlib import Path
+from rich.console import Console
+from rich.panel import Panel
+
+# Find .env relative to this file's location
+env_path = Path(__file__).parent.parent / '.env'
+load_dotenv(dotenv_path=env_path)
+
+from jarvis.api_client import JarvisAPIClient
 from jarvis.tools import ToolRegistry
 
-load_dotenv()
+console = Console()
 
+BOOT_ART = """
+     ██╗ █████╗ ██████╗ ██╗   ██╗██╗███████╗
+     ██║██╔══██╗██╔══██╗██║   ██║██║██╔════╝
+     ██║███████║██████╔╝██║   ██║██║███████╗
+██   ██║██╔══██║██╔══██╗╚██╗ ██╔╝██║╚════██║
+╚█████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║███████╗
+ ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝
+"""
 
-def load_config(config_path: str = "config.yaml") -> dict:
-    """Load config from YAML file."""
-    if os.path.exists(config_path):
-        with open(config_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    return {
-        "api": {
-            "base_url": "https://integrate.api.nvidia.com/v1",
-            "model": "meta/llama-3.1-8b-instruct",
-            "temperature": 0.6,
-            "max_tokens": 1000
-        }
-    }
-
-
-def chat_with_tools(
-    client: OpenAI,
-    config: dict,
-    messages: list,
-    registry: ToolRegistry
-) -> str:
-    """
-    Send conversation history and tool schemas to NIM API.
-    If tool_calls are present, execute tools via registry, send results back,
-    and return the final response text.
-    """
-    api_config = config.get("api", {})
-    model = api_config.get("model", "meta/llama-3.1-8b-instruct")
-    temperature = api_config.get("temperature", 0.6)
-    max_tokens = api_config.get("max_tokens", 1000)
-
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=registry.schemas,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-    except Exception as e:
-        error_msg = f"API Error: {str(e)}"
-        print(f"[ERROR] {error_msg}")
-        return error_msg
-
-    response_message = response.choices[0].message
-    tool_calls = getattr(response_message, "tool_calls", None)
-
-    if tool_calls:
-        messages.append(response_message)
-
-        for tool_call in tool_calls:
-            func_name = tool_call.function.name
-            try:
-                func_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-            except Exception:
-                func_args = {}
-
-            tool_result = registry.execute_tool(func_name, func_args)
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "name": func_name,
-                "content": str(tool_result)
-            })
-
-        try:
-            second_response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
-            final_text = second_response.choices[0].message.content or ""
-            messages.append({"role": "assistant", "content": final_text})
-            return final_text
-        except Exception as e:
-            error_msg = f"API Error on final response: {str(e)}"
-            print(f"[ERROR] {error_msg}")
-            return error_msg
-    else:
-        final_text = response_message.content or ""
-        messages.append({"role": "assistant", "content": final_text})
-        return final_text
-
-
-def handle_slash_command(command: str, messages: list, registry: ToolRegistry = None) -> tuple[bool, str]:
-    """
-    Handle slash commands. Returns (should_continue: bool, response_text: str)
-    """
-    cmd_raw = command.strip()
-    cmd = cmd_raw.lower().split()[0] if cmd_raw else ""
-
-    if cmd in ("/exit", "/quit", "/q"):
-        return False, "Goodbye, sir. Shutting down session."
-
-    elif cmd in ("/clear", "/c"):
-        messages.clear()
-        messages.append({
-            "role": "system",
-            "content": (
-                "You are JARVIS, Nived's personal AI assistant. "
-                "You have access to tools for file operations, running commands, web search, "
-                "system status, opening applications/websites, GitHub, and Obsidian note management "
-                "(obsidian_create_note, obsidian_daily_note, obsidian_edit_note, obsidian_semantic_search). "
-                "Always call the appropriate tool when asked to perform actions or manage Obsidian notes."
-            )
-        })
-        return True, "Conversation history cleared, sir."
-
-    elif cmd in ("/help", "/h"):
-        help_text = (
-            "JARVIS Core Capabilities & System Access:\n\n"
-            "SYSTEM & FILE OPERATIONS:\n"
-            "• File Control        - Create, write, read, copy, rename, move, and delete files\n"
-            "• Directory Management- Create directories, list contents, and delete folders\n"
-            "• Command Execution   - Run shell/PowerShell commands with stdout/stderr capture\n"
-            "• System Telemetry     - Monitor real CPU %, RAM %, and Disk utilization\n"
-            "• Clipboard Control    - Copy text to system clipboard with fail-proof verification\n"
-            "• Desktop & Web        - Launch applications (notepad, calc, chrome, code), websites, and Google search\n"
-            "• Full GitHub Suite    - Full account access for repos, issues, PRs, CI status, and notifications\n"
-            "• Obsidian Memory      - Local semantic search, note creation, daily notes, and note edits with backups\n\n"
-            "SLASH COMMANDS:\n"
-            "• /help, /h      - Display this system capability summary\n"
-            "• /tools         - List all 25 registered system tools\n"
-            "• /status        - Query live CPU, RAM, and Disk vitals\n"
-            "• /projects      - View active projects database summary\n"
-            "• /reminders     - View pending reminders\n"
-            "• /clear, /c     - Reset conversation history\n"
-            "• /exit, /quit   - Terminate CLI session"
-        )
-        return True, help_text
-
-    elif cmd == "/tools":
-        if registry:
-            tool_list = list(registry.tools.keys())
-            return True, f"Registered Tools ({len(tool_list)}):\n• " + "\n• ".join(tool_list)
-        return True, "Tools registry initialized."
-
-    elif cmd == "/status":
-        from jarvis.tools import get_system_status
-        return True, get_system_status()
-
-    elif cmd == "/projects":
-        try:
-            from jarvis.projects import get_active_projects_summary
-            projects = get_active_projects_summary()
-            if not projects:
-                return True, "No active projects found, sir."
-            lines = [f"• {p.get('name')}: {p.get('status', 'active')}" for p in projects]
-            return True, "Active Projects:\n" + "\n".join(lines)
-        except Exception as e:
-            return True, f"Projects status error: {e}"
-
-    elif cmd == "/reminders":
-        try:
-            from jarvis.memory import Memory
-            mem = Memory()
-            reminders = mem.get_pending_reminders()
-            if not reminders:
-                return True, "No pending reminders, sir."
-            lines = [f"• [{r.get('due_date', 'no date')}] {r.get('text')}" for r in reminders]
-            return True, "Pending Reminders:\n" + "\n".join(lines)
-        except Exception as e:
-            return True, f"Reminders error: {e}"
-
-    else:
-        return True, f"Unknown slash command: '{command}'. Type /help for available commands."
-
-
-class JARVISCLI:
-    """Class wrapper around core chat pipeline for API/Desktop integration."""
-    def __init__(self, config_path: str = "config.yaml"):
-        self.config = load_config(config_path)
-        self.tools = ToolRegistry()
-        from jarvis.memory import MemoryManager
-        from jarvis.projects import ProjectManager
-        self.memory = MemoryManager()
-        self.project_manager = ProjectManager()
-        self.proactive_monitor = None
-        self.voice_manager = None
+class JarvisAssistant:
+    def __init__(self):
+        boot_start = time.time()
+        self.voice_enabled = True
         
-        api_key = os.getenv("NVIDIA_NIM_API_KEY")
-        api_config = self.config.get("api", {})
-        self.client = OpenAI(
-            base_url=api_config.get("base_url", "https://integrate.api.nvidia.com/v1"),
-            api_key=api_key
+        # Show banner
+        console.print(BOOT_ART, style="cyan")
+        console.print(
+            "Just A Rather Very Intelligent System",
+            style="dim cyan", justify="center"
         )
-        self.messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are JARVIS, Nived's personal AI assistant. "
-                    "You have access to tools for file operations, running commands, web search, "
-                    "system status, opening applications/websites, GitHub, and Obsidian note management "
-                    "(obsidian_create_note, obsidian_daily_note, obsidian_edit_note, obsidian_semantic_search). "
-                    "When requested to create, edit, search, or update Obsidian notes, YOU MUST call the appropriate Obsidian tool."
-                )
-            }
-        ]
-
-    async def process_single_command(self, user_message: str) -> str:
-        self.messages.append({"role": "user", "content": user_message})
-        import asyncio
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, chat_with_tools, self.client, self.config, self.messages, self.tools
+        console.print(
+            "Created by Nived  |  "
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            style="dim white", justify="center"
         )
+        console.rule(style="dim cyan")
+        
+        # Initialize core systems
+        console.print("[dim cyan]Initializing...[/]")
+        self.api = JarvisAPIClient()
+        self.tools = ToolRegistry()
+        
+        boot_time = time.time() - boot_start
+        console.print(
+            f"[green]✓ Online in {boot_time:.2f}s — "
+            f"{len(self.tools.tools)} tools ready[/]"
+        )
+        
+        # Boot voice greeting
+        self._speak_boot_greeting()
+    
+    def _speak_boot_greeting(self):
+        if not getattr(self, 'voice_enabled', True):
+            return
+        try:
+            from jarvis.voice import speak
+            from datetime import datetime
+            h = datetime.now().hour
+            greeting = (
+                "Good morning" if h < 12 else
+                "Good afternoon" if h < 18 else
+                "Good evening"
+            )
+            # Schedule on the main event loop instead of creating a new one
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(speak(f"{greeting}, sir. All systems operational."))
+            except RuntimeError:
+                # No running loop, create one for this thread
+                def run_greeting():
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(speak(f"{greeting}, sir. All systems operational."))
+                        loop.close()
+                    except Exception as e:
+                        print(f"[VOICE] Boot greeting error: {e}")
+                import threading
+                t = threading.Thread(target=run_greeting, daemon=True)
+                t.start()
+        except Exception as e:
+            print(f"[VOICE] Boot greeting failed: {e}")
+    
+    async def _speak(self, text: str):
+        if not getattr(self, 'voice_enabled', True):
+            return
+        # Skip very long responses — speak summary instead
+        speak_text = text
+        if len(text) > 400:
+            speak_text = text[:400] + "..."
+        # Skip debug lines
+        if text.startswith('[') and ']' in text[:20]:
+            return
+        try:
+            from jarvis.voice import speak
+            # Schedule on the main event loop instead of creating a new thread with new loop
+            loop = asyncio.get_running_loop()
+            loop.create_task(speak(speak_text))
+        except RuntimeError:
+            # No running loop (shouldn't happen in async context), fallback to thread
+            import threading
+            def run_speak():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(speak(speak_text))
+                    loop.close()
+                except Exception as e:
+                    print(f"[VOICE] Speak error: {e}")
+            t = threading.Thread(target=run_speak, daemon=True)
+            t.start()
+        except ImportError:
+            print("[VOICE] voice.py not found")
+        except Exception as e:
+            print(f"[VOICE] Error: {e}")
+    
+    async def _execute_tool(
+        self, name: str, args: dict) -> str:
+        return await self.tools.execute(name, args)
+    
+    async def _handle_slash_command(
+        self, cmd: str) -> str:
+        cmd = cmd.strip().lower()
+        
+        if cmd == '/help':
+            return self._show_help()
+        elif cmd == '/exit':
+            console.print(
+                "[cyan]JARVIS offline. Goodbye, sir.[/]")
+            sys.exit(0)
+        elif cmd == '/clear':
+            console.clear()
+            return "Screen cleared."
+        elif cmd == '/tools':
+            tools_list = list(self.tools.tools.keys())
+            return f"Tools: {', '.join(tools_list)}"
+        elif cmd == '/history':
+            msgs = self.api.messages[-10:]
+            lines = [
+                f"{m['role'].upper()}: "
+                f"{str(m.get('content',''))[:100]}"
+                for m in msgs
+            ]
+            return "\n".join(lines) if lines \
+                   else "No history."
+        elif cmd == '/diagnose':
+            return await self._diagnose()
+        elif cmd == '/speak off':
+            self.voice_enabled = False
+            return "Voice disabled, sir."
+        elif cmd == '/speak on':
+            self.voice_enabled = True
+            return "Voice enabled, sir."
+        else:
+            return f"Unknown command: {cmd}. Try /help"
+    
+    async def _diagnose(self) -> str:
+        lines = ["System Diagnostics:"]
+        
+        # DB check
+        try:
+            import sqlite3
+            conn = sqlite3.connect('jarvis/data/jarvis.db')
+            conn.execute("SELECT 1")
+            conn.close()
+            lines.append("✓ Database: connected")
+        except Exception as e:
+            lines.append(f"✗ Database: {e}")
+        
+        # API check
+        try:
+            import httpx
+            r = httpx.get(
+                "https://integrate.api.nvidia.com",
+                timeout=5
+            )
+            lines.append("✓ NIM API: reachable")
+        except:
+            lines.append("✗ NIM API: unreachable")
+        
+        # Tools check
+        lines.append(
+            f"✓ Tools: {len(self.tools.tools)} registered"
+        )
+        
+        # gh CLI check
+        try:
+            result = subprocess.run(
+                ['gh', 'auth', 'status'],
+                capture_output=True, timeout=5
+            )
+            if result.returncode == 0:
+                lines.append("✓ GitHub CLI: authenticated")
+            else:
+                lines.append("✗ GitHub CLI: not authenticated")
+        except:
+            lines.append("✗ GitHub CLI: not found")
+        
+        return "\n".join(lines)
+    
+    def _show_help(self) -> str:
+        return """JARVIS Commands:
+/help         - This message
+/exit         - Quit
+/clear        - Clear screen  
+/tools        - List all tools
+/history      - Recent conversation
+/diagnose     - System health check
+/speak on|off - Toggle voice output
 
-    async def process_command(self, user_message: str) -> str:
-        return await self.process_single_command(user_message)
-
-    async def _handle_slash_command(self, command: str) -> str:
-        should_continue, response_text = handle_slash_command(command, self.messages, self.tools)
-        return response_text
-
+Natural language — just talk:
+"open notepad"
+"create file notes.txt with content: hello"
+"open youtube"
+"show my github repos"
+"copy hello world to clipboard"
+"what's my cpu usage"
+"search for python tutorials" """
+    
+    async def process(self, user_input: str) -> str:
+        user_input = user_input.strip()
+        if not user_input:
+            return None
+        
+        # Slash commands
+        if user_input.startswith('/'):
+            return await self._handle_slash_command(
+                user_input)
+        
+        # Everything goes through LLM tool pipeline
+        self.api.add_user_message(user_input)
+        return await self.api.chat_with_tools(
+            tool_schemas=self.tools.schemas,
+            tool_executor=self._execute_tool
+        )
+    
+    async def run(self):
+        console.print(
+            "\n[dim cyan]Type anything or /help for commands."
+            " /exit to quit.[/]\n"
+        )
+        
+        while True:
+            try:
+                user_input = console.input(
+                    "[cyan]◈ YOU  →  [/]"
+                ).strip()
+                
+                if not user_input:
+                    continue
+                
+                response = await self.process(user_input)
+                
+                if response:
+                    console.print(Panel(
+                        response,
+                        title="[cyan]◈ JARVIS[/]",
+                        border_style="cyan"
+                    ))
+                    
+                    await self._speak(response)
+                        
+            except KeyboardInterrupt:
+                console.print(
+                    "\n[cyan]Goodbye, sir.[/]")
+                break
+            except EOFError:
+                break
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/]")
 
 def main():
-    print("=" * 50)
-    print("         JARVIS - Core Chat Pipeline")
-    print("=" * 50)
-
-    config = load_config("config.yaml")
-    registry = ToolRegistry()
-
-    api_key = os.getenv("NVIDIA_NIM_API_KEY")
-    if not api_key:
-        print("[ERROR] NVIDIA_NIM_API_KEY not found in environment or .env file.")
-        sys.exit(1)
-
-    api_config = config.get("api", {})
-    client = OpenAI(
-        base_url=api_config.get("base_url", "https://integrate.api.nvidia.com/v1"),
-        api_key=api_key
-    )
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are JARVIS, Nived's personal AI assistant. "
-                "You have access to tools for file operations, running commands, web search, "
-                "system status, opening applications/websites, GitHub, and Obsidian note management "
-                "(obsidian_create_note, obsidian_daily_note, obsidian_edit_note, obsidian_semantic_search). "
-                "When requested to perform an action (such as creating Obsidian notes, editing notes, "
-                "running shell commands, or querying GitHub), call the appropriate tool."
-            )
-        }
-    ]
-
-    print("\nJARVIS initialized and standing by, sir. Type /help for commands or /exit to quit.\n")
-
-    while True:
-        try:
-            user_input = input("You > ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nGoodbye, sir.")
-            break
-
-        if not user_input:
-            continue
-
-        if user_input.startswith("/"):
-            should_continue, response_text = handle_slash_command(user_input, messages, registry)
-            print(f"\n{response_text}\n")
-            if not should_continue:
-                break
-            continue
-
-        messages.append({"role": "user", "content": user_input})
-        response_text = chat_with_tools(client, config, messages, registry)
-        print(f"\nJARVIS > {response_text}\n")
-
+    assistant = JarvisAssistant()
+    asyncio.run(assistant.run())
 
 if __name__ == "__main__":
     main()

@@ -152,8 +152,8 @@ class ProjectManager:
                 self.add_timeline_event(
                     project_id=p_id,
                     event="JARVIS Project Management Subsystem Initialized",
-                    type="launch",
-                    date=date.today().isoformat()
+                    type_str="launch",
+                    date_str=date.today().isoformat()
                 )
 
     # ==================== HELPER RESOLVER ====================
