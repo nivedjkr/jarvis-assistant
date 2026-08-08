@@ -623,6 +623,7 @@ class ToolRegistry:
         def git_add_commit_push(
             message: str,
             path: str = 'D:\\JARVIS') -> str:
+            import subprocess
             results = []
             
             # git add .
@@ -630,21 +631,30 @@ class ToolRegistry:
                 ['git', 'add', '.'],
                 capture_output=True, text=True, cwd=path
             )
-            results.append(f"add: {'OK' if r1.returncode==0 else r1.stderr}")
+            if r1.returncode != 0:
+                return f"FAILED at git add: {r1.stderr}"
+            results.append("✓ Staged all changes")
             
             # git commit
             r2 = subprocess.run(
                 ['git', 'commit', '-m', message],
                 capture_output=True, text=True, cwd=path
             )
-            results.append(f"commit: {'OK' if r2.returncode==0 else r2.stderr}")
+            if r2.returncode != 0:
+                if "nothing to commit" in r2.stdout:
+                    return "Nothing to commit, sir."
+                return f"FAILED at git commit: {r2.stderr}"
+            results.append(f"✓ Committed: {message}")
             
             # git push
             r3 = subprocess.run(
                 ['git', 'push'],
                 capture_output=True, text=True, cwd=path
             )
-            results.append(f"push: {'OK' if r3.returncode==0 else r3.stderr}")
+            if r3.returncode != 0:
+                return f"FAILED at git push: {r3.stderr}\n" \
+                       f"Committed locally but not pushed."
+            results.append("✓ Pushed to GitHub")
             
             return "\n".join(results)
         
@@ -766,12 +776,16 @@ class ToolRegistry:
         def gh_create_pr(
             title: str, body: str = "",
             base: str = "main",
-            repo: str = DEFAULT_REPO) -> str:
+            repo: str = "nivedjkr/jarvis-assistant") -> str:
             cmd = ['gh', 'pr', 'create',
-                   '--repo', repo, '--title', title,
-                   '--base', base]
+                   '--repo', repo,
+                   '--title', title,
+                   '--base', base,
+                   '--head', 'HEAD']
             if body:
                 cmd += ['--body', body]
+            else:
+                cmd += ['--body', '']
             r = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=30
             )
@@ -780,10 +794,10 @@ class ToolRegistry:
         
         def gh_merge_pr(
             number: int,
-            repo: str = DEFAULT_REPO) -> str:
+            repo: str = "nivedjkr/jarvis-assistant") -> str:
             r = subprocess.run(
                 ['gh', 'pr', 'merge', str(number),
-                 '--repo', repo, '--merge'],
+                 '--repo', repo, '--merge', '--auto'],
                 capture_output=True, text=True, timeout=30
             )
             return f"PR #{number} merged." \
@@ -871,15 +885,16 @@ class ToolRegistry:
             required=["name"])
         
         self._add("git_status", git_status,
-            "Check git status of the JARVIS project.",
+            "Check real git status — what files changed, "
+            "what's staged, branch info.",
             {"path": {"type": "string",
                       "default": "D:\\JARVIS"}},
             required=[])
         
         self._add("git_add_commit_push", git_add_commit_push,
-            "Stage all changes, commit with message, "
-            "and push to GitHub. Use when user says "
-            "push to github, commit, or save to github.",
+            "Stage all changes, commit with a message, and push "
+            "to GitHub. Call this when user says 'push to github', "
+            "'commit and push', 'save to github', or similar.",
             {"message": {"type": "string",
                          "description": "Commit message"},
              "path": {"type": "string",
@@ -900,7 +915,7 @@ class ToolRegistry:
             required=[])
         
         self._add("git_diff", git_diff,
-            "Show what files have changed since last commit.",
+            "Show what files changed since last commit.",
             {"path": {"type": "string",
                       "default": "D:\\JARVIS"}},
             required=[])
@@ -952,7 +967,7 @@ class ToolRegistry:
             required=[])
         
         self._add("gh_create_pr", gh_create_pr,
-            "Create a new pull request.",
+            "Create a GitHub pull request.",
             {"title": {"type": "string"},
              "body": {"type": "string", "default": ""},
              "base": {"type": "string", "default": "main"},
@@ -961,7 +976,7 @@ class ToolRegistry:
             required=["title"])
         
         self._add("gh_merge_pr", gh_merge_pr,
-            "Merge a pull request.",
+            "Merge a GitHub pull request.",
             {"number": {"type": "integer"},
              "repo": {"type": "string",
                       "default": "nivedjkr/jarvis-assistant"}},
