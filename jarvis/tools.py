@@ -619,35 +619,27 @@ class ToolRegistry:
     def _register_github_full_tools(self):
         import subprocess
         import json
+        import os
         
         DEFAULT_REPO = "nivedjkr/jarvis-assistant"
         
-        # --- REPO OPERATIONS ---
+        # === ACCOUNT & REPOS ===
         def gh_list_repos(limit: int = 20) -> str:
             r = subprocess.run(
                 ['gh', 'repo', 'list', '--limit', str(limit),
                  '--json', 'name,description,isPrivate,'
-                          'url,pushedAt,primaryLanguage'],
+                          'url,pushedAt'],
                 capture_output=True, text=True, timeout=15
             )
-            if r.returncode != 0:
-                return f"FAILED: {r.stderr}"
+            if r.returncode != 0: return f"FAILED: {r.stderr}"
             repos = json.loads(r.stdout)
             lines = [
                 f"{'[private]' if x['isPrivate'] else '[public]'}"
                 f" {x['name']} — "
-                f"{x.get('description','no description')}"
+                f"{x.get('description') or 'no description'}"
                 for x in repos
             ]
             return "Your GitHub repos:\n" + "\n".join(lines)
-        
-        def gh_clone_repo(repo: str, path: str = '.') -> str:
-            r = subprocess.run(
-                ['gh', 'repo', 'clone', repo, path],
-                capture_output=True, text=True, timeout=60
-            )
-            return f"Cloned {repo} to {path}" \
-                   if r.returncode == 0 else f"FAILED: {r.stderr}"
         
         def gh_create_repo(
             name: str, private: bool = False,
@@ -656,59 +648,77 @@ class ToolRegistry:
                    '--' + ('private' if private else 'public')]
             if description:
                 cmd += ['--description', description]
+            cmd += ['--confirm']
             r = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=30
             )
             return r.stdout.strip() if r.returncode == 0 \
                    else f"FAILED: {r.stderr}"
         
-        # --- GIT OPERATIONS ---
-        def git_status(path: str = 'D:\\JARVIS') -> str:
+        def gh_delete_repo(repo: str) -> str:
             r = subprocess.run(
-                ['git', 'status'],
-                capture_output=True, text=True,
-                cwd=path, timeout=10
+                ['gh', 'repo', 'delete', repo, '--yes'],
+                capture_output=True, text=True, timeout=15
             )
-            return r.stdout if r.returncode == 0 \
+            return f"Deleted {repo}" if r.returncode == 0 \
                    else f"FAILED: {r.stderr}"
         
+        def gh_clone_repo(
+            repo: str, path: str = '.') -> str:
+            r = subprocess.run(
+                ['gh', 'repo', 'clone', repo, path],
+                capture_output=True, text=True, timeout=60
+            )
+            return f"Cloned to {path}" if r.returncode == 0 \
+                   else f"FAILED: {r.stderr}"
+        
+        def gh_repo_info(
+            repo: str = "nivedjkr/jarvis-assistant") -> str:
+            r = subprocess.run(
+                ['gh', 'repo', 'view', repo,
+                 '--json', 'name,description,stargazerCount,'
+                          'forks,openIssues,url,'
+                          'defaultBranchRef,isPrivate'],
+                capture_output=True, text=True, timeout=15
+            )
+            if r.returncode != 0: return f"FAILED: {r.stderr}"
+            d = json.loads(r.stdout)
+            return (f"{d['name']}: {d.get('description','')}\n"
+                    f"Stars: {d['stargazerCount']} | "
+                    f"Forks: {d['forks']} | "
+                    f"Open issues: {d['openIssues']}\n"
+                    f"URL: {d['url']}")
+        
+        # === GIT OPERATIONS ===
         def git_add_commit_push(
             message: str,
             path: str = 'D:\\JARVIS') -> str:
-            import subprocess
+            cmds = [
+                (['git', 'add', '.'], 'Stage'),
+                (['git', 'commit', '-m', message], 'Commit'),
+                (['git', 'push'], 'Push')
+            ]
             results = []
-            
-            # git add .
-            r1 = subprocess.run(
-                ['git', 'add', '.'],
-                capture_output=True, text=True, cwd=path
-            )
-            if r1.returncode != 0:
-                return f"FAILED at git add: {r1.stderr}"
-            results.append("✓ Staged all changes")
-            
-            # git commit
-            r2 = subprocess.run(
-                ['git', 'commit', '-m', message],
-                capture_output=True, text=True, cwd=path
-            )
-            if r2.returncode != 0:
-                if "nothing to commit" in r2.stdout:
-                    return "Nothing to commit, sir."
-                return f"FAILED at git commit: {r2.stderr}"
-            results.append(f"✓ Committed: {message}")
-            
-            # git push
-            r3 = subprocess.run(
-                ['git', 'push'],
-                capture_output=True, text=True, cwd=path
-            )
-            if r3.returncode != 0:
-                return f"FAILED at git push: {r3.stderr}\n" \
-                       f"Committed locally but not pushed."
-            results.append("✓ Pushed to GitHub")
-            
+            for cmd, label in cmds:
+                r = subprocess.run(
+                    cmd, capture_output=True, text=True,
+                    cwd=path, env=os.environ.copy()
+                )
+                if r.returncode != 0:
+                    if 'nothing to commit' in \
+                       r.stdout + r.stderr:
+                        return "Nothing to commit, sir."
+                    return f"FAILED at {label}: {r.stderr}"
+                results.append(f"✓ {label}")
             return "\n".join(results)
+        
+        def git_status(path: str = 'D:\\JARVIS') -> str:
+            r = subprocess.run(
+                ['git', 'status'],
+                capture_output=True, text=True, cwd=path
+            )
+            return r.stdout if r.returncode == 0 \
+                   else f"FAILED: {r.stderr}"
         
         def git_pull(path: str = 'D:\\JARVIS') -> str:
             r = subprocess.run(
@@ -746,58 +756,64 @@ class ToolRegistry:
             return f"Created branch: {branch}" \
                    if r.returncode == 0 else f"FAILED: {r.stderr}"
         
-        # --- ISSUES ---
+        def git_switch_branch(
+            branch: str,
+            path: str = 'D:\\JARVIS') -> str:
+            r = subprocess.run(
+                ['git', 'checkout', branch],
+                capture_output=True, text=True, cwd=path
+            )
+            return f"Switched to: {branch}" \
+                   if r.returncode == 0 else f"FAILED: {r.stderr}"
+        
+        # === ISSUES ===
         def gh_list_issues(
-            repo: str = DEFAULT_REPO,
+            repo: str = "nivedjkr/jarvis-assistant",
             state: str = "open",
             limit: int = 10) -> str:
             r = subprocess.run(
                 ['gh', 'issue', 'list',
-                 '--repo', repo, '--state', state,
+                 '--repo', repo,
+                 '--state', state,
                  '--limit', str(limit),
-                 '--json', 'number,title,state,createdAt,labels'],
+                 '--json', 'number,title,state,createdAt'],
                 capture_output=True, text=True, timeout=15
             )
-            if r.returncode != 0:
-                return f"FAILED: {r.stderr}"
+            if r.returncode != 0: return f"FAILED: {r.stderr}"
             issues = json.loads(r.stdout)
             if not issues:
-                return f"No {state} issues in {repo}, sir."
-            lines = [f"#{i['number']} [{i['state']}] {i['title']}"
+                return f"No {state} issues in {repo}."
+            lines = [f"#{i['number']} {i['title']}"
                      for i in issues]
-            return f"{len(issues)} {state} issues:\n" + \
-                   "\n".join(lines)
+            return f"{len(issues)} issues:\n" + "\n".join(lines)
         
         def gh_create_issue(
             title: str, body: str = "",
-            labels: str = "",
-            repo: str = DEFAULT_REPO) -> str:
+            repo: str = "nivedjkr/jarvis-assistant") -> str:
             cmd = ['gh', 'issue', 'create',
                    '--repo', repo, '--title', title]
-            if body:
-                cmd += ['--body', body]
-            if labels:
-                cmd += ['--label', labels]
+            if body: cmd += ['--body', body]
+            else: cmd += ['--body', '']
             r = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=15
             )
-            return f"Issue created: {r.stdout.strip()}" \
+            return f"Created: {r.stdout.strip()}" \
                    if r.returncode == 0 else f"FAILED: {r.stderr}"
         
         def gh_close_issue(
             number: int,
-            repo: str = DEFAULT_REPO) -> str:
+            repo: str = "nivedjkr/jarvis-assistant") -> str:
             r = subprocess.run(
                 ['gh', 'issue', 'close', str(number),
                  '--repo', repo],
                 capture_output=True, text=True, timeout=15
             )
-            return f"Closed issue #{number}" \
-                   if r.returncode == 0 else f"FAILED: {r.stderr}"
+            return f"Closed #{number}" if r.returncode == 0 \
+                   else f"FAILED: {r.stderr}"
         
         def gh_comment_issue(
             number: int, comment: str,
-            repo: str = DEFAULT_REPO) -> str:
+            repo: str = "nivedjkr/jarvis-assistant") -> str:
             r = subprocess.run(
                 ['gh', 'issue', 'comment', str(number),
                  '--repo', repo, '--body', comment],
@@ -806,23 +822,21 @@ class ToolRegistry:
             return "Comment added." if r.returncode == 0 \
                    else f"FAILED: {r.stderr}"
         
-        # --- PULL REQUESTS ---
+        # === PULL REQUESTS ===
         def gh_list_prs(
-            repo: str = DEFAULT_REPO,
+            repo: str = "nivedjkr/jarvis-assistant",
             state: str = "open") -> str:
             r = subprocess.run(
-                ['gh', 'pr', 'list', '--repo', repo,
-                 '--state', state, '--limit', '10',
-                 '--json', 'number,title,state,author,url'],
+                ['gh', 'pr', 'list',
+                 '--repo', repo, '--state', state,
+                 '--limit', '10',
+                 '--json', 'number,title,state,url'],
                 capture_output=True, text=True, timeout=15
             )
-            if r.returncode != 0:
-                return f"FAILED: {r.stderr}"
+            if r.returncode != 0: return f"FAILED: {r.stderr}"
             prs = json.loads(r.stdout)
-            if not prs:
-                return f"No {state} PRs."
-            lines = [f"#{p['number']} {p['title']}"
-                     for p in prs]
+            if not prs: return "No open PRs."
+            lines = [f"#{p['number']} {p['title']}" for p in prs]
             return "\n".join(lines)
         
         def gh_create_pr(
@@ -833,11 +847,7 @@ class ToolRegistry:
                    '--repo', repo,
                    '--title', title,
                    '--base', base,
-                   '--head', 'HEAD']
-            if body:
-                cmd += ['--body', body]
-            else:
-                cmd += ['--body', '']
+                   '--body', body or title]
             r = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=30
             )
@@ -849,85 +859,118 @@ class ToolRegistry:
             repo: str = "nivedjkr/jarvis-assistant") -> str:
             r = subprocess.run(
                 ['gh', 'pr', 'merge', str(number),
-                 '--repo', repo, '--merge', '--auto'],
+                 '--repo', repo, '--merge'],
                 capture_output=True, text=True, timeout=30
             )
             return f"PR #{number} merged." \
                    if r.returncode == 0 else f"FAILED: {r.stderr}"
         
-        # --- CI/ACTIONS ---
+        # === CI / ACTIONS ===
         def gh_ci_status(
-            repo: str = DEFAULT_REPO,
-            limit: int = 5) -> str:
+            repo: str = "nivedjkr/jarvis-assistant") -> str:
             r = subprocess.run(
-                ['gh', 'run', 'list', '--repo', repo,
-                 '--limit', str(limit),
-                 '--json', 'name,status,conclusion,url,createdAt'],
+                ['gh', 'run', 'list',
+                 '--repo', repo, '--limit', '5',
+                 '--json', 'name,status,conclusion,url'],
                 capture_output=True, text=True, timeout=15
             )
-            if r.returncode != 0:
-                return f"FAILED: {r.stderr}"
+            if r.returncode != 0: return f"FAILED: {r.stderr}"
             runs = json.loads(r.stdout)
-            if not runs:
-                return "No CI runs found."
+            if not runs: return "No CI runs."
             latest = runs[0]
-            c = latest.get('conclusion', 'in_progress')
+            c = latest.get('conclusion', 'running')
             icon = '✓' if c == 'success' else '✗'
-            lines = [f"Latest: {icon} {c.upper()} — "
-                     f"{latest['name']}"]
-            for run in runs[1:]:
-                c2 = run.get('conclusion', '?')
-                lines.append(f"  {'✓' if c2=='success' else '✗'}"
-                             f" {c2} — {run['name']}")
-            return "\n".join(lines)
+            return f"CI: {icon} {c.upper()} — {latest['name']}"
         
-        def gh_view_run_logs(
-            run_id: str,
-            repo: str = DEFAULT_REPO) -> str:
+        def gh_rerun_failed(
+            repo: str = "nivedjkr/jarvis-assistant") -> str:
             r = subprocess.run(
-                ['gh', 'run', 'view', run_id,
-                 '--repo', repo, '--log-failed'],
-                capture_output=True, text=True, timeout=30
+                ['gh', 'run', 'list',
+                 '--repo', repo, '--limit', '1',
+                 '--json', 'databaseId,conclusion'],
+                capture_output=True, text=True, timeout=15
             )
-            return r.stdout[:3000] if r.stdout \
+            if r.returncode != 0: return f"FAILED: {r.stderr}"
+            runs = json.loads(r.stdout)
+            if not runs: return "No runs found."
+            run_id = runs[0]['databaseId']
+            r2 = subprocess.run(
+                ['gh', 'run', 'rerun', str(run_id),
+                 '--failed', '--repo', repo],
+                capture_output=True, text=True, timeout=15
+            )
+            return "Rerunning failed jobs." \
+                   if r2.returncode == 0 else f"FAILED: {r2.stderr}"
+        
+        # === NOTIFICATIONS ===
+        def gh_notifications() -> str:
+            r = subprocess.run(
+                ['gh', 'api', 'notifications',
+                 '--jq', 
+                 '.[0:10] | .[] | '
+                 '"\(.subject.title) [\(.reason)]"'],
+                capture_output=True, text=True, timeout=15
+            )
+            output = r.stdout.strip()
+            return f"Notifications:\n{output}" \
+                   if output else "No new notifications."
+        
+        def gh_mark_notifications_read() -> str:
+            r = subprocess.run(
+                ['gh', 'api', '--method', 'PUT',
+                 'notifications'],
+                capture_output=True, text=True, timeout=15
+            )
+            return "All notifications marked read." \
+                   if r.returncode == 0 else f"FAILED: {r.stderr}"
+        
+        # === GIST ===
+        def gh_create_gist(
+            filename: str, content: str,
+            description: str = "",
+            public: bool = False) -> str:
+            import tempfile
+            # Write to temp file then create gist
+            with tempfile.NamedTemporaryFile(
+                mode='w', suffix=f'_{filename}',
+                delete=False, encoding='utf-8'
+            ) as f:
+                f.write(content)
+                tmp_path = f.name
+            
+            cmd = ['gh', 'gist', 'create', tmp_path]
+            if description: cmd += ['--desc', description]
+            if public: cmd += ['--public']
+            
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=15
+            )
+            os.unlink(tmp_path)
+            return r.stdout.strip() if r.returncode == 0 \
                    else f"FAILED: {r.stderr}"
         
-        # --- RELEASES ---
-        def gh_list_releases(
-            repo: str = DEFAULT_REPO) -> str:
+        def gh_list_gists() -> str:
             r = subprocess.run(
-                ['gh', 'release', 'list', '--repo', repo,
-                 '--limit', '5'],
+                ['gh', 'gist', 'list', '--limit', '10'],
                 capture_output=True, text=True, timeout=15
             )
             return r.stdout if r.returncode == 0 \
                    else f"FAILED: {r.stderr}"
         
-        def gh_create_release(
-            tag: str, title: str,
-            notes: str = "",
-            repo: str = DEFAULT_REPO) -> str:
-            cmd = ['gh', 'release', 'create', tag,
-                   '--repo', repo, '--title', title]
-            if notes:
-                cmd += ['--notes', notes]
-            r = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30
-            )
-            return r.stdout.strip() if r.returncode == 0 \
-                   else f"FAILED: {r.stderr}"
+        # === REGISTER ALL ===
+        self._add("git_add_commit_push", 
+            git_add_commit_push,
+            "Stage all changes, commit, push to GitHub. "
+            "Call when user says push, commit, save to github.",
+            {"message": {"type": "string"},
+             "path": {"type": "string",
+                      "default": "D:\\JARVIS"}},
+            required=["message"])
         
-        # Register all GitHub tools
         self._add("gh_list_repos", gh_list_repos,
-            "List all your GitHub repositories with details.",
+            "List all GitHub repositories for the account.",
             {"limit": {"type": "integer", "default": 20}},
             required=[])
-        
-        self._add("gh_clone_repo", gh_clone_repo,
-            "Clone a GitHub repository to local disk.",
-            {"repo": {"type": "string"},
-             "path": {"type": "string", "default": "."}},
-            required=["repo"])
         
         self._add("gh_create_repo", gh_create_repo,
             "Create a new GitHub repository.",
@@ -936,31 +979,37 @@ class ToolRegistry:
              "description": {"type": "string", "default": ""}},
             required=["name"])
         
+        self._add("gh_delete_repo", gh_delete_repo,
+            "Delete a GitHub repository.",
+            {"repo": {"type": "string"}},
+            required=["repo"])
+        
+        self._add("gh_clone_repo", gh_clone_repo,
+            "Clone a GitHub repo to local machine.",
+            {"repo": {"type": "string"},
+             "path": {"type": "string", "default": "."}},
+            required=["repo"])
+        
+        self._add("gh_repo_info", gh_repo_info,
+            "Get info about a specific GitHub repo.",
+            {"repo": {"type": "string",
+                      "default": "nivedjkr/jarvis-assistant"}},
+            required=[])
+        
         self._add("git_status", git_status,
-            "Check real git status — what files changed, "
-            "what's staged, branch info.",
+            "Check git status of JARVIS project.",
             {"path": {"type": "string",
                       "default": "D:\\JARVIS"}},
             required=[])
         
-        self._add("git_add_commit_push", git_add_commit_push,
-            "Stage all changes, commit with a message, and push "
-            "to GitHub. Call this when user says 'push to github', "
-            "'commit and push', 'save to github', or similar.",
-            {"message": {"type": "string",
-                         "description": "Commit message"},
-             "path": {"type": "string",
-                      "default": "D:\\JARVIS"}},
-            required=["message"])
-        
         self._add("git_pull", git_pull,
-            "Pull latest changes from GitHub.",
+            "Pull latest from GitHub.",
             {"path": {"type": "string",
                       "default": "D:\\JARVIS"}},
             required=[])
         
         self._add("git_log", git_log,
-            "Show recent git commit history.",
+            "Show recent commit history.",
             {"limit": {"type": "integer", "default": 10},
              "path": {"type": "string",
                       "default": "D:\\JARVIS"}},
@@ -979,6 +1028,13 @@ class ToolRegistry:
                       "default": "D:\\JARVIS"}},
             required=["branch"])
         
+        self._add("git_switch_branch", git_switch_branch,
+            "Switch to an existing git branch.",
+            {"branch": {"type": "string"},
+             "path": {"type": "string",
+                      "default": "D:\\JARVIS"}},
+            required=["branch"])
+        
         self._add("gh_list_issues", gh_list_issues,
             "List GitHub issues.",
             {"repo": {"type": "string",
@@ -991,20 +1047,19 @@ class ToolRegistry:
             "Create a new GitHub issue.",
             {"title": {"type": "string"},
              "body": {"type": "string", "default": ""},
-             "labels": {"type": "string", "default": ""},
              "repo": {"type": "string",
                       "default": "nivedjkr/jarvis-assistant"}},
             required=["title"])
         
         self._add("gh_close_issue", gh_close_issue,
-            "Close a GitHub issue.",
+            "Close a GitHub issue by number.",
             {"number": {"type": "integer"},
              "repo": {"type": "string",
                       "default": "nivedjkr/jarvis-assistant"}},
             required=["number"])
         
         self._add("gh_comment_issue", gh_comment_issue,
-            "Add a comment to a GitHub issue.",
+            "Comment on a GitHub issue.",
             {"number": {"type": "integer"},
              "comment": {"type": "string"},
              "repo": {"type": "string",
@@ -1012,14 +1067,14 @@ class ToolRegistry:
             required=["number", "comment"])
         
         self._add("gh_list_prs", gh_list_prs,
-            "List GitHub pull requests.",
+            "List pull requests.",
             {"repo": {"type": "string",
                       "default": "nivedjkr/jarvis-assistant"},
              "state": {"type": "string", "default": "open"}},
             required=[])
         
         self._add("gh_create_pr", gh_create_pr,
-            "Create a GitHub pull request.",
+            "Create a pull request.",
             {"title": {"type": "string"},
              "body": {"type": "string", "default": ""},
              "base": {"type": "string", "default": "main"},
@@ -1028,40 +1083,44 @@ class ToolRegistry:
             required=["title"])
         
         self._add("gh_merge_pr", gh_merge_pr,
-            "Merge a GitHub pull request.",
+            "Merge a pull request.",
             {"number": {"type": "integer"},
              "repo": {"type": "string",
                       "default": "nivedjkr/jarvis-assistant"}},
             required=["number"])
         
         self._add("gh_ci_status", gh_ci_status,
-            "Check CI/GitHub Actions status.",
-            {"repo": {"type": "string",
-                      "default": "nivedjkr/jarvis-assistant"},
-             "limit": {"type": "integer", "default": 5}},
-            required=[])
-        
-        self._add("gh_view_run_logs", gh_view_run_logs,
-            "View logs from a failed CI run.",
-            {"run_id": {"type": "string"},
-             "repo": {"type": "string",
-                      "default": "nivedjkr/jarvis-assistant"}},
-            required=["run_id"])
-        
-        self._add("gh_list_releases", gh_list_releases,
-            "List GitHub releases.",
+            "Check CI/Actions status.",
             {"repo": {"type": "string",
                       "default": "nivedjkr/jarvis-assistant"}},
             required=[])
         
-        self._add("gh_create_release", gh_create_release,
-            "Create a new GitHub release.",
-            {"tag": {"type": "string"},
-             "title": {"type": "string"},
-             "notes": {"type": "string", "default": ""},
-             "repo": {"type": "string",
+        self._add("gh_rerun_failed", gh_rerun_failed,
+            "Rerun failed CI jobs.",
+            {"repo": {"type": "string",
                       "default": "nivedjkr/jarvis-assistant"}},
-            required=["tag", "title"])
+            required=[])
+        
+        self._add("gh_notifications", gh_notifications,
+            "Check GitHub notifications.",
+            {}, required=[])
+        
+        self._add("gh_mark_notifications_read",
+            gh_mark_notifications_read,
+            "Mark all GitHub notifications as read.",
+            {}, required=[])
+        
+        self._add("gh_create_gist", gh_create_gist,
+            "Create a GitHub gist from text content.",
+            {"filename": {"type": "string"},
+             "content": {"type": "string"},
+             "description": {"type": "string", "default": ""},
+             "public": {"type": "boolean", "default": False}},
+            required=["filename", "content"])
+        
+        self._add("gh_list_gists", gh_list_gists,
+            "List your GitHub gists.",
+            {}, required=[])
 
     def _register_system_file_tools(self):
         import shutil
