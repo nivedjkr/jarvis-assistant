@@ -80,3 +80,25 @@
 .directive-text {
   word-break: break-word;
 }
+
+@keyframes flashGlow {
+  0% {
+    background: rgba(0, 240, 255, 0.35);
+    border-color: rgba(0, 240, 255, 0.8);
+    box-shadow: 0 0 15px rgba(0, 240, 255, 0.6);
+  }
+  50% {
+    background: rgba(167, 139, 250, 0.3);
+    border-color: rgba(167, 139, 250, 0.7);
+    box-shadow: 0 0 10px rgba(167, 139, 250, 0.4);
+  }
+  100% {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.05);
+    box-shadow: none;
+  }
+}
+
+.state-flash-highlight {
+  animation: flashGlow 1.5s ease-out;
+}

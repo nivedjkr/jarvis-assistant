@@ -23,6 +23,7 @@ load_dotenv(Path(__file__).parent.parent / '.env')
 from jarvis.api_client import JarvisAPIClient
 from jarvis.tools import ToolRegistry
 from jarvis.voice import TTSEngine
+from jarvis.diagnostics import run_diagnostics, run_diagnostics_sync
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"])
@@ -31,6 +32,24 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"])
 api_client = JarvisAPIClient()
 tool_registry = ToolRegistry()
 tts_engine = TTSEngine()  # Single shared TTS engine
+
+def handle_tool_state_change(domain: str, action: str, payload: dict):
+    from datetime import datetime
+    msg = {
+        "type": "state_update",
+        "domain": domain,
+        "action": action,
+        "payload": payload,
+        "timestamp": datetime.now().isoformat()
+    }
+    print(f"[WS] Broadcasting state update ({domain} -> {action})")
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(manager.broadcast(msg))
+    except Exception:
+        pass
+
+tool_registry.on_state_change = handle_tool_state_change
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -71,11 +90,13 @@ async def websocket_endpoint(ws: WebSocket):
     session_id = f"electron_{uuid.uuid4().hex[:8]}"
     await manager.connect(ws)
     
-    # Send connected confirmation
+    # Run startup health check and send report to desktop client
+    report = await run_diagnostics(check_nvidia=True)
     await ws.send_json({
         "type": "status",
         "status": "connected",
-        "message": "JARVIS online, sir."
+        "message": "JARVIS online, sir.",
+        "health_check": report.to_dict()
     })
     
     try:
@@ -112,9 +133,15 @@ async def websocket_endpoint(ws: WebSocket):
                 print(f"[WS] Sent response: {response[:100]}")
                 
             elif msg_type == "slash_command":
-                cmd = data.get("command", "")
-                # Handle basic slash commands
-                if cmd == "/exit":
+                cmd = data.get("command", "").strip().lower()
+                if cmd == "/diagnose":
+                    diag_report = await run_diagnostics(check_nvidia=True)
+                    await ws.send_json({
+                        "type": "response",
+                        "text": diag_report.format_plain(),
+                        "status": "idle"
+                    })
+                elif cmd == "/exit":
                     await ws.send_json({
                         "type": "response",
                         "text": "Goodbye, sir.",
@@ -141,6 +168,11 @@ async def status():
         "tools": len(tool_registry.tools),
         "ws_connections": len(manager.active_connections)
     }
+
+@app.get("/health")
+async def health_endpoint():
+    report = await run_diagnostics(check_nvidia=True)
+    return report.to_dict()
 
 @app.post("/chat")
 async def chat_endpoint(request: dict):
@@ -219,6 +251,9 @@ async def vitals_endpoint():
 
 if __name__ == "__main__":
     print("[API] Starting JARVIS WebSocket server...")
+    print("[API] Running startup health check...")
+    report = run_diagnostics_sync(check_nvidia=True)
+    print(report.format_plain())
     print("[API] Electron can connect at ws://127.0.0.1:8765/ws")
     try:
         uvicorn.run(app, host="127.0.0.1", port=8765, log_level="info")

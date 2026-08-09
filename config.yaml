@@ -53,6 +53,8 @@ awareness:
 proactive:
   enabled: true
   frequency: 20  # Check interval frequency in minutes
+  cooldown_minutes: 30  # Cooldown between proactive suggestions (30 mins default)
+  velocity_anomaly_threshold: 1.8  # Threshold ratio for stock velocity anomaly
   idle_threshold_minutes: 10  # Minutes of inactivity before idle commentary
   idle_cooldown_minutes: 15   # Minimum minutes between idle commentary speech
   interests:

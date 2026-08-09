@@ -4,6 +4,7 @@ import time
 import psutil
 import webbrowser
 import inspect
+from typing import Optional, Dict, List, Tuple, Any
 from pydantic import BaseModel, ValidationError
 
 def validate_tool_schemas(registry):
@@ -127,6 +128,8 @@ class ToolRegistry:
     def __init__(self):
         self.tools = {}   # name -> async callable
         self.schemas = [] # OpenAI tool schemas
+        self.on_state_change = None  # Callable[[str, str, dict], None]
+        self._last_suggestion_time = 0.0
         self._register_all()
         # Validate schemas on startup
         validate_tool_schemas(self)
@@ -141,6 +144,7 @@ class ToolRegistry:
         self._register_github_full_tools()
         self._register_system_file_tools()
         self._register_semantic_memory_tools()
+        self._register_inventory_tools()
         print(f"[TOOLS] Registered {len(self.tools)} tools: "
               f"{list(self.tools.keys())}")
     
@@ -179,11 +183,78 @@ class ToolRegistry:
                 result = await loop.run_in_executor(
                     None, lambda: fn(**args)
                 )
-            return str(result) if result else "Done."
+            result_str = str(result) if result else "Done."
+
+            # State update broadcast hook
+            if hasattr(self, 'on_state_change') and callable(self.on_state_change):
+                domain, action, payload = self._extract_state_change(name, args, result_str)
+                if domain:
+                    try:
+                        self.on_state_change(domain, action, payload)
+                    except Exception as e:
+                        print(f"[TOOLS] State update callback error: {e}")
+
+            # Adjacent context suggestion hook
+            suggestion = self._check_adjacent_context_suggestion(name, args, result_str)
+            if suggestion and "FAILED" not in result_str:
+                result_str = result_str.strip() + f"\n\n💡 {suggestion}"
+
+            return result_str
         except Exception as e:
             import traceback
             traceback.print_exc()
             return f"Tool error: {str(e)}"
+
+    def _extract_state_change(self, name: str, args: dict, result_str: str) -> tuple:
+        if "FAILED" in result_str:
+            return (None, None, None)
+        
+        name_lower = name.lower()
+        if "inventory" in name_lower:
+            return ("inventory", "stock_updated", {"sku": args.get("sku"), "item_name": args.get("item_name"), "quantity_changed": args.get("quantity_changed"), "result": result_str})
+        elif "reminder" in name_lower or "deadline" in name_lower or "task" in name_lower:
+            return ("directives", "reminder_updated", {"text": args.get("text") or args.get("message") or args.get("task"), "action": name_lower, "result": result_str})
+        elif "git" in name_lower:
+            return ("git", "repository_updated", {"action": name_lower, "result": result_str})
+        elif "calendar" in name_lower or "event" in name_lower:
+            return ("calendar", "event_updated", {"title": args.get("title") or args.get("summary"), "result": result_str})
+        return (None, None, None)
+
+    def _check_adjacent_context_suggestion(self, name: str, args: dict, result_str: str) -> Optional[str]:
+        cfg = _load_config()
+        cooldown_mins = float(cfg.get("proactive", {}).get("cooldown_minutes", 30.0))
+        now = time.time()
+        
+        if (now - self._last_suggestion_time) < (cooldown_mins * 60.0):
+            return None
+
+        name_lower = name.lower()
+
+        # 1. Git operations
+        if "git" in name_lower:
+            try:
+                r_stat = subprocess.run(["git", "status", "--short"], capture_output=True, text=True, timeout=3)
+                if r_stat.returncode == 0 and r_stat.stdout.strip():
+                    lines = [l for l in r_stat.stdout.strip().splitlines() if l.strip()]
+                    if len(lines) > 0:
+                        self._last_suggestion_time = now
+                        return f"Note: You still have {len(lines)} uncommitted file(s) on your active git branch."
+            except Exception:
+                pass
+
+        # 2. Reminder / Directive operations
+        if "reminder" in name_lower or "calendar" in name_lower:
+            try:
+                from jarvis.memory import Memory
+                mem = Memory()
+                reminders = mem.get_reminders(status="pending")
+                if len(reminders) > 0:
+                    self._last_suggestion_time = now
+                    return f"Note: You have {len(reminders)} other pending directive(s) scheduled in your backlog."
+            except Exception:
+                pass
+
+        return None
     
     def _register_file_tools(self):
         
@@ -1539,3 +1610,72 @@ class ToolRegistry:
             "even without exact keyword match.",
             {"query": {"type": "string"}},
             required=["query"])
+
+    def _register_inventory_tools(self):
+        def set_inventory_threshold(sku: str, item_name: str, reorder_threshold: int) -> str:
+            try:
+                from jarvis.memory import Memory
+                mem = Memory()
+                res = mem.log_inventory_event(
+                    sku=sku,
+                    item_name=item_name,
+                    quantity_changed=0,
+                    event_type="threshold_update",
+                    reorder_threshold=reorder_threshold
+                )
+                return f"Updated inventory threshold for {res['item_name']} (SKU: {res['sku']}): reorder_threshold set to {res['reorder_threshold']}, current stock: {res['new_quantity']}."
+            except Exception as e:
+                return f"FAILED: {e}"
+
+        def log_inventory_event(sku: str, item_name: str, quantity_changed: int, event_type: str = "sale") -> str:
+            try:
+                from jarvis.memory import Memory
+                mem = Memory()
+                res = mem.log_inventory_event(
+                    sku=sku,
+                    item_name=item_name,
+                    quantity_changed=quantity_changed,
+                    event_type=event_type
+                )
+                action_type = "Restocked" if quantity_changed > 0 else "Consumed/Sold"
+                return f"{action_type} {abs(quantity_changed)} units of {res['item_name']} (SKU: {res['sku']}). New stock level: {res['new_quantity']} (reorder threshold: {res['reorder_threshold']})."
+            except Exception as e:
+                return f"FAILED: {e}"
+
+        def get_inventory_status(sku: str = "") -> str:
+            try:
+                from jarvis.memory import Memory
+                mem = Memory()
+                if sku and sku.strip():
+                    item = mem.get_inventory_item(sku)
+                    if not item:
+                        return f"No inventory record found for SKU '{sku}'."
+                    return f"SKU {item['sku']}: {item['item_name']} | Quantity: {item['quantity']} | Reorder Threshold: {item['reorder_threshold']} | Updated: {item['updated_at']}"
+                else:
+                    items = mem.get_all_inventory()
+                    if not items:
+                        return "Inventory is empty."
+                    lines = [f"- {i['sku']}: {i['item_name']} ({i['quantity']} in stock, threshold: {i['reorder_threshold']})" for i in items]
+                    return f"Inventory ({len(items)} items):\n" + "\n".join(lines)
+            except Exception as e:
+                return f"FAILED: {e}"
+
+        self._add("set_inventory_threshold", set_inventory_threshold,
+            "Set reorder threshold or initialize stock for an inventory SKU.",
+            {"sku": {"type": "string"},
+             "item_name": {"type": "string"},
+             "reorder_threshold": {"type": "integer"}},
+            required=["sku", "item_name", "reorder_threshold"])
+
+        self._add("log_inventory_event", log_inventory_event,
+            "Log inventory consumption, sale, or restock for an SKU.",
+            {"sku": {"type": "string"},
+             "item_name": {"type": "string"},
+             "quantity_changed": {"type": "integer"},
+             "event_type": {"type": "string", "default": "sale"}},
+            required=["sku", "item_name", "quantity_changed"])
+
+        self._add("get_inventory_status", get_inventory_status,
+            "Get current stock level and reorder thresholds for inventory.",
+            {"sku": {"type": "string", "default": ""}},
+            required=[])

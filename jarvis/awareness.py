@@ -379,3 +379,145 @@ class GlobalAwarenessManager:
     def get_surfaced_news(self, limit: int = 15) -> List[Dict[str, Any]]:
         """Get recent surfaced news items"""
         return self.surfaced_news[:limit]
+
+
+def detect_stock_velocity_anomaly(
+    db_path: str = "jarvis/data/jarvis.db",
+    anomaly_threshold: float = 1.8,
+    cooldown_minutes: float = 30.0,
+    data_dir: str = "jarvis/data"
+) -> List[Dict[str, Any]]:
+    """
+    Queries inventory_log for each SKU's consumption rate over the last 7 days,
+    compares it to historical baseline, and flags items trending toward zero
+    significantly faster than usual (velocity anomaly).
+    Gated by cooldown tracking in data_dir / velocity_anomalies_seen.json.
+    """
+    import sqlite3
+    from datetime import datetime, timedelta
+
+    db_file = Path(db_path)
+    if not db_file.exists():
+        return []
+
+    data_path = Path(data_dir)
+    seen_file = data_path / "velocity_anomalies_seen.json"
+    seen_data = {}
+    if seen_file.exists():
+        try:
+            with open(seen_file, "r", encoding="utf-8") as f:
+                seen_data = json.load(f)
+        except Exception:
+            seen_data = {}
+
+    now = datetime.now()
+
+    try:
+        conn = sqlite3.connect(str(db_file))
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Check if tables exist
+        tables = [r[0] for r in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        if "inventory" not in tables or "inventory_log" not in tables:
+            conn.close()
+            return []
+
+        inventory_items = cursor.execute("SELECT * FROM inventory").fetchall()
+        alerts = []
+
+        for item in inventory_items:
+            sku = item["sku"]
+            item_name = item["item_name"]
+            quantity = item["quantity"]
+            threshold = item["reorder_threshold"]
+
+            # Cooldown check
+            last_surfaced = seen_data.get(sku, 0)
+            if (now.timestamp() - last_surfaced) < (cooldown_minutes * 60):
+                continue
+
+            # Fetch consumption logs (quantity_changed < 0)
+            logs = cursor.execute(
+                "SELECT quantity_changed, timestamp FROM inventory_log WHERE UPPER(sku) = UPPER(?) AND quantity_changed < 0 ORDER BY timestamp DESC",
+                (sku,)
+            ).fetchall()
+
+            if not logs:
+                continue
+
+            seven_days_ago = now - timedelta(days=7)
+            recent_units = 0
+            baseline_units = 0
+            baseline_days_count = 0
+
+            # Find earliest log timestamp to determine baseline span
+            earliest_dt = now
+
+            for log in logs:
+                try:
+                    dt = datetime.fromisoformat(log["timestamp"])
+                except Exception:
+                    continue
+
+                if dt < earliest_dt:
+                    earliest_dt = dt
+
+                units = abs(log["quantity_changed"])
+                if dt >= seven_days_ago:
+                    recent_units += units
+                else:
+                    baseline_units += units
+
+            v_7d = recent_units / 7.0  # units per day over last 7 days
+
+            # Determine baseline span in days
+            baseline_span_days = max(1.0, (seven_days_ago - earliest_dt).total_seconds() / 86400.0)
+            v_baseline = baseline_units / baseline_span_days if baseline_units > 0 else (recent_units / 7.0 if len(logs) > 5 else 0.0)
+
+            if v_baseline <= 0:
+                continue
+
+            ratio = v_7d / v_baseline
+
+            if ratio >= anomaly_threshold and v_7d > 0:
+                days_left = quantity / v_7d
+                estimated_depletion_dt = now + timedelta(days=days_left)
+                depletion_str = estimated_depletion_dt.strftime("%b %d, %Y")
+
+                alert_text = (
+                    f"{item_name} (SKU: {sku}) is selling roughly {ratio:.1f}x faster than usual this week — "
+                    f"at this pace it'll run out around {depletion_str}, ahead of your normal reorder cycle."
+                )
+
+                alert_obj = {
+                    "sku": sku,
+                    "item_name": item_name,
+                    "quantity": quantity,
+                    "reorder_threshold": threshold,
+                    "ratio": round(ratio, 2),
+                    "v_7d": round(v_7d, 2),
+                    "v_baseline": round(v_baseline, 2),
+                    "estimated_depleted_date": estimated_depletion_dt.strftime("%Y-%m-%d"),
+                    "alert_text": alert_text,
+                    "timestamp": now.isoformat()
+                }
+
+                alerts.append(alert_obj)
+                seen_data[sku] = now.timestamp()
+
+        conn.close()
+
+        # Update seen data
+        if alerts:
+            try:
+                data_path.mkdir(parents=True, exist_ok=True)
+                with open(seen_file, "w", encoding="utf-8") as f:
+                    json.dump(seen_data, f, indent=2)
+            except Exception:
+                pass
+
+        return alerts
+    except Exception as e:
+        console.print(f"[yellow]Velocity anomaly detection error: {e}[/yellow]")
+        return []

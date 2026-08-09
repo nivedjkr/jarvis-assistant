@@ -14,6 +14,7 @@ load_dotenv(dotenv_path=env_path)
 
 from jarvis.api_client import JarvisAPIClient
 from jarvis.tools import ToolRegistry
+from jarvis.diagnostics import run_diagnostics_sync
 
 console = Console()
 
@@ -44,8 +45,13 @@ class JarvisAssistant:
         )
         console.rule(style="dim cyan")
         
+        # Run startup diagnostics
+        console.print("[dim cyan]Running startup health check...[/]")
+        self.health_report = run_diagnostics_sync()
+        console.print(self.health_report.format_plain())
+        
         # Initialize core systems
-        console.print("[dim cyan]Initializing...[/]")
+        console.print("[dim cyan]Initializing core engine...[/]")
         self.api = JarvisAPIClient()
         self.tools = ToolRegistry()
         
@@ -173,48 +179,8 @@ class JarvisAssistant:
             return f"Unknown command: {cmd}. Try /help"
     
     async def _diagnose(self) -> str:
-        lines = ["System Diagnostics:"]
-        
-        # DB check
-        try:
-            import sqlite3
-            conn = sqlite3.connect('jarvis/data/jarvis.db')
-            conn.execute("SELECT 1")
-            conn.close()
-            lines.append("✓ Database: connected")
-        except Exception as e:
-            lines.append(f"✗ Database: {e}")
-        
-        # API check
-        try:
-            import httpx
-            r = httpx.get(
-                "https://integrate.api.nvidia.com",
-                timeout=5
-            )
-            lines.append("✓ NIM API: reachable")
-        except:
-            lines.append("✗ NIM API: unreachable")
-        
-        # Tools check
-        lines.append(
-            f"✓ Tools: {len(self.tools.tools)} registered"
-        )
-        
-        # gh CLI check
-        try:
-            result = subprocess.run(
-                ['gh', 'auth', 'status'],
-                capture_output=True, timeout=5
-            )
-            if result.returncode == 0:
-                lines.append("✓ GitHub CLI: authenticated")
-            else:
-                lines.append("✗ GitHub CLI: not authenticated")
-        except:
-            lines.append("✗ GitHub CLI: not found")
-        
-        return "\n".join(lines)
+        report = run_diagnostics_sync()
+        return report.format_plain()
     
     def _show_help(self) -> str:
         return """JARVIS Commands:
@@ -289,6 +255,9 @@ Natural language — just talk:
                 break
             except Exception as e:
                 console.print(f"[red]Error: {e}[/]")
+
+# Alias for backward compatibility with tests
+JARVISCLI = JarvisAssistant
 
 def main():
     assistant = JarvisAssistant()

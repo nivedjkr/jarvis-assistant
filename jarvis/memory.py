@@ -29,6 +29,18 @@ def get_shared_db_connection(db_path: str = "jarvis/data/jarvis.db") -> sqlite3.
         return _DB_CONNECTIONS[norm_path]
 
 
+def close_shared_db_connections():
+    """Close all open SQLite connection caches (useful for test cleanup on Windows)."""
+    global _DB_CONNECTIONS
+    with _DB_CONNECTIONS_LOCK:
+        for conn in _DB_CONNECTIONS.values():
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _DB_CONNECTIONS.clear()
+
+
 class Memory:
     """Manages JARVIS memory and persistent storage using SQLite"""
     
@@ -172,6 +184,29 @@ class Memory:
                     content TEXT,
                     category TEXT DEFAULT 'general',
                     created_at TIMESTAMP
+                )
+            """)
+
+            # Inventory master table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS inventory (
+                    sku TEXT PRIMARY KEY,
+                    item_name TEXT,
+                    quantity INTEGER DEFAULT 0,
+                    reorder_threshold INTEGER DEFAULT 10,
+                    updated_at TIMESTAMP
+                )
+            """)
+
+            # Inventory log table for consumption velocity tracking
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS inventory_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sku TEXT,
+                    item_name TEXT,
+                    quantity_changed INTEGER,
+                    event_type TEXT DEFAULT 'sale',
+                    timestamp TIMESTAMP
                 )
             """)
 
@@ -749,6 +784,84 @@ class Memory:
                 rows = conn.execute("SELECT * FROM trades WHERE UPPER(ticker) = UPPER(?) ORDER BY id DESC", (ticker,)).fetchall()
             else:
                 rows = conn.execute("SELECT * FROM trades ORDER BY id DESC").fetchall()
+            return [dict(row) for row in rows]
+
+    # --- Inventory Methods ---
+
+    def log_inventory_event(
+        self,
+        sku: str,
+        item_name: str,
+        quantity_changed: int,
+        event_type: str = "sale",
+        reorder_threshold: int = 10,
+        timestamp: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Log inventory consumption/restock event and update current stock."""
+        now_iso = timestamp or datetime.now().isoformat()
+        sku_clean = sku.strip().upper()
+        item_clean = item_name.strip()
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Fetch current stock if exists
+            row = cursor.execute("SELECT quantity, reorder_threshold FROM inventory WHERE sku = ?", (sku_clean,)).fetchone()
+            current_qty = row["quantity"] if row else 0
+            new_threshold = reorder_threshold if reorder_threshold is not None else (row["reorder_threshold"] if row else 10)
+            
+            # quantity_changed is negative for consumption/sales, positive for restocks
+            new_qty = max(0, current_qty + quantity_changed)
+            
+            cursor.execute("""
+                INSERT INTO inventory (sku, item_name, quantity, reorder_threshold, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(sku) DO UPDATE SET
+                    item_name = excluded.item_name,
+                    quantity = excluded.quantity,
+                    reorder_threshold = excluded.reorder_threshold,
+                    updated_at = excluded.updated_at
+            """, (sku_clean, item_clean, new_qty, new_threshold, now_iso))
+            
+            cursor.execute("""
+                INSERT INTO inventory_log (sku, item_name, quantity_changed, event_type, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+            """, (sku_clean, item_clean, quantity_changed, event_type, now_iso))
+            
+            conn.commit()
+            return {
+                "sku": sku_clean,
+                "item_name": item_clean,
+                "previous_quantity": current_qty,
+                "new_quantity": new_qty,
+                "reorder_threshold": new_threshold,
+                "quantity_changed": quantity_changed,
+                "event_type": event_type,
+                "timestamp": now_iso
+            }
+
+    def get_inventory_item(self, sku: str) -> Optional[Dict[str, Any]]:
+        """Get inventory details for a single SKU."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM inventory WHERE sku = ?", (sku.strip().upper(),)).fetchone()
+            return dict(row) if row else None
+
+    def get_all_inventory(self) -> List[Dict[str, Any]]:
+        """Get list of all inventory items."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM inventory ORDER BY item_name ASC").fetchall()
+            return [dict(row) for row in rows]
+
+    def get_inventory_logs(self, sku: Optional[str] = None, days: int = 30) -> List[Dict[str, Any]]:
+        """Get inventory transaction log entries."""
+        with self._get_connection() as conn:
+            if sku:
+                rows = conn.execute("""
+                    SELECT * FROM inventory_log 
+                    WHERE UPPER(sku) = UPPER(?) 
+                    ORDER BY id DESC
+                """, (sku.strip(),)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM inventory_log ORDER BY id DESC").fetchall()
             return [dict(row) for row in rows]
 
 

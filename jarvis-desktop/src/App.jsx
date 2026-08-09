@@ -9,6 +9,7 @@ import DirectivesPanel from './components/DirectivesPanel'
 export default function App() {
   const [orbState, setOrbState] = useState('idle')
   const [isConnected, setIsConnected] = useState(true)
+  const [lastStateUpdate, setLastStateUpdate] = useState(null)
 
   const activeAudioRef = useRef(null)
   const timeoutRef = useRef(null)
@@ -296,6 +297,15 @@ export default function App() {
           }])
           speakResponse(alertText, data.audio)
         }
+        else if (data.type === 'state_update') {
+          console.log('[UI] Real-time state update received:', data)
+          setLastStateUpdate({
+            domain: data.domain,
+            action: data.action,
+            payload: data.payload,
+            timestamp: Date.now()
+          })
+        }
         else if (data.type === 'status') {
           if (data.status === 'thinking') {
             setOrbState('thinking')
@@ -387,7 +397,9 @@ export default function App() {
       flexDirection: 'column',
       height: '100vh',
       width: '100vw',
-      background: '#08080b',
+      background: '#040406',
+      color: '#e8e6e0',
+      fontFamily: "'JetBrains Mono', monospace",
       overflow: 'hidden'
     }}>
       <TitleBar isConnected={isConnected} />
@@ -398,7 +410,7 @@ export default function App() {
         height: 'calc(100vh - 88px)',
         overflow: 'hidden'
       }}>
-        <SystemVitals isConnected={isConnected} />
+        <SystemVitals isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
 
         <div style={{
           display: 'flex',
@@ -421,7 +433,7 @@ export default function App() {
           <ChatLog messages={messages} />
         </div>
 
-        <DirectivesPanel isConnected={isConnected} />
+        <DirectivesPanel isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
       </div>
 
       <InputBar onSend={handleSendMessage} />
