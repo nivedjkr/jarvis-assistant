@@ -75,6 +75,15 @@ def _load_config():
             pass
     return {}
 
+def is_confirmed(val) -> bool:
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return val != 0
+    if isinstance(val, str):
+        return val.strip().lower() in ("true", "1", "yes", "y", "confirm", "confirmed")
+    return False
+
 def _log_command(command: str, confirmed: bool):
     try:
         cfg = _load_config()
@@ -125,11 +134,23 @@ def _get_repo_path(path: str = "") -> str:
     return os.getcwd()
 
 class ToolRegistry:
-    def __init__(self):
+    def __init__(self, email_service: Optional[Any] = None):
         self.tools = {}   # name -> async callable
         self.schemas = [] # OpenAI tool schemas
         self.on_state_change = None  # Callable[[str, str, dict], None]
         self._last_suggestion_time = 0.0
+
+        if email_service is not None:
+            self.email_service = email_service
+        else:
+            try:
+                from jarvis.google_auth import GoogleAuthManager
+                from jarvis.email_service import EmailService
+                auth_mgr = GoogleAuthManager()
+                self.email_service = EmailService(auth_manager=auth_mgr)
+            except Exception as e:
+                self.email_service = None
+
         self._register_all()
         # Validate schemas on startup
         validate_tool_schemas(self)
@@ -145,6 +166,7 @@ class ToolRegistry:
         self._register_system_file_tools()
         self._register_semantic_memory_tools()
         self._register_inventory_tools()
+        self._register_email_tools()
         print(f"[TOOLS] Registered {len(self.tools)} tools: "
               f"{list(self.tools.keys())}")
     
@@ -170,18 +192,48 @@ class ToolRegistry:
                 return
         self.schemas.append(schema_obj)
     
+    async def execute_tool(self, name: str, **kwargs) -> str:
+        """Alias for backward compatibility with manual test runners."""
+        return await self.execute(name, kwargs)
+
     async def execute(self, name: str, args: dict) -> str:
         if name not in self.tools:
             return f"Unknown tool: {name}"
         try:
             fn = self.tools[name]
             import asyncio, inspect
+
+            # Parameter alias normalization for send_email
+            normalized_args = dict(args) if isinstance(args, dict) else {}
+            if name == "send_email":
+                if "recipient" in normalized_args and "to" not in normalized_args:
+                    normalized_args["to"] = normalized_args.pop("recipient")
+                if "email" in normalized_args and "to" not in normalized_args:
+                    normalized_args["to"] = normalized_args.pop("email")
+                if "target" in normalized_args and "to" not in normalized_args:
+                    normalized_args["to"] = normalized_args.pop("target")
+                if "message" in normalized_args and "body" not in normalized_args:
+                    normalized_args["body"] = normalized_args.pop("message")
+                if "text" in normalized_args and "body" not in normalized_args:
+                    normalized_args["body"] = normalized_args.pop("text")
+                if "content" in normalized_args and "body" not in normalized_args:
+                    normalized_args["body"] = normalized_args.pop("content")
+                if "title" in normalized_args and "subject" not in normalized_args:
+                    normalized_args["subject"] = normalized_args.pop("title")
+
+            # Filter kwargs to match function signature
+            sig = inspect.signature(fn)
+            has_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+            if not has_kwargs:
+                valid_keys = set(sig.parameters.keys())
+                normalized_args = {k: v for k, v in normalized_args.items() if k in valid_keys}
+
             if inspect.iscoroutinefunction(fn):
-                result = await fn(**args)
+                result = await fn(**normalized_args)
             else:
                 loop = asyncio.get_event_loop()
                 result = await loop.run_in_executor(
-                    None, lambda: fn(**args)
+                    None, lambda: fn(**normalized_args)
                 )
             result_str = str(result) if result else "Done."
 
@@ -206,12 +258,25 @@ class ToolRegistry:
             return f"Tool error: {str(e)}"
 
     def _extract_state_change(self, name: str, args: dict, result_str: str) -> tuple:
-        if "FAILED" in result_str:
+        if "FAILED" in result_str or "CONFIRMATION REQUIRED" in result_str:
             return (None, None, None)
         
         name_lower = name.lower()
         if "inventory" in name_lower:
             return ("inventory", "stock_updated", {"sku": args.get("sku"), "item_name": args.get("item_name"), "quantity_changed": args.get("quantity_changed"), "result": result_str})
+        elif "email" in name_lower:
+            emails_payload = []
+            if getattr(self, 'email_service', None):
+                try:
+                    emails_payload = self.email_service.fetch_unread_structured(limit=10)
+                except Exception:
+                    emails_payload = []
+            return ("email", "email_sent" if "send" in name_lower else "email_checked", {
+                "action": name_lower,
+                "unread_count": len(emails_payload),
+                "emails": emails_payload,
+                "result": result_str
+            })
         elif "reminder" in name_lower or "deadline" in name_lower or "task" in name_lower:
             return ("directives", "reminder_updated", {"text": args.get("text") or args.get("message") or args.get("task"), "action": name_lower, "result": result_str})
         elif "git" in name_lower:
@@ -1200,7 +1265,7 @@ class ToolRegistry:
                 ['gh', 'api', 'notifications',
                  '--jq', 
                  '.[0:10] | .[] | '
-                 '"\(.subject.title) [\(.reason)]"'],
+                 r'"\(.subject.title) [\(.reason)]"'],
                 capture_output=True, text=True, timeout=15
             )
             output = r.stdout.strip()
@@ -1679,3 +1744,103 @@ class ToolRegistry:
             "Get current stock level and reorder thresholds for inventory.",
             {"sku": {"type": "string", "default": ""}},
             required=[])
+
+    def _register_email_tools(self):
+        def check_email(limit: int = 5) -> str:
+            if not self.email_service:
+                return "Email service is unavailable."
+            return self.email_service.format_unread_list(limit=limit)
+
+        def read_email(index: Any = 1) -> str:
+            if not self.email_service:
+                return "Email service is unavailable."
+            try:
+                import re
+                if isinstance(index, str):
+                    digits = re.findall(r'\d+', index)
+                    clean_idx = int(digits[0]) if digits else 1
+                else:
+                    clean_idx = int(index)
+            except Exception:
+                clean_idx = 1
+            return self.email_service.read_email_body_by_index(index_1_based=clean_idx)
+
+        def email_summary() -> str:
+            if not self.email_service:
+                return "Email service is unavailable."
+            return self.email_service.generate_email_summary_briefing()
+
+        def send_email(to: str = "", subject: str = "", body: str = "", confirmed: Any = False) -> str:
+            if not self.email_service:
+                return "Email service is unavailable."
+
+            to_clean = (to or "").strip()
+            subject_clean = (subject or "").strip() or "Message from JARVIS"
+            body_clean = (body or "").strip()
+
+            if not to_clean or not body_clean:
+                missing = []
+                if not to_clean: missing.append("recipient address ('to')")
+                if not body_clean: missing.append("message text ('body')")
+                return f"CANNOT SEND EMAIL: Missing {', '.join(missing)}. Please specify recipient and message body."
+
+            cfg = _load_config()
+            confirm_dangerous = cfg.get("tools", {}).get("confirm_dangerous", True)
+            is_conf = is_confirmed(confirmed)
+
+            if confirm_dangerous and not is_conf:
+                return (
+                    f"CONFIRMATION REQUIRED to send email:\n"
+                    f"  To: {to_clean}\n"
+                    f"  Subject: {subject_clean}\n"
+                    f"  Body: {body_clean}\n\n"
+                    f"Please confirm sending this email by asking to confirm or re-running with confirmed=True."
+                )
+            return self.email_service.send_email(to=to_clean, subject=subject_clean, body=body_clean)
+
+        self._add("check_email", check_email,
+            "Check recent unread emails in Gmail inbox.",
+            {"limit": {"type": "integer", "description": "Number of recent unread emails to list (default 5)."}},
+            required=[])
+
+        self._add("read_email", read_email,
+            "Read full body content of an unread email by 1-based index.",
+            {"index": {"type": "integer", "description": "1-based index of email from check_email list."}},
+            required=[])
+
+        self._add("email_summary", email_summary,
+            "Get an executive summary briefing of unread inbox emails.",
+            {},
+            required=[])
+
+        self._add("send_email", send_email,
+            "Send an email to a recipient via Gmail API. Requires confirmation before sending.",
+            {
+                "to": {"type": "string", "description": "Recipient email address."},
+                "subject": {"type": "string", "description": "Email subject line."},
+                "body": {"type": "string", "description": "Body text of email."},
+                "confirmed": {"type": "boolean", "description": "Set to True only when user explicitly confirms sending."}
+            },
+            required=[])
+
+
+# Backward compatibility aliases for manual test runners
+class WebsiteOpenTool:
+    def __init__(self):
+        pass
+
+    def run(self, url: str):
+        import subprocess, webbrowser
+        webbrowser.open(url)
+        return f"Opened {url}"
+
+def open_url(url: str):
+    import webbrowser
+    webbrowser.open(url)
+    return f"Opened {url}"
+
+def find_chrome_path():
+    import shutil
+    return shutil.which("chrome") or shutil.which("msedge") or "browser"
+
+

@@ -17,6 +17,12 @@ export default function TitleBar({ isConnected = true }) {
     return () => clearInterval(timer)
   }, [])
 
+  const handleHelp = () => {
+    if (window.jarvis?.sendSlashCommand) {
+      window.jarvis.sendSlashCommand('/help')
+    }
+  }
+
   const handleMinimize = () => {
     if (window.jarvis?.minimize) {
       window.jarvis.minimize()
@@ -40,6 +46,7 @@ export default function TitleBar({ isConnected = true }) {
         <span className="session-id">SESSION: #JVS-887B</span>
         <span className="live-clock">{timeStr || '00:00:00'}</span>
         <div className="title-controls">
+          <button className="control-btn help" onClick={handleHelp} title="Show System Help">?</button>
           <button className="control-btn" onClick={handleMinimize} title="Minimize">—</button>
           <button className="control-btn close" onClick={handleClose} title="Close">✕</button>
         </div>

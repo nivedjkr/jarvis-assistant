@@ -8,6 +8,7 @@ import base64
 import json
 import re
 from datetime import datetime
+from email.mime.text import MIMEText
 from typing import Dict, Any, List, Optional, Tuple
 from googleapiclient.discovery import build
 
@@ -128,8 +129,8 @@ class EmailService:
         """
         Use lightweight rules / LLM triage to classify email as 'urgent', 'normal', or 'noise'.
         """
-        lower_subj = subject.lower()
-        lower_sender = sender.lower()
+        lower_subj = (subject or "").lower()
+        lower_sender = (sender or "").lower()
 
         # Immediate rule checks for urgency keywords
         urgent_keywords = ["urgent", "action required", "asap", "critical", "security alert", "emergency", "deadline", "payment failed", "important"]
@@ -197,6 +198,11 @@ class EmailService:
         if not self.auth_manager.is_authenticated():
             return "Gmail is not authenticated."
 
+        try:
+            index_1_based = int(index_1_based)
+        except (ValueError, TypeError):
+            return f"Invalid email index '{index_1_based}'."
+
         unread = self.fetch_unread_messages(max_results=10)
         if not unread or index_1_based < 1 or index_1_based > len(unread):
             return f"Invalid email index {index_1_based}. Available unread emails: 1 to {len(unread)}."
@@ -229,3 +235,61 @@ class EmailService:
             summary_lines.append(f"- [{importance.upper()}] From {clean_sender}: {msg['subject']}")
 
         return "\n".join(summary_lines)
+
+    def fetch_unread_structured(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Fetch structured unread emails for desktop UI cards."""
+        if not self.auth_manager.is_authenticated():
+            return []
+
+        try:
+            unread = self.fetch_unread_messages(max_results=limit)
+            structured = []
+            for msg in unread:
+                sender_val = msg.get("sender") or "Unknown Sender"
+                subject_val = msg.get("subject") or "No Subject"
+                clean_sender = sender_val.split("<")[0].strip().strip('"') if isinstance(sender_val, str) else "Unknown Sender"
+                importance = self.classify_importance(sender_val, subject_val)
+                structured.append({
+                    "id": msg.get("id", ""),
+                    "sender": clean_sender or "Unknown Sender",
+                    "subject": subject_val,
+                    "snippet": msg.get("snippet", ""),
+                    "date": msg.get("date", ""),
+                    "urgency": importance
+                })
+            return structured
+        except Exception as e:
+            print(f"[EMAIL_SERVICE] Error in fetch_unread_structured: {e}")
+            return []
+
+
+    def send_email(self, to: str, subject: str, body: str) -> str:
+        """
+        Send an email using Gmail API's users().messages().send().
+        """
+        if not self.auth_manager.is_authenticated():
+            return "Gmail is not authenticated. Please authenticate via Google OAuth setup."
+
+        service = self._get_service()
+        if not service:
+            return "Gmail service unavailable."
+
+        try:
+            message = MIMEText(body)
+            message["to"] = to
+            message["subject"] = subject
+
+            raw_bytes = message.as_bytes()
+            raw_b64 = base64.urlsafe_b64encode(raw_bytes).decode("utf-8")
+            send_body = {"raw": raw_b64}
+
+            result = service.users().messages().send(
+                userId="me",
+                body=send_body
+            ).execute()
+
+            msg_id = result.get("id", "unknown")
+            return f"Email sent successfully to {to}. (Message ID: {msg_id})"
+        except Exception as e:
+            return f"Failed to send email: {str(e)}"
+

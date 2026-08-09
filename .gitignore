@@ -63,9 +63,15 @@ jarvis-desktop/dist/
 jarvis-desktop/.vite/
 jarvis-desktop/.env
 
-# Google OAuth
+# Google OAuth & Secrets Safeguards
+credentials.json
+google_token.json
 jarvis/data/google_token.json
 jarvis/data/credentials.json
+**/credentials*.json
+**/*token*.json
+**/*.env
+!**/.env.example
 
 # New data files
 jarvis/data/github_seen.json

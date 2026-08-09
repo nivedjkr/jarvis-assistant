@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   getReminders: () => ipcRenderer.invoke('get-reminders'),
   getWatchlist: () => ipcRenderer.invoke('get-watchlist'),
   getVitals: () => ipcRenderer.invoke('get-vitals'),
+  checkEmail: () => ipcRenderer.invoke('check-email'),
 
   minimize: () => ipcRenderer.invoke('window-minimize'),
   close: () => ipcRenderer.invoke('window-close')

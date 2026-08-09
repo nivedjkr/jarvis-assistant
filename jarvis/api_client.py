@@ -163,9 +163,17 @@ TOOL USE — CRITICAL:
 - App opened? Only say so if open_application returned success.
 - Clipboard copied? Only say so if copy_to_clipboard confirmed.
 
+EMAIL INSTRUCTIONS:
+- Whenever the user says "send email", "sent email to...", "email to...", or expresses intent to write or send an email, ALWAYS call the send_email tool immediately.
+- To check inbox: call check_email tool.
+- To read an email: call read_email tool with 1-based index (e.g., read_email(index=1)).
+- If fields (to, subject, body) are missing, pass whatever parameters you have to send_email (do not reply in natural text without calling send_email).
+- NEVER hallucinate or invent email content, sender names, or subjects.
+- NEVER claim an email was sent if send_email returned a CONFIRMATION REQUIRED or CANNOT SEND message. Always present the output prompt to the user first.
+
 NEVER:
 - Generate OAuth flows, login pages, fake authentication
-- Invent file contents, prices, GitHub data
+- Invent file contents, prices, GitHub data, or email contents
 - Report success without tool verification
 - Write more than 3 sentences for routine responses
 - Use emojis"""
@@ -300,6 +308,7 @@ NEVER:
                     "tool_calls": tool_calls_data
                 })
                 
+                tool_results = []
                 for tc in message.tool_calls:
                     name = tc.function.name
                     try:
@@ -310,6 +319,7 @@ NEVER:
                     print(f"[TOOL] >>> {name}({args})")
                     result = await tool_executor(name, args)
                     print(f"[TOOL] <<< {repr(result)[:200]}")
+                    tool_results.append(result)
                     
                     messages.append({
                         "role": "tool",
@@ -317,7 +327,13 @@ NEVER:
                         "content": str(result)
                     })
                 
-                response_text = await self._stream_response(messages, max_tokens=150)
+                # If tool returned a confirmation prompt or detailed readout, return tool output directly
+                if any("CONFIRMATION REQUIRED" in str(r) for r in tool_results):
+                    response_text = "\n\n".join(str(r) for r in tool_results)
+                elif any(str(r).startswith("===") or str(r).startswith("From:") or str(r).startswith("Found ") for r in tool_results):
+                    response_text = "\n\n".join(str(r) for r in tool_results)
+                else:
+                    response_text = await self._stream_response(messages, max_tokens=300)
             
             else:
                 if message.content:

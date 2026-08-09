@@ -447,6 +447,11 @@ ipcMain.handle('get-projects', () => fetchJson('http://127.0.0.1:8765/projects')
 ipcMain.handle('get-reminders', () => fetchJson('http://127.0.0.1:8765/reminders'))
 ipcMain.handle('get-watchlist', () => fetchJson('http://127.0.0.1:8765/watchlist'))
 ipcMain.handle('get-vitals', () => fetchJson('http://127.0.0.1:8765/vitals'))
+ipcMain.handle('check-email', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'slash_command', command: '/email' }))
+  }
+})
 
 
 ipcMain.handle('window-minimize', () => mainWindow && mainWindow.minimize())

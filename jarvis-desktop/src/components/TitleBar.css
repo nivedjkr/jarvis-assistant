@@ -87,6 +87,11 @@
   color: #e8e6e0;
 }
 
+.control-btn.help:hover {
+  background: rgba(167, 139, 250, 0.2);
+  color: #a78bfa;
+}
+
 .control-btn.close:hover {
   background: rgba(239, 68, 68, 0.2);
   color: #ef4444;

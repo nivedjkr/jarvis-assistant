@@ -104,9 +104,13 @@ async def websocket_endpoint(ws: WebSocket):
             data = await ws.receive_json()
             msg_type = data.get("type", "message")
             
-            if msg_type == "message":
-                user_msg = data.get("message", "")
-                print(f"[WS] Received: {user_msg}")
+            if msg_type == "message" or msg_type == "slash_command":
+                user_msg = data.get("message") or data.get("command") or ""
+                user_msg = user_msg.strip()
+                print(f"[WS] Received ({msg_type}): {user_msg}")
+                
+                if not user_msg:
+                    continue
                 
                 # Send thinking status
                 await ws.send_json({
@@ -114,45 +118,164 @@ async def websocket_endpoint(ws: WebSocket):
                     "status": "thinking"
                 })
                 
-                # Process through JARVIS pipeline
-                api_client.add_user_message(user_msg, session_id=session_id)
-                
-                response = await api_client.chat_with_tools(
-                    tool_schemas=tool_registry.schemas,
-                    tool_executor=tool_registry.execute,
-                    session_id=session_id
-                )
-                
-                # Send response back to Electron
-                await ws.send_json({
-                    "type": "response",
-                    "text": response,
-                    "status": "speaking"
-                })
-                
-                print(f"[WS] Sent response: {response[:100]}")
-                
-            elif msg_type == "slash_command":
-                cmd = data.get("command", "").strip().lower()
-                if cmd == "/diagnose":
-                    diag_report = await run_diagnostics(check_nvidia=True)
-                    await ws.send_json({
-                        "type": "response",
-                        "text": diag_report.format_plain(),
-                        "status": "idle"
-                    })
-                elif cmd == "/exit":
-                    await ws.send_json({
-                        "type": "response",
-                        "text": "Goodbye, sir.",
-                        "status": "idle"
-                    })
+                # Check slash command handling
+                if user_msg.startswith("/"):
+                    cmd = user_msg.lower()
+                    if cmd == "/diagnose":
+                        diag_report = await run_diagnostics(check_nvidia=True)
+                        await ws.send_json({
+                            "type": "response",
+                            "text": diag_report.format_plain(),
+                            "status": "idle"
+                        })
+                    elif cmd in ["/email", "/check_email", "/checkemail"]:
+                        res = await tool_registry.execute("check_email", {"limit": 5})
+                        await ws.send_json({
+                            "type": "response",
+                            "text": res,
+                            "tool_calls": [{"name": "check_email"}],
+                            "status": "speaking"
+                        })
+                    elif cmd in ["/email summary", "/email_summary", "/email-summary"]:
+                        res = await tool_registry.execute("email_summary", {})
+                        await ws.send_json({
+                            "type": "response",
+                            "text": res,
+                            "tool_calls": [{"name": "email_summary"}],
+                            "status": "speaking"
+                        })
+                    elif cmd == "/tools":
+                        tools_list = list(tool_registry.tools.keys())
+                        await ws.send_json({
+                            "type": "response",
+                            "text": f"Registered Tools ({len(tools_list)}):\n" + ", ".join(tools_list),
+                            "status": "speaking"
+                        })
+                    elif cmd == "/help":
+                        help_text = (
+                            "=====================================================\n"
+                            "            J.A.R.V.I.S. SYSTEM COMMAND REFERENCE    \n"
+                            "=====================================================\n\n"
+                            "--- SLASH COMMANDS ---\n"
+                            "  /help          Show this command reference\n"
+                            "  /tools         List all 59 registered tool schemas\n"
+                            "  /email         Check recent unread emails in Gmail\n"
+                            "  /email summary Get executive email briefing\n"
+                            "  /diagnose      Run system diagnostics & health check\n"
+                            "  /context       View active session token usage\n"
+                            "  /context clear Reset session context memory\n"
+                            "  /exit          Disconnect active session\n\n"
+                            "--- GMAIL & EMAIL COMMANDS ---\n"
+                            "  • 'check my email' / '/email'\n"
+                            "  • 'email summary' / '/email summary'\n"
+                            "  • 'read email 1' (reads body of email #1)\n"
+                            "  • 'send email to name@domain.com subject Title body Message'\n"
+                            "  • 'confirm' / 'yes' (confirms draft send)\n\n"
+                            "--- SYSTEM & UTILITIES ---\n"
+                            "  • 'what is my cpu usage?'\n"
+                            "  • 'get disk usage'\n"
+                            "  • 'open spotify' / 'close notepad'\n"
+                            "  • 'copy hello world to clipboard'\n\n"
+                            "--- DEVELOPER & GITHUB ---\n"
+                            "  • 'git status' / 'git log'\n"
+                            "  • 'show my github repos'\n"
+                            "  • 'list open pull requests'\n\n"
+                            "====================================================="
+                        )
+                        await ws.send_json({
+                            "type": "response",
+                            "text": help_text,
+                            "status": "speaking"
+                        })
+                    elif cmd == "/context":
+                        msgs = api_client.get_session(session_id).messages
+                        tokens = api_client.get_token_estimate(session_id)
+                        await ws.send_json({
+                            "type": "response",
+                            "text": f"Session Context: {len(msgs)} messages, ~{tokens} estimated tokens.",
+                            "status": "speaking"
+                        })
+                    elif cmd == "/context clear":
+                        api_client.clear_history(session_id)
+                        await ws.send_json({
+                            "type": "response",
+                            "text": "Context history cleared, sir.",
+                            "status": "speaking"
+                        })
+                    elif cmd == "/exit":
+                        await ws.send_json({
+                            "type": "response",
+                            "text": "Goodbye, sir.",
+                            "status": "idle"
+                        })
+                    else:
+                        # Fallback slash command or natural query starting with /
+                        executed_tools = []
+                        async def tracking_executor(name: str, args: dict) -> str:
+                            executed_tools.append({"name": name, "args": args})
+                            return await tool_registry.execute(name, args)
+
+                        api_client.add_user_message(user_msg, session_id=session_id)
+                        response = await api_client.chat_with_tools(
+                            tool_schemas=tool_registry.schemas,
+                            tool_executor=tracking_executor,
+                            session_id=session_id
+                        )
+                        await ws.send_json({
+                            "type": "response",
+                            "text": response,
+                            "tool_calls": executed_tools,
+                            "status": "speaking"
+                        })
                 else:
+                    # Natural language prompt processing with tool tracking
+                    executed_tools = []
+                    async def tracking_executor(name: str, args: dict) -> str:
+                        executed_tools.append({"name": name, "args": args})
+                        return await tool_registry.execute(name, args)
+
+                    api_client.add_user_message(user_msg, session_id=session_id)
+                    response = await api_client.chat_with_tools(
+                        tool_schemas=tool_registry.schemas,
+                        tool_executor=tracking_executor,
+                        session_id=session_id
+                    )
+                    
+                    # Intent fallback safety: guarantee email tool execution if LLM generated text without calling tool
+                    if not executed_tools:
+                        lower_msg = user_msg.lower()
+                        if "email" in lower_msg or "gmail" in lower_msg or "inbox" in lower_msg:
+                            import re
+                            if any(k in lower_msg for k in ["send", "sent", "write", "draft", "compose"]):
+                                to_match = re.search(r'(?:to|recipient)\s+([^\s,]+@[^\s,]+\.[^\s,]+)', user_msg, re.I)
+                                to_val = to_match.group(1) if to_match else ""
+                                subj_match = re.search(r'subject\s+[\'"]?([^\'\"]+?)[\'"]?\s+(?:body|message|text|$)', user_msg, re.I)
+                                subj_val = subj_match.group(1) if subj_match else ""
+                                body_match = re.search(r'(?:body|message|text)\s+(.+)$', user_msg, re.I)
+                                body_val = body_match.group(1) if body_match else ""
+                                
+                                args_dict = {"to": to_val, "subject": subj_val, "body": body_val}
+                                res = await tool_registry.execute("send_email", args_dict)
+                                executed_tools.append({"name": "send_email", "args": args_dict})
+                                response = res
+                            elif any(k in lower_msg for k in ["check", "list", "show", "unread"]):
+                                res = await tool_registry.execute("check_email", {"limit": 5})
+                                executed_tools.append({"name": "check_email", "args": {"limit": 5}})
+                                response = res
+                            elif "summary" in lower_msg or "brief" in lower_msg:
+                                res = await tool_registry.execute("email_summary", {})
+                                executed_tools.append({"name": "email_summary", "args": {}})
+                                response = res
+
+                    # Send response back to Electron
                     await ws.send_json({
                         "type": "response",
-                        "text": f"Command: {cmd}",
-                        "status": "idle"
+                        "text": response,
+                        "tool_calls": executed_tools,
+                        "status": "speaking"
                     })
+                    
+                    print(f"[WS] Sent response ({len(executed_tools)} tools executed): {response[:100]}")
                     
     except WebSocketDisconnect:
         manager.disconnect(ws)

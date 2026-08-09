@@ -5,6 +5,7 @@ import ChatLog from './components/ChatLog'
 import InputBar from './components/InputBar'
 import SystemVitals from './components/SystemVitals'
 import DirectivesPanel from './components/DirectivesPanel'
+import EmailPanel from './components/EmailPanel'
 
 export default function App() {
   const [orbState, setOrbState] = useState('idle')
@@ -434,6 +435,7 @@ export default function App() {
         </div>
 
         <DirectivesPanel isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
+        <EmailPanel isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
       </div>
 
       <InputBar onSend={handleSendMessage} />

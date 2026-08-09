@@ -16,6 +16,12 @@ from jarvis.api_client import JarvisAPIClient
 from jarvis.tools import ToolRegistry
 from jarvis.diagnostics import run_diagnostics_sync
 
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 console = Console()
 
 BOOT_ART = """
@@ -183,26 +189,46 @@ class JarvisAssistant:
         return report.format_plain()
     
     def _show_help(self) -> str:
-        return """JARVIS Commands:
-/help         - This message
-/exit         - Quit
-/clear        - Clear screen  
-/tools        - List all tools
-/history      - Recent conversation
-/context      - Check context usage
-/context clear - Clear context history
-/diagnose     - System health check
-/speak on|off - Toggle voice output
+        return """=====================================================
+            J.A.R.V.I.S. SYSTEM COMMAND REFERENCE
+=====================================================
 
-Natural language — just talk:
-"open notepad"
-"create file notes.txt with content: hello"
-"open youtube"
-"show my github repos"
-"copy hello world to clipboard"
-"what's my cpu usage"
-"search for python tutorials" """
+--- SLASH COMMANDS ---
+  /help          Show this command reference
+  /tools         List all registered tool schemas
+  /email         Check recent unread emails in Gmail
+  /email summary Get executive email briefing
+  /diagnose      Run system diagnostics & health check
+  /context       View active session token usage
+  /context clear Reset session context memory
+  /history       View recent conversation log
+  /speak on|off  Toggle voice output
+  /exit          Disconnect active session
+
+--- GMAIL & EMAIL COMMANDS ---
+  • "check my email" / "/email"
+  • "email summary" / "/email summary"
+  • "read email 1" (reads body of email #1)
+  • "send email to name@domain.com subject Title body Message"
+  • "confirm" / "yes" (confirms draft send)
+
+--- SYSTEM & UTILITIES ---
+  • "what is my cpu usage?"
+  • "get disk usage"
+  • "open spotify" / "close notepad"
+  • "copy hello world to clipboard"
+
+--- DEVELOPER & GITHUB ---
+  • "git status" / "git log"
+  • "show my github repos"
+  • "list open pull requests"
+
+====================================================="""
     
+    async def process_command(self, user_input: str) -> str:
+        """Alias for backward compatibility with manual test runners."""
+        return await self.process(user_input)
+
     async def process(self, user_input: str) -> str:
         user_input = user_input.strip()
         if not user_input:

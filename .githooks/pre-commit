@@ -1,0 +1,22 @@
+#!/bin/sh
+# JARVIS Pre-Commit Hook: Block secret credentials, tokens, and .env files
+
+FORBIDDEN_PATTERNS="credentials\.json$|google_token\.json$|^\.env$|\.env$|.*token.*\.json$"
+
+staged_files=$(git diff --cached --name-only)
+
+for file in $staged_files; do
+  if echo "$file" | grep -iE "$FORBIDDEN_PATTERNS" > /dev/null; then
+    echo ""
+    echo "======================================================================"
+    echo " [SECURITY ERROR] COMMIT BLOCKED BY PRE-COMMIT SAFEGUARD HOOK!"
+    echo "  Attempted to commit forbidden secret file: $file"
+    echo "  Reason: OAuth client secrets, Google tokens, and .env files must"
+    echo "          NEVER be committed to version control."
+    echo "======================================================================"
+    echo ""
+    exit 1
+  fi
+done
+
+exit 0
