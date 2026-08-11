@@ -1,84 +1,92 @@
-# JARVIS Configuration
+# JARVIS Configuration System
 
-# NVIDIA NIM API Settings
 api:
-  base_url: "https://integrate.api.nvidia.com/v1"
-  model: "meta/llama-3.1-8b-instruct"
-  temperature: 0.6
+  provider: nvidia
+  model: nvidia/nemotron-3-ultra-550b-a55b
+  base_url: https://integrate.api.nvidia.com/v1
   max_tokens: 500
-  stream: true
-  timeout: 60.0
+  max_history_messages: 40
+  stream: false
 
-# Memory Settings
+personality:
+  user_title: sir
+  name: JARVIS
+  adaptive_tone: true
+  voice_enabled: true
+  response_style: concise
+  enable_boot_greeting: true
+
+voice:
+  tts_engine: edge-tts
+  tts_voice: en-GB-RyanNeural
+  boot_greeting: true
+  speak_responses: true
+  speak_code_blocks: false
+  max_speak_length: 400
+  stt_model: base
+  push_to_talk_key: space
+  input_device: null
+  wake_word_enabled: false
+  silence_threshold: 0.5
+  auto_stop_recording: true
+
 memory:
-  file: "jarvis/data/jarvis.db"
-  log_file: "jarvis_commands.log"
+  auto_extract: true
+  max_facts: 500
+  context_facts: 10
+  db_path: jarvis/data/jarvis.db
+  file: jarvis/data/jarvis.db
+  log_file: jarvis_commands.log
 
-# Tool Settings
+github:
+  default_repo: nivedjkr/jarvis-assistant
+  watch_repos:
+    - nivedjkr/jarvis-assistant
+  check_interval_minutes: 30
+
+obsidian:
+  enabled: false
+  vault_path: ""
+
+trading:
+  check_interval_seconds: 300
+  default_tickers: []
+
 tools:
+  confirm_destructive: true
   confirm_dangerous: true
+  app_launch_timeout: 2.0
+  command_timeout: 30
   log_commands: true
 
-# Personality Settings
-personality:
-  user_title: "sir"  # How JARVIS addresses the user (sir, ma'am, etc.)
-  response_style: "concise"  # concise, detailed
-  enable_boot_greeting: true  # Speak greeting on startup
-
-# Voice Settings
-voice:
+debug:
   enabled: false
-  speak_responses: false  # Output-only TTS for all responses
-  speak_code_blocks: false  # Skip reading raw code blocks aloud
-  stt_model: "base"  # "base" or "small" for faster-whisper
-  tts_engine: "edge"  # "edge" or "pyttsx3"
-  tts_voice: "en-GB-RyanNeural"  # Edge TTS voice
-  push_to_talk_key: "space"  # Key for push-to-talk
-  input_device: null  # Input device ID (null for default, or integer)
-  wake_word_enabled: false  # Enable wake word detection
-  silence_threshold: 0.5  # Silence detection threshold (0-1)
-  auto_stop_recording: true  # Auto-stop on silence
+  log_tool_calls: true
+  log_api_calls: false
+  log_file: jarvis/data/jarvis.log
 
-# Global Awareness Settings
+location:
+  city: Kerala
+  country: India
+
 awareness:
   enabled: true
   topics:
-    - "AI"
-    - "cybersecurity"
-    - "space technology"
-  check_interval_hours: 0.33  # 20 minutes (0.33 hours)
+    - AI
+    - cybersecurity
+    - space technology
+  check_interval_hours: 0.33
   significance_threshold: 7
 
-# Proactive Assistant Settings
 proactive:
   enabled: true
-  frequency: 20  # Check interval frequency in minutes
-  cooldown_minutes: 30  # Cooldown between proactive suggestions (30 mins default)
-  velocity_anomaly_threshold: 1.8  # Threshold ratio for stock velocity anomaly
-  idle_threshold_minutes: 10  # Minutes of inactivity before idle commentary
-  idle_cooldown_minutes: 15   # Minimum minutes between idle commentary speech
+  frequency: 20
+  cooldown_minutes: 30
+  velocity_anomaly_threshold: 1.8
+  idle_threshold_minutes: 10
+  idle_cooldown_minutes: 15
   interests:
-    - "AI"
-    - "cybersecurity"
-    - "space technology"
-    - "software engineering"
-
-# Location Settings
-location:
-  city: "Kerala"
-  country: "India"
-
-# GitHub Settings
-github:
-  default_repo: "nivedjkr/jarvis-assistant"
-  watch_repos:
-    - "nivedjkr/jarvis-assistant"
-  check_interval_minutes: 30
-
-# Obsidian Memory Settings
-obsidian:
-  enabled: true
-  vault_path: "C:/Users/nived/Obsidian/Vault"
-  smart_connections_mcp_url: "http://127.0.0.1:3000"
-  fallback_to_grep: true
-
+    - AI
+    - cybersecurity
+    - space technology
+    - software engineering

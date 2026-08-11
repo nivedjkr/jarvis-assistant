@@ -20,9 +20,13 @@
 
 ---
 
-## What is JARVIS?
+## 📚 Documentation & Architecture
 
-JARVIS is a local AI assistant that runs directly on your machine — accessible via a sleek Electron + React desktop application or an interactive terminal CLI. Powered by the **NVIDIA Nemotron** LLM API, JARVIS goes beyond standard chatbot wrappers by providing an intelligent local operating system: live Gmail inbox integration, custom React desktop UI panels, voice output, persistent relational and vector memory, real-time hardware diagnostics, native GitHub and Git workflows, proactive awareness monitoring, pre-commit credential safeguards, and safe system execution tools.
+Comprehensive technical documentation is available in the [`docs/`](docs/) directory:
+
+- 🏗️ **[Architecture Guide](docs/ARCHITECTURE.md)**: System overview, ASCII data flow diagrams, and design principles.
+- ⚡ **[Tool Reference Catalog](docs/TOOLS.md)**: Complete catalog of all ~59 registered tool schemas, descriptions, and natural language triggers.
+- ⚙️ **[Setup & Installation Guide](docs/SETUP.md)**: Step-by-step setup guide for CLI, Electron UI, environment configuration, and live debug dashboard.
 
 ---
 

@@ -53,10 +53,22 @@ class JarvisAssistant:
         )
         console.rule(style="dim cyan")
         
-        # Run startup diagnostics
+        # Run startup health check
         console.print("[dim cyan]Running startup health check...[/]")
-        self.health_report = run_diagnostics_sync()
-        console.print(self.health_report.format_plain())
+        from jarvis.health import HealthChecker
+        checker = HealthChecker()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                results = loop.run_until_complete(checker.run_all())
+            else:
+                results = asyncio.run(checker.run_all())
+        except Exception:
+            results = asyncio.run(checker.run_all())
+        console.print(checker.render_results())
+        if checker.critical_failures:
+            console.print(f"[bold red][WARNING] Critical failures: {checker.critical_failures}[/bold red]")
+            console.print("[yellow]JARVIS may not function correctly.[/yellow]")
         
         # Initialize core systems
         console.print("[dim cyan]Initializing core engine...[/]")

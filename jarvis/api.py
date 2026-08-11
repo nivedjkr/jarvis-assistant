@@ -181,11 +181,117 @@ async def websocket_endpoint(ws: WebSocket):
                             "status": "speaking"
                         })
                     elif cmd == "/diagnose":
-                        diag_report = await run_diagnostics(check_nvidia=True)
+                        from jarvis.health import HealthChecker
+                        checker = HealthChecker()
+                        await checker.run_all()
+                        res_text = checker.render_results()
                         await ws.send_json({
                             "type": "response",
-                            "text": diag_report.format_plain(),
+                            "text": res_text,
                             "status": "idle"
+                        })
+                    elif cmd.startswith("/debug"):
+                        from jarvis.debug_panel import debug
+                        parts = user_msg.strip().split()
+                        sub = parts[1].lower() if len(parts) > 1 else ""
+                        if sub == "on":
+                            debug.enabled = True
+                            res = "Debug panel enabled, sir."
+                        elif sub == "off":
+                            debug.enabled = False
+                            res = "Debug panel disabled, sir."
+                        else:
+                            res = debug.render()
+                        await ws.send_json({
+                            "type": "response",
+                            "text": res,
+                            "status": "speaking"
+                        })
+                    elif cmd.startswith("/provider"):
+                        from jarvis.llm_provider import get_provider
+                        parts = user_msg.strip().split(maxsplit=1)
+                        prov_name = parts[1] if len(parts) > 1 else ""
+                        if prov_name:
+                            api_client.provider = get_provider(prov_name)
+                            api_client.model = getattr(api_client.provider, 'model', 'default')
+                            res = f"LLM Provider switched to: {api_client.provider.name}"
+                        else:
+                            res = f"Active Provider: {getattr(api_client.provider, 'name', 'NVIDIA NIM')}"
+                        await ws.send_json({
+                            "type": "response",
+                            "text": res,
+                            "status": "speaking"
+                        })
+                    elif cmd.startswith("/config"):
+                        from jarvis.config_manager import config
+                        parts = user_msg.strip().split(maxsplit=2)
+                        sub = parts[1].lower() if len(parts) > 1 else "show"
+                        if sub == "show":
+                            import yaml
+                            res = "=== JARVIS CONFIGURATION ===\n" + yaml.dump(config.get_all(), default_flow_style=False)
+                        elif sub == "set" and len(parts) > 2:
+                            kv = parts[2].split(maxsplit=1)
+                            if len(kv) == 2:
+                                config.set(kv[0], kv[1])
+                                res = f"Set config path '{kv[0]}' to '{kv[1]}'."
+                            else:
+                                res = "Usage: /config set <path> <value>"
+                        elif sub == "save":
+                            config.save()
+                            res = "Configuration saved to config.yaml."
+                        elif sub == "reset":
+                            config.reload()
+                            res = "Configuration reloaded from config.yaml."
+                        else:
+                            res = "Usage: /config [show|set <path> <val>|save|reset]"
+                        await ws.send_json({
+                            "type": "response",
+                            "text": res,
+                            "status": "speaking"
+                        })
+                    elif cmd.startswith("/memory"):
+                        from jarvis.memory import list_all_facts, delete_fact, edit_fact, clear_facts_by_category, get_memory_stats, search_facts, export_memory
+                        parts = user_msg.strip().split(maxsplit=2)
+                        sub = parts[1].lower() if len(parts) > 1 else "stats"
+                        if sub == "stats":
+                            st = get_memory_stats()
+                            res = f"Total Facts: {st['total_facts']}\nBy Category: {st['by_category']}"
+                        elif sub == "list":
+                            cat = parts[2] if len(parts) > 2 else None
+                            facts = list_all_facts(category=cat, limit=20)
+                            if not facts:
+                                res = "No facts found."
+                            else:
+                                lines = [f"#{f['id']} [{f.get('category','gen')}] {f.get('content','')[:60]}" for f in facts]
+                                res = "Memory Facts:\n" + "\n".join(lines)
+                        elif sub == "delete" and len(parts) > 2:
+                            try:
+                                fid = int(parts[2])
+                                res = delete_fact(fid)
+                            except ValueError:
+                                res = "Invalid fact ID."
+                        elif sub == "edit" and len(parts) > 2:
+                            try:
+                                edit_parts = parts[2].split(maxsplit=1)
+                                fid = int(edit_parts[0])
+                                n_content = edit_parts[1] if len(edit_parts) > 1 else ""
+                                res = edit_fact(fid, n_content)
+                            except ValueError:
+                                res = "Usage: /memory edit <id> <new content>"
+                        elif sub == "clear" and len(parts) > 2:
+                            res = clear_facts_by_category(parts[2])
+                        elif sub == "search" and len(parts) > 2:
+                            facts = search_facts(parts[2])
+                            lines = [f"#{f['id']} [{f.get('category','gen')}] {f.get('content','')[:60]}" for f in facts]
+                            res = f"Search Results ({len(facts)}):\n" + "\n".join(lines) if lines else "No matching facts."
+                        elif sub == "export":
+                            res = export_memory()
+                        else:
+                            res = "Usage: /memory [stats|list|delete <id>|edit <id> <content>|clear <cat>|search <kw>|export]"
+                        await ws.send_json({
+                            "type": "response",
+                            "text": res,
+                            "status": "speaking"
                         })
                     elif cmd in ["/email", "/check_email", "/checkemail"]:
                         res = await tool_registry.execute("check_email", {"limit": 5})

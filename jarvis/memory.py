@@ -364,6 +364,12 @@ class Memory:
                 "confidence": confidence
             }
 
+    def save_fact(self, content: str, category: str = "general") -> Optional[Dict]:
+        return self.add_fact(category=category, content=content)
+
+    def log_fact(self, content: str, category: str = "general") -> Optional[Dict]:
+        return self.add_fact(category=category, content=content)
+
     def invalidate_facts_cache(self):
         """Invalidate in-memory facts cache"""
         self._facts_cache = None
@@ -895,6 +901,75 @@ class CommandLogger:
         return lines[-limit:]
 
 
-# Backward compatibility alias
+# Memory Management CRUD functions
+
+def list_all_facts(category: Optional[str] = None, limit: int = 50) -> list:
+    mem = Memory()
+    with mem._get_connection() as conn:
+        if category:
+            rows = conn.execute(
+                "SELECT id, category, content, created_at FROM facts WHERE category=? ORDER BY created_at DESC LIMIT ?",
+                (category, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, category, content, created_at FROM facts ORDER BY created_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+def delete_fact(fact_id: int) -> str:
+    mem = Memory()
+    with mem._get_connection() as conn:
+        conn.execute("DELETE FROM facts WHERE id=?", (fact_id,))
+        conn.commit()
+    return f"Fact #{fact_id} deleted."
+
+def edit_fact(fact_id: int, new_content: str) -> str:
+    mem = Memory()
+    with mem._get_connection() as conn:
+        conn.execute("UPDATE facts SET content=? WHERE id=?", (new_content, fact_id))
+        conn.commit()
+    return f"Fact #{fact_id} updated."
+
+def clear_facts_by_category(category: str) -> str:
+    mem = Memory()
+    with mem._get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM facts WHERE category=?", (category,)).fetchone()[0]
+        conn.execute("DELETE FROM facts WHERE category=?", (category,))
+        conn.commit()
+    return f"Deleted {count} facts in '{category}'."
+
+def get_memory_stats() -> dict:
+    mem = Memory()
+    with mem._get_connection() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        by_category = conn.execute(
+            "SELECT category, COUNT(*) as count FROM facts GROUP BY category"
+        ).fetchall()
+        return {
+            "total_facts": total,
+            "by_category": {r[0]: r[1] for r in by_category}
+        }
+
+def search_facts(query: str, limit: int = 20) -> list:
+    mem = Memory()
+    with mem._get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, category, content, created_at FROM facts WHERE content LIKE ? ORDER BY created_at DESC LIMIT ?",
+            (f"%{query}%", limit)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def export_memory(export_path: str = "jarvis/data/memory_export.json") -> str:
+    facts = list_all_facts(limit=1000)
+    out_file = Path(export_path)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_file, "w", encoding="utf-8") as f:
+        json.dump(facts, f, indent=2)
+    return f"Exported {len(facts)} memory facts to {export_path}."
+
+
+# Backward compatibility aliases
 MemoryManager = Memory
 

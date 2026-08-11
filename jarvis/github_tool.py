@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime
+from jarvis.error_recovery import recovery
 
 
 class GitHubTool:

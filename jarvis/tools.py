@@ -522,14 +522,32 @@ class ToolRegistry:
                 valid_keys = set(sig.parameters.keys())
                 normalized_args = {k: v for k, v in normalized_args.items() if k in valid_keys}
 
-            if inspect.iscoroutinefunction(fn):
-                result = await fn(**normalized_args)
-            else:
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None, lambda: fn(**normalized_args)
-                )
-            result_str = str(result) if result else "Done."
+            t0 = time.time()
+            try:
+                if inspect.iscoroutinefunction(fn):
+                    result = await fn(**normalized_args)
+                else:
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(
+                        None, lambda: fn(**normalized_args)
+                    )
+                duration = time.time() - t0
+                result_str = str(result) if result else "Done."
+                success = not result_str.startswith("FAILED") and not result_str.startswith("Tool error:")
+                
+                try:
+                    from jarvis.debug_panel import debug
+                    debug.record_tool_call(name, duration, success, result_str)
+                except Exception:
+                    pass
+            except Exception as e:
+                duration = time.time() - t0
+                result_str = f"Tool error: {str(e)}"
+                try:
+                    from jarvis.debug_panel import debug
+                    debug.record_tool_call(name, duration, False, result_str)
+                except Exception:
+                    pass
 
             # State update broadcast hook
             if hasattr(self, 'on_state_change') and callable(self.on_state_change):

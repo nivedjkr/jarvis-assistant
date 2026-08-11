@@ -8,6 +8,7 @@ import httpx
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
 from pathlib import Path
+from jarvis.config_manager import config
 
 # Find .env relative to this file's location
 env_path = Path(__file__).parent.parent / '.env'
@@ -96,17 +97,13 @@ class ConversationSession:
 
 class JarvisAPIClient:
     def __init__(self):
-        cfg = _load_config()
-        model_name = cfg.get("api", {}).get("model", "meta/llama-3.1-8b-instruct")
-        self.client = AsyncOpenAI(
-            base_url="https://integrate.api.nvidia.com/v1",
-            api_key=os.getenv("NVIDIA_NIM_API_KEY"),
-            timeout=httpx.Timeout(connect=15.0, read=120.0, write=30.0, pool=15.0)
-        )
-        self.model = model_name
+        from jarvis.llm_provider import get_provider
+        self.provider = get_provider()
+        self.client = getattr(self.provider, 'client', None)
+        self.model = getattr(self.provider, 'model', 'default-model')
         self.system_prompt = self._load_system_prompt()
-        self.max_messages = 40      # keep last 20 exchanges
-        self.token_budget = 4000    # rough token estimate
+        self.max_messages = config.get('api.max_history_messages', 40)
+        self.token_budget = 4000
         self.sessions: Dict[str, ConversationSession] = {}
         self.default_session = "cli"
         
@@ -116,7 +113,7 @@ class JarvisAPIClient:
         except Exception:
             self.semantic_memory = None
             
-        print(f"[API] Model: {self.model}")
+        print(f"[API] Using Provider: {self.provider.name} | Model: {self.model}")
     
     @property
     def messages(self) -> list:
@@ -292,25 +289,40 @@ NEVER:
         print(f"[PIPELINE] Calling API for session '{session.session_id}' with "
               f"{len(tool_schemas)} tools")
         
+        pipeline_t0 = time.time()
+        try:
+            from jarvis.debug_panel import debug
+            debug.current_status = "THINKING"
+            debug.active_session = session.session_id
+            debug.message_count = len(session.messages)
+            debug.context_tokens = session.get_token_estimate()
+        except Exception:
+            pass
+        
         async def _do_chat():
-            kwargs = {
-                "model": self.model,
-                "messages": messages,
-                "max_tokens": 300,
-                "stream": False,
-                "timeout": httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
-            }
-            if tool_schemas:
-                kwargs["tools"] = tool_schemas
-                kwargs["tool_choice"] = "auto"
-            
-            response = await self.client.chat.completions.create(
-                **kwargs
-            )
-            message = response.choices[0].message
-            
-            print(f"[DEBUG] Has tool calls: "
-                  f"{bool(message.tool_calls)}")
+            api_t0 = time.time()
+            if hasattr(self.provider, 'chat'):
+                response = await self.provider.chat(messages, tools=tool_schemas, max_tokens=300)
+            else:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=tool_schemas,
+                    tool_choice="auto" if tool_schemas else None,
+                    max_tokens=300,
+                    stream=False
+                )
+            api_latency = time.time() - api_t0
+
+            if isinstance(response, str):
+                return response
+
+            choices = getattr(response, 'choices', [])
+            message = choices[0].message if choices else None
+            if not message:
+                return str(response)
+
+            print(f"[DEBUG] Has tool calls: {bool(getattr(message, 'tool_calls', None))}")
             
             if message.tool_calls:
                 tool_calls_data = []
@@ -382,11 +394,26 @@ NEVER:
             response_text = response_text or "Done, sir."
             self.add_assistant_message(response_text, session_id=session_id)
             print(f"[PIPELINE] Response: {repr(response_text)}")
+            
+            try:
+                from jarvis.debug_panel import debug
+                total_duration = time.time() - pipeline_t0
+                est_tokens = len(response_text) // 4 + session.get_token_estimate()
+                debug.record_response(total_duration, tokens=est_tokens, api_latency=api_latency)
+                debug.current_status = "IDLE"
+            except Exception:
+                pass
+
             return response_text
         
         try:
             return await with_retry(_do_chat)
         except Exception as e:
+            try:
+                from jarvis.debug_panel import debug
+                debug.current_status = "IDLE"
+            except Exception:
+                pass
             import traceback
             traceback.print_exc()
             return f"Error: {str(e)}"

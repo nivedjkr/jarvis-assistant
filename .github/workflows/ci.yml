@@ -9,7 +9,6 @@ on:
 jobs:
   test:
     runs-on: windows-latest
-    
     steps:
     - uses: actions/checkout@v4
     
@@ -24,23 +23,23 @@ jobs:
         pip install -r requirements.txt
         pip install pytest pytest-asyncio
     
-    - name: Run tool schema validation
+    - name: Validate tool schemas
       run: |
         python -c "
         from jarvis.tools import ToolRegistry, validate_tool_schemas
         r = ToolRegistry()
-        assert validate_tool_schemas(r), 'Schema validation failed'
-        print(f'OK: {len(r.tools)} tools validated')
+        ok = validate_tool_schemas(r)
+        print(f'Tools: {len(r.tools)}')
+        assert ok
         "
       env:
         NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
     
-    - name: Run tool tests
-      run: python -m pytest jarvis/tests/test_tools.py -v --tb=short
+    - name: Run tests
+      run: pytest jarvis/tests/ -v --tb=short
       env:
         NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
     
-    - name: Check no sensitive files tracked
-      shell: bash
+    - name: Security check
       run: |
-        git ls-files | grep -E "\.env$|\.db$|token" && echo "FAIL: sensitive files tracked" && exit 1 || echo "OK: no sensitive files"
+        git ls-files | findstr /E ".env .db token" >nul 2>&1 && echo FAIL && exit 1 || echo OK
