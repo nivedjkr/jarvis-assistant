@@ -26,7 +26,26 @@ from jarvis.voice import TTSEngine
 from jarvis.diagnostics import run_diagnostics, run_diagnostics_sync
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"])
+
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8765",
+    "http://127.0.0.1:8765",
+    "vscode-webview://*"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+WS_AUTH_TOKEN = os.getenv("JARVIS_WS_TOKEN", "jarvis_secure_local_token_2026")
 
 # Shared instances
 api_client = JarvisAPIClient()
@@ -87,8 +106,27 @@ import uuid
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    # Verify auth token from query params or headers
+    token = ws.query_params.get("token") or ws.headers.get("x-auth-token")
+    if not token or token != WS_AUTH_TOKEN:
+        # Check for auth handshake message
+        await ws.accept()
+        try:
+            auth_data = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+            if auth_data.get("type") == "auth" and auth_data.get("token") == WS_AUTH_TOKEN:
+                token = WS_AUTH_TOKEN
+            else:
+                await ws.send_json({"type": "error", "message": "Authentication failed: Invalid token"})
+                await ws.close(code=1008)
+                return
+        except Exception:
+            await ws.send_json({"type": "error", "message": "Authentication failed: Auth handshake required"})
+            await ws.close(code=1008)
+            return
+    else:
+        await manager.connect(ws)
+
     session_id = f"electron_{uuid.uuid4().hex[:8]}"
-    await manager.connect(ws)
     
     # Run startup health check and send report to desktop client
     report = await run_diagnostics(check_nvidia=True)
@@ -103,6 +141,17 @@ async def websocket_endpoint(ws: WebSocket):
         while True:
             data = await ws.receive_json()
             msg_type = data.get("type", "message")
+            
+            if msg_type == "confirm_action":
+                act_id = data.get("action_id", "")
+                extra = data.get("input", "") or data.get("extra_input", "")
+                res = tool_registry.confirm_action(act_id, extra)
+                await ws.send_json({
+                    "type": "response",
+                    "text": res,
+                    "status": "speaking"
+                })
+                continue
             
             if msg_type == "message" or msg_type == "slash_command":
                 user_msg = data.get("message") or data.get("command") or ""
@@ -121,7 +170,17 @@ async def websocket_endpoint(ws: WebSocket):
                 # Check slash command handling
                 if user_msg.startswith("/"):
                     cmd = user_msg.lower()
-                    if cmd == "/diagnose":
+                    if user_msg.lower().startswith("/confirm"):
+                        parts = user_msg.strip().split(maxsplit=2)
+                        act_id = parts[1] if len(parts) > 1 else ""
+                        extra = parts[2] if len(parts) > 2 else ""
+                        res = tool_registry.confirm_action(act_id, extra)
+                        await ws.send_json({
+                            "type": "response",
+                            "text": res,
+                            "status": "speaking"
+                        })
+                    elif cmd == "/diagnose":
                         diag_report = await run_diagnostics(check_nvidia=True)
                         await ws.send_json({
                             "type": "response",
@@ -228,6 +287,24 @@ async def websocket_endpoint(ws: WebSocket):
                             "status": "speaking"
                         })
                 else:
+                    # Check if there are pending actions awaiting confirmation and user typed an affirmative / confirmation response
+                    if tool_registry.pending_actions:
+                        import re
+                        lower_m = user_msg.lower().strip()
+                        confirm_words = ["confirm", "yes", "yep", "yeah", "proceed", "approve", "do it", "send", "send it", "ok", "okay", "go ahead"]
+                        act_match = re.search(r'act_[a-f0-9]+', lower_m)
+                        
+                        if act_match or any(lower_m == w or lower_m.startswith(w + " ") or lower_m.endswith(" " + w) for w in confirm_words):
+                            act_id = act_match.group(0) if act_match else ""
+                            extra = user_msg.split(maxsplit=1)[1] if " " in user_msg and not act_match else user_msg
+                            res = tool_registry.confirm_action(act_id, extra)
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking"
+                            })
+                            continue
+
                     # Natural language prompt processing with tool tracking
                     executed_tools = []
                     async def tracking_executor(name: str, args: dict) -> str:
@@ -241,28 +318,22 @@ async def websocket_endpoint(ws: WebSocket):
                         session_id=session_id
                     )
                     
-                    # Intent fallback safety: guarantee email tool execution if LLM generated text without calling tool
+                    # Intent fallback safety: ONLY trigger if user explicitly issued a direct command to check email and LLM produced no tool calls
                     if not executed_tools:
-                        lower_msg = user_msg.lower()
-                        if "email" in lower_msg or "gmail" in lower_msg or "inbox" in lower_msg:
-                            import re
-                            if any(k in lower_msg for k in ["send", "sent", "write", "draft", "compose"]):
-                                to_match = re.search(r'(?:to|recipient)\s+([^\s,]+@[^\s,]+\.[^\s,]+)', user_msg, re.I)
-                                to_val = to_match.group(1) if to_match else ""
-                                subj_match = re.search(r'subject\s+[\'"]?([^\'\"]+?)[\'"]?\s+(?:body|message|text|$)', user_msg, re.I)
-                                subj_val = subj_match.group(1) if subj_match else ""
-                                body_match = re.search(r'(?:body|message|text)\s+(.+)$', user_msg, re.I)
-                                body_val = body_match.group(1) if body_match else ""
-                                
-                                args_dict = {"to": to_val, "subject": subj_val, "body": body_val}
-                                res = await tool_registry.execute("send_email", args_dict)
-                                executed_tools.append({"name": "send_email", "args": args_dict})
-                                response = res
-                            elif any(k in lower_msg for k in ["check", "list", "show", "unread"]):
+                        lower_msg = user_msg.lower().strip()
+                        negatives_or_questions = ["don't", "dont", "do not", "never", "stop", "no ", "not ", "how ", "what ", "why ", "explain ", "tell me", "can you"]
+                        if not any(neg in lower_msg for neg in negatives_or_questions):
+                            EXPLICIT_CHECK_COMMANDS = [
+                                "check email", "check my email", "check inbox", "check my inbox",
+                                "check gmail", "check my gmail", "read email", "read my email",
+                                "show email", "show my email", "show unread emails", "list emails",
+                                "list my emails", "get emails", "get unread emails"
+                            ]
+                            if any(cmd == lower_msg or lower_msg.startswith(cmd) for cmd in EXPLICIT_CHECK_COMMANDS):
                                 res = await tool_registry.execute("check_email", {"limit": 5})
                                 executed_tools.append({"name": "check_email", "args": {"limit": 5}})
                                 response = res
-                            elif "summary" in lower_msg or "brief" in lower_msg:
+                            elif "email summary" in lower_msg or "summarize email" in lower_msg:
                                 res = await tool_registry.execute("email_summary", {})
                                 executed_tools.append({"name": "email_summary", "args": {}})
                                 response = res

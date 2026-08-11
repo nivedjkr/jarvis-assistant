@@ -12,7 +12,11 @@ import asyncio
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+from pathlib import Path
+
+root_dir = str(Path(__file__).resolve().parent.parent.parent)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 
 from jarvis.system_monitor import SystemMonitor
 from jarvis.weather import WeatherManager

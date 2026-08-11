@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 
 def run_tests():
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     script_dir = Path(__file__).parent.resolve()
     test_files = sorted([f.name for f in script_dir.glob("test_*.py")])
     print(f"Found {len(test_files)} test files to execute in {script_dir}:\n")
@@ -24,6 +26,8 @@ def run_tests():
             [sys.executable, test_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
             env=env
         )

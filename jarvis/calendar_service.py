@@ -175,7 +175,9 @@ class CalendarService:
             try:
                 # Parse datetime with ISO offset or Z
                 clean_start = start_str.replace("Z", "+00:00")
-                start_dt = datetime.fromisoformat(clean_start).replace(tzinfo=None)
+                start_dt = datetime.fromisoformat(clean_start)
+                if start_dt.tzinfo is not None:
+                    start_dt = start_dt.astimezone().replace(tzinfo=None)
                 diff_minutes = (start_dt - now).total_seconds() / 60.0
 
                 # 10 minute warning (between 9.0 and 11.0 mins)
@@ -196,10 +198,239 @@ class CalendarService:
 
         return alerts
 
-    def format_calendar_command(self, mode: str = "today") -> str:
-        """Format output for /calendar today, /calendar tomorrow, /calendar next."""
+    def _invalidate_cache(self):
+        """Invalidate events cache after mutations."""
+        self.cached_events = []
+        self.last_fetch_time = 0.0
+
+    def create_event(
+        self,
+        summary: str,
+        start_time: str,
+        end_time: Optional[str] = None,
+        location: Optional[str] = None,
+        description: Optional[str] = None,
+        attendees: Optional[List[str]] = None,
+        timezone: str = "UTC"
+    ) -> Dict[str, Any]:
+        """
+        Create a new Google Calendar event.
+        start_time and end_time accept ISO strings (e.g. '2026-08-09T18:00:00') or date strings ('2026-08-09').
+        """
+        service = self._get_service()
+        if not service:
+            return {"error": "Google Calendar is not authenticated."}
+
+        if self.auth_manager and hasattr(self.auth_manager, 'has_calendar_write_scope'):
+            if not self.auth_manager.has_calendar_write_scope():
+                return {
+                    "error": (
+                        "INSUFFICIENT OAUTH PERMISSIONS: Your active Google token only has read access. "
+                        "To create, edit, or delete events, please re-authenticate Google OAuth with full calendar scope by running '/calendar auth' in CLI or deleting jarvis/data/google_token.json."
+                    )
+                }
+
+        # Auto-correct past years (e.g. LLM default 2023 -> current year 2026)
+        current_year = datetime.now().year
+        try:
+            year_str = start_time[:4]
+            if year_str.isdigit():
+                start_year = int(year_str)
+                if start_year < current_year:
+                    start_time = str(current_year) + start_time[4:]
+                    if end_time and end_time[:4].isdigit() and int(end_time[:4]) < current_year:
+                        end_time = str(current_year) + end_time[4:]
+        except Exception:
+            pass
+
+        body: Dict[str, Any] = {
+            "summary": summary
+        }
+        if location:
+            body["location"] = location
+        if description:
+            body["description"] = description
+
+        # Handle start time format
+        if "T" in start_time:
+            body["start"] = {"dateTime": start_time if start_time.endswith("Z") or "+" in start_time else start_time + "Z"}
+        else:
+            body["start"] = {"date": start_time}
+
+        # Handle end time format or default (+1h for dateTime, same day for date)
+        if end_time:
+            if "T" in end_time:
+                body["end"] = {"dateTime": end_time if end_time.endswith("Z") or "+" in end_time else end_time + "Z"}
+            else:
+                body["end"] = {"date": end_time}
+        else:
+            if "dateTime" in body["start"]:
+                try:
+                    dt = datetime.fromisoformat(body["start"]["dateTime"].replace("Z", "+00:00"))
+                    end_dt = dt + timedelta(hours=1)
+                    body["end"] = {"dateTime": end_dt.isoformat()}
+                except Exception:
+                    body["end"] = body["start"]
+            else:
+                body["end"] = body["start"]
+
+        if attendees:
+            body["attendees"] = [{"email": email} for email in attendees if isinstance(email, str)]
+
+        try:
+            created_event = service.events().insert(
+                calendarId="primary",
+                body=body
+            ).execute()
+            self._invalidate_cache()
+            return {
+                "id": created_event.get("id"),
+                "summary": created_event.get("summary"),
+                "start": created_event.get("start", {}).get("dateTime", created_event.get("start", {}).get("date")),
+                "end": created_event.get("end", {}).get("dateTime", created_event.get("end", {}).get("date")),
+                "location": created_event.get("location", ""),
+                "description": created_event.get("description", ""),
+                "htmlLink": created_event.get("htmlLink", "")
+            }
+        except Exception as e:
+            err_str = str(e)
+            if "insufficientPermissions" in err_str or "403" in err_str:
+                return {
+                    "error": (
+                        "INSUFFICIENT OAUTH PERMISSIONS: Google Calendar returned HTTP 403 Insufficient Permission. "
+                        "Your saved token does not have event creation access. Please re-authenticate by running '/calendar auth' in CLI or deleting jarvis/data/google_token.json."
+                    )
+                }
+            return {"error": f"Failed to create calendar event: {err_str}"}
+
+    def update_event(
+        self,
+        event_id: str,
+        summary: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        location: Optional[str] = None,
+        description: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Update an existing event on Google Calendar by ID."""
+        service = self._get_service()
+        if not service:
+            return {"error": "Google Calendar is not authenticated."}
+
+        patch_body: Dict[str, Any] = {}
+        if summary is not None:
+            patch_body["summary"] = summary
+        if location is not None:
+            patch_body["location"] = location
+        if description is not None:
+            patch_body["description"] = description
+        if start_time is not None:
+            if "T" in start_time:
+                patch_body["start"] = {"dateTime": start_time if start_time.endswith("Z") or "+" in start_time else start_time + "Z"}
+            else:
+                patch_body["start"] = {"date": start_time}
+        if end_time is not None:
+            if "T" in end_time:
+                patch_body["end"] = {"dateTime": end_time if end_time.endswith("Z") or "+" in end_time else end_time + "Z"}
+            else:
+                patch_body["end"] = {"date": end_time}
+
+        if not patch_body:
+            return {"error": "No update fields provided."}
+
+        try:
+            updated_event = service.events().patch(
+                calendarId="primary",
+                eventId=event_id,
+                body=patch_body
+            ).execute()
+            self._invalidate_cache()
+            return {
+                "id": updated_event.get("id"),
+                "summary": updated_event.get("summary"),
+                "start": updated_event.get("start", {}).get("dateTime", updated_event.get("start", {}).get("date")),
+                "end": updated_event.get("end", {}).get("dateTime", updated_event.get("end", {}).get("date")),
+                "location": updated_event.get("location", ""),
+                "description": updated_event.get("description", "")
+            }
+        except Exception as e:
+            return {"error": f"Failed to update calendar event: {str(e)}"}
+
+    def delete_event(self, event_id: str) -> bool:
+        """Delete an event from Google Calendar by ID."""
+        service = self._get_service()
+        if not service:
+            return False
+
+        try:
+            service.events().delete(
+                calendarId="primary",
+                eventId=event_id
+            ).execute()
+            self._invalidate_cache()
+            return True
+        except Exception:
+            return False
+
+    def search_events(
+        self,
+        query: str,
+        max_results: int = 10,
+        time_min: Optional[str] = None,
+        time_max: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Search calendar events matching text query."""
+        service = self._get_service()
+        if not service:
+            return []
+
+        try:
+            params: Dict[str, Any] = {
+                "calendarId": "primary",
+                "q": query,
+                "maxResults": max_results,
+                "singleEvents": True,
+                "orderBy": "startTime"
+            }
+            if time_min:
+                params["timeMin"] = time_min if time_min.endswith("Z") else time_min + "Z"
+            if time_max:
+                params["timeMax"] = time_max if time_max.endswith("Z") else time_max + "Z"
+
+            events_result = service.events().list(**params).execute()
+            items = events_result.get("items", [])
+            events = []
+            for item in items:
+                start = item.get("start", {})
+                end = item.get("end", {})
+                events.append({
+                    "id": item.get("id"),
+                    "summary": item.get("summary", "Untitled Event"),
+                    "start": start.get("dateTime", start.get("date")),
+                    "end": end.get("dateTime", end.get("date")),
+                    "location": item.get("location", ""),
+                    "description": item.get("description", "")
+                })
+            return events
+        except Exception:
+            return []
+
+    def format_calendar_command(self, mode: str = "today", query: str = "") -> str:
+        """Format output for /calendar today, /calendar tomorrow, /calendar next, or /calendar search <query>."""
         if not self.auth_manager.is_authenticated():
             return "Google Calendar is not authenticated. Please run Google OAuth setup or place credentials.json in workspace."
+
+        if mode == "search":
+            if not query:
+                return "Please specify a search query, e.g. /calendar search meeting."
+            events = self.search_events(query=query)
+            if not events:
+                return f"No events found matching '{query}', sir."
+            lines = [f"=== Search Results for '{query}' ==="]
+            for idx, evt in enumerate(events, 1):
+                loc = f" — {evt['location']}" if evt.get("location") else ""
+                lines.append(f"{idx}. [{evt['start']}] {evt['summary']}{loc}")
+            return "\n".join(lines)
 
         if mode == "next":
             evt = self.get_next_event()
@@ -237,3 +468,4 @@ class CalendarService:
             lines.append(f"{idx}. [{time_part}] {evt['summary']}{loc}")
 
         return "\n".join(lines)
+

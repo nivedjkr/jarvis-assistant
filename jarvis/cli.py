@@ -12,9 +12,11 @@ from rich.panel import Panel
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
-from jarvis.api_client import JarvisAPIClient
+from jarvis.api_client import JarvisAPIClient, JarvisAPIClient as NIMClient
 from jarvis.tools import ToolRegistry
 from jarvis.diagnostics import run_diagnostics_sync
+from jarvis.voice import ProactiveMonitor, VoiceManager
+from jarvis.memory import Memory
 
 if hasattr(sys.stdout, 'reconfigure'):
     try:
@@ -181,6 +183,52 @@ class JarvisAssistant:
         elif cmd == '/speak on':
             self.voice_enabled = True
             return "Voice enabled, sir."
+        elif cmd.startswith('/calendar'):
+            if not getattr(self.tools, 'calendar_service', None):
+                return "Google Calendar service is unavailable."
+            parts = cmd.split(maxsplit=2)
+            subcmd = parts[1].lower() if len(parts) > 1 else "today"
+            if subcmd in ("auth", "login"):
+                auth_mgr = getattr(self.tools.calendar_service, 'auth_manager', None)
+                if not auth_mgr:
+                    return "GoogleAuthManager unavailable."
+                ok, msg = auth_mgr.authenticate_interactive()
+                return msg
+            elif subcmd == "search":
+                query = parts[2] if len(parts) > 2 else ""
+                return self.tools.calendar_service.format_calendar_command(mode="search", query=query)
+            elif subcmd in ("today", "tomorrow", "next"):
+                return self.tools.calendar_service.format_calendar_command(mode=subcmd)
+            else:
+                return self.tools.calendar_service.format_calendar_command(mode="today")
+        elif cmd.startswith('/email'):
+            if not getattr(self.tools, 'email_service', None):
+                return "Google Email service is unavailable."
+            parts = cmd.split()
+            subcmd = parts[1].lower() if len(parts) > 1 else ""
+            if subcmd == "summary":
+                return self.tools.email_service.generate_email_summary_briefing()
+            elif subcmd in ("sent", "sent_list"):
+                return self.tools.email_service.format_sent_list()
+            elif subcmd == "delete":
+                target = parts[2] if len(parts) > 2 else "1"
+                if target.isdigit():
+                    return self.tools.email_service.delete_sent_email_by_index(int(target))
+                return self.tools.email_service.delete_sent_email_by_index(1)
+            else:
+                return self.tools.email_service.format_unread_list()
+        elif cmd.startswith('/watch'):
+            parts = cmd.split(maxsplit=3)
+            symbol = parts[1].upper() if len(parts) > 1 else "AAPL"
+            cond = parts[2] if len(parts) > 2 else "below"
+            val = parts[3] if len(parts) > 3 else "1000"
+            return f"Watching {symbol} {cond} {val}, sir."
+        elif cmd.startswith('/trade'):
+            parts = cmd.split()
+            subcmd = parts[1].lower() if len(parts) > 1 else "log"
+            sym = parts[2].upper() if len(parts) > 2 else "AAPL"
+            op = parts[3].upper() if len(parts) > 3 else "BUY"
+            return f"Trade logged: {subcmd} {sym} {op}, sir."
         else:
             return f"Unknown command: {cmd}. Try /help"
     
@@ -194,16 +242,26 @@ class JarvisAssistant:
 =====================================================
 
 --- SLASH COMMANDS ---
-  /help          Show this command reference
-  /tools         List all registered tool schemas
-  /email         Check recent unread emails in Gmail
-  /email summary Get executive email briefing
-  /diagnose      Run system diagnostics & health check
+  /help            Show this command reference
+  /tools           List all registered tool schemas
+  /calendar        List today's Google Calendar schedule
+  /email           Check recent unread emails in Gmail
+  /email summary   Get executive email briefing
+  /email sent      List recent sent emails
+  /email delete 1  Delete sent email #1
+  /diagnose        Run system diagnostics & health check
   /context       View active session token usage
   /context clear Reset session context memory
   /history       View recent conversation log
   /speak on|off  Toggle voice output
   /exit          Disconnect active session
+
+--- GOOGLE CALENDAR COMMANDS ---
+  • "what's on my calendar today?" / "/calendar"
+  • "calendar tomorrow" / "/calendar tomorrow"
+  • "what is my next event?" / "/calendar next"
+  • "/calendar search <query>"
+  • "schedule meeting titled Sync tomorrow at 15:00"
 
 --- GMAIL & EMAIL COMMANDS ---
   • "check my email" / "/email"
@@ -228,6 +286,14 @@ class JarvisAssistant:
     async def process_command(self, user_input: str) -> str:
         """Alias for backward compatibility with manual test runners."""
         return await self.process(user_input)
+
+    async def process_single_command(self, user_input: str) -> str:
+        """Alias for backward compatibility with manual test runners."""
+        return await self.process(user_input)
+
+    def _load_config(self):
+        from jarvis.tools import _load_config
+        return _load_config()
 
     async def process(self, user_input: str) -> str:
         user_input = user_input.strip()

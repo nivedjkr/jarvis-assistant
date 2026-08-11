@@ -153,7 +153,8 @@ class SystemMonitor:
         if cpu_pct > 85.0:
             self.consecutive_high_cpu_count += 1
             if self.consecutive_high_cpu_count >= 2:
-                msg = f"CPU usage sustained at {cpu_pct:.1f}% for {self.consecutive_high_cpu_count * 30} seconds, sir."
+                duration_sec = self.consecutive_high_cpu_count * 2
+                msg = f"CPU usage sustained at {cpu_pct:.1f}% for {duration_sec} seconds, sir."
                 alert = {"type": "cpu", "level": "warning", "message": msg, "timestamp": now_str}
                 alerts.append(alert)
                 self.anomaly_log.append(alert)

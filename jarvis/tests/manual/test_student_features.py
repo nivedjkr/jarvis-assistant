@@ -8,6 +8,12 @@ from datetime import datetime, timedelta
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
+from pathlib import Path
+
+root_dir = str(Path(__file__).resolve().parent.parent.parent)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 print("Testing Student Features (Phase 1)...\n")
 
 from jarvis.cli import JARVISCLI

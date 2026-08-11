@@ -203,8 +203,13 @@ def check_google_auth(report: HealthCheckReport) -> HealthCheckItem:
         creds = manager.get_credentials()
         
         if creds and creds.valid:
-            item.status = "PASS"
-            item.message = "Google OAuth2 credentials valid."
+            if hasattr(manager, 'has_calendar_write_scope') and not manager.has_calendar_write_scope():
+                item.status = "WARN"
+                item.message = "Google OAuth token valid for read-only access (Calendar write scope missing)."
+                item.fix_recommendation = "Re-authenticate with full calendar permissions by running '/calendar auth' in CLI or deleting jarvis/data/google_token.json."
+            else:
+                item.status = "PASS"
+                item.message = "Google OAuth2 credentials valid with full Calendar & Gmail permissions."
         elif manager.credentials_path.exists():
             item.status = "WARN"
             item.message = "credentials.json found, but active OAuth token is unauthenticated or expired."

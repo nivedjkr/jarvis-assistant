@@ -13,20 +13,23 @@ from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 
 
+_THREAD_LOCAL = threading.local()
 _DB_CONNECTIONS: Dict[str, sqlite3.Connection] = {}
 _DB_CONNECTIONS_LOCK = threading.Lock()
 
 
 def get_shared_db_connection(db_path: str = "jarvis/data/jarvis.db") -> sqlite3.Connection:
-    """Get cached shared SQLite database connection with Row factory"""
-    global _DB_CONNECTIONS
+    """Get thread-local SQLite database connection with Row factory and busy timeout."""
     norm_path = os.path.normpath(db_path)
-    with _DB_CONNECTIONS_LOCK:
-        if norm_path not in _DB_CONNECTIONS:
-            conn = sqlite3.connect(norm_path, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            _DB_CONNECTIONS[norm_path] = conn
-        return _DB_CONNECTIONS[norm_path]
+    if not hasattr(_THREAD_LOCAL, "connections"):
+        _THREAD_LOCAL.connections = {}
+    if norm_path not in _THREAD_LOCAL.connections:
+        conn = sqlite3.connect(norm_path, timeout=10.0, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        _THREAD_LOCAL.connections[norm_path] = conn
+        with _DB_CONNECTIONS_LOCK:
+            _DB_CONNECTIONS[f"{threading.get_ident()}_{norm_path}"] = conn
+    return _THREAD_LOCAL.connections[norm_path]
 
 
 def close_shared_db_connections():
@@ -39,6 +42,8 @@ def close_shared_db_connections():
             except Exception:
                 pass
         _DB_CONNECTIONS.clear()
+        if hasattr(_THREAD_LOCAL, "connections"):
+            _THREAD_LOCAL.connections.clear()
 
 
 class Memory:

@@ -7,6 +7,12 @@ import asyncio
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
+from pathlib import Path
+
+root_dir = str(Path(__file__).resolve().parents[3])
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 print("Testing JARVIS Exact-String File Read Grounding & Anti-Fabrication...\n")
 
 from jarvis.cli import JARVISCLI

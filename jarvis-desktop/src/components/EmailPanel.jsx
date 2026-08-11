@@ -2,16 +2,22 @@ import React, { useState, useEffect } from 'react'
 import './EmailPanel.css'
 
 export default function EmailPanel({ isConnected = true, lastStateUpdate = null }) {
+  const [activeTab, setActiveTab] = useState('inbox')
   const [emails, setEmails] = useState([])
+  const [sentEmails, setSentEmails] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [flashing, setFlashing] = useState(false)
 
   // Initial load on mount or connection
   useEffect(() => {
-    if (isConnected && window.jarvis?.checkEmail) {
-      window.jarvis.checkEmail()
+    if (isConnected) {
+      if (activeTab === 'inbox' && window.jarvis?.checkEmail) {
+        window.jarvis.checkEmail()
+      } else if (activeTab === 'sent' && window.jarvis?.listSentEmails) {
+        window.jarvis.listSentEmails()
+      }
     }
-  }, [isConnected])
+  }, [isConnected, activeTab])
 
   // Listen for real-time WebSocket state_update events for domain "email"
   useEffect(() => {
@@ -29,42 +35,83 @@ export default function EmailPanel({ isConnected = true, lastStateUpdate = null 
   }, [lastStateUpdate])
 
   const handleManualRefresh = () => {
-    if (window.jarvis?.checkEmail) {
+    if (activeTab === 'inbox' && window.jarvis?.checkEmail) {
       window.jarvis.checkEmail()
+    } else if (activeTab === 'sent' && window.jarvis?.listSentEmails) {
+      window.jarvis.listSentEmails()
     }
   }
+
+  const handleDeleteSent = (idx) => {
+    if (window.jarvis?.deleteSentEmail) {
+      window.jarvis.deleteSentEmail(idx + 1)
+    } else if (window.jarvis?.sendSlashCommand) {
+      window.jarvis.sendSlashCommand(`/email delete ${idx + 1}`)
+    }
+  }
+
+  const displayList = activeTab === 'inbox' ? emails : sentEmails
 
   return (
     <div className={`email-panel-container ${flashing ? 'state-flash-highlight' : ''}`}>
       <div className="email-panel-header">
-        <span className="email-panel-title">GMAIL INBOX</span>
+        <div className="email-tab-group">
+          <button 
+            className={`email-tab-btn ${activeTab === 'inbox' ? 'active' : ''}`}
+            onClick={() => setActiveTab('inbox')}
+          >
+            INBOX
+          </button>
+          <button 
+            className={`email-tab-btn ${activeTab === 'sent' ? 'active' : ''}`}
+            onClick={() => setActiveTab('sent')}
+          >
+            SENT
+          </button>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span className="email-unread-badge">
-            {unreadCount} UNREAD
-          </span>
-          <button className="email-refresh-btn" onClick={handleManualRefresh} title="Refresh Inbox">
+          {activeTab === 'inbox' && (
+            <span className="email-unread-badge">
+              {unreadCount} UNREAD
+            </span>
+          )}
+          <button className="email-refresh-btn" onClick={handleManualRefresh} title="Refresh">
             ↻
           </button>
         </div>
       </div>
 
       <div className="email-card-list">
-        {emails.length === 0 ? (
+        {displayList.length === 0 ? (
           <div className="email-empty-state">
             <span className="email-empty-icon">✉</span>
-            <span>NO UNREAD EMAILS CARDS</span>
-            <span className="email-empty-sub">Ask "check my email" to update inbox</span>
+            <span>{activeTab === 'inbox' ? 'NO UNREAD EMAILS' : 'NO SENT EMAILS'}</span>
+            <span className="email-empty-sub">
+              {activeTab === 'inbox' ? 'Ask "check my email" to update inbox' : 'Ask "/email sent" to view sent mails'}
+            </span>
           </div>
         ) : (
-          emails.map((item, idx) => {
+          displayList.map((item, idx) => {
             const urgencyClass = (item.urgency || 'normal').toLowerCase()
             return (
               <div key={item.id || idx} className="email-card">
                 <div className="email-card-header">
-                  <span className="email-sender">{item.sender || 'Unknown Sender'}</span>
-                  <span className={`email-urgency-tag ${urgencyClass}`}>
-                    {item.urgency ? item.urgency.toUpperCase() : 'NORMAL'}
+                  <span className="email-sender">
+                    {activeTab === 'inbox' ? (item.sender || 'Unknown Sender') : (`To: ${item.recipient || item.to || 'Unknown'}`)}
                   </span>
+                  {activeTab === 'inbox' ? (
+                    <span className={`email-urgency-tag ${urgencyClass}`}>
+                      {item.urgency ? item.urgency.toUpperCase() : 'NORMAL'}
+                    </span>
+                  ) : (
+                    <button 
+                      className="email-delete-btn" 
+                      onClick={() => handleDeleteSent(idx)} 
+                      title="Delete Sent Email"
+                    >
+                      ✕ Delete
+                    </button>
+                  )}
                 </div>
                 <div className="email-subject">{item.subject || 'No Subject'}</div>
                 {item.snippet && (

@@ -183,13 +183,14 @@ class WeatherManager:
                 return f"Unable to fetch weather forecast: {msg}"
 
             # Filter forecast items for tomorrow (approx 24h ahead)
-            tomorrow_str = (datetime.now().day + 1)
+            from datetime import timedelta
+            tomorrow_date = (datetime.now() + timedelta(days=1)).date()
             tomorrow_items = []
             for item in f_data.get("list", []):
                 dt_txt = item.get("dt_txt", "")
                 try:
                     dt_obj = datetime.strptime(dt_txt, "%Y-%m-%d %H:%M:%S")
-                    if dt_obj.day == tomorrow_str:
+                    if dt_obj.date() == tomorrow_date:
                         tomorrow_items.append(item)
                 except ValueError:
                     pass

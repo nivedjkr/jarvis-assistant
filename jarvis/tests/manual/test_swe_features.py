@@ -10,6 +10,10 @@ from pathlib import Path
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
+root_dir = str(Path(__file__).resolve().parents[3])
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 print("Testing Software Engineer Features (Phase 2)...\n")
 
 from jarvis.cli import JARVISCLI

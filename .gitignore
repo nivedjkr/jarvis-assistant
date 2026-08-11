@@ -81,4 +81,5 @@ jarvis/data/awareness_seen.json
 # Logs
 *.log
 .pytest_cache/
+test_project_workspace/
 

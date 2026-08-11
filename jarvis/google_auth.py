@@ -12,9 +12,11 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 SCOPES: List[str] = [
+    "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send"
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify"
 ]
 
 
@@ -36,12 +38,12 @@ class GoogleAuthManager:
         """
         Retrieve valid Google OAuth2 credentials.
         Refreshes expired tokens if possible.
-        Returns None if credentials.json or token is missing/unconfigured.
+        Returns None if credentials.json or token is missing/unconfigured/unrefreshable.
         """
         creds = None
         if self.token_path.exists():
             try:
-                creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
+                creds = Credentials.from_authorized_user_file(str(self.token_path))
             except Exception:
                 creds = None
 
@@ -63,6 +65,21 @@ class GoogleAuthManager:
         """Check if valid Google credentials are ready for use."""
         creds = self.get_credentials()
         return creds is not None and creds.valid
+
+    def has_calendar_write_scope(self) -> bool:
+        """Check if the active credentials possess Google Calendar write permissions."""
+        creds = self.get_credentials()
+        if not creds or not creds.valid:
+            return False
+        write_scope = "https://www.googleapis.com/auth/calendar"
+        if hasattr(creds, 'has_scopes'):
+            try:
+                return creds.has_scopes([write_scope])
+            except Exception:
+                pass
+        if hasattr(creds, 'scopes') and creds.scopes:
+            return write_scope in creds.scopes
+        return True
 
     def authenticate_interactive(self) -> tuple[bool, str]:
         """

@@ -282,7 +282,8 @@ function connectWebSocket() {
     return
   }
   try {
-    ws = new WebSocket('ws://127.0.0.1:8765/ws')
+    const wsToken = process.env.JARVIS_WS_TOKEN || 'jarvis_secure_local_token_2026'
+    ws = new WebSocket(`ws://127.0.0.1:8765/ws?token=${wsToken}`)
     
     ws.on('open', () => {
       console.log('[WS] Connected to JARVIS backend')

@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('jarvis', {
   getWatchlist: () => ipcRenderer.invoke('get-watchlist'),
   getVitals: () => ipcRenderer.invoke('get-vitals'),
   checkEmail: () => ipcRenderer.invoke('check-email'),
+  listSentEmails: () => ipcRenderer.invoke('send-slash-command', '/email sent'),
+  deleteSentEmail: (index = 1) => ipcRenderer.invoke('send-slash-command', `/email delete ${index}`),
 
   minimize: () => ipcRenderer.invoke('window-minimize'),
   close: () => ipcRenderer.invoke('window-close')

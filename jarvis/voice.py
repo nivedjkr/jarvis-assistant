@@ -499,6 +499,7 @@ class AudioRecorder:
                 self.audio_data.append(indata.copy())
         
         try:
+            import sounddevice as sd
             device_kwargs = {}
             if self.device is not None:
                 device_kwargs['device'] = self.device

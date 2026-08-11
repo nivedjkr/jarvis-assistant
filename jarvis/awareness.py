@@ -216,7 +216,8 @@ class GlobalAwarenessManager:
             "(e.g. major tech breakthrough, critical vulnerability, major industry event) "
             "versus routine blog posts.\n"
             f"If notable, craft a conversational spoken alert for the user (addressed as '{user_title}'). "
-            "Start naturally with 'Thought you'd want to know, [honorific] — [conversational 1-sentence summary]'. "
+            "Prefer question-phrased alerts or offering help over plain statement dumps where it fits naturally "
+            "(e.g. 'Sir, [item/update summary] — shall I look into the details for you?'). "
             "Do NOT output a raw headline dump.\n"
             "Respond ONLY with a JSON object: {\"score\": <1-10 integer>, \"one_liner\": \"<Conversational spoken alert>\"}"
         )
@@ -237,13 +238,13 @@ class GlobalAwarenessManager:
                     data = json.loads(match.group(0))
                     score = int(data.get("score", 5))
                     one_liner = str(data.get("one_liner", article["title"])).strip()
-                    if not (one_liner.startswith("Thought") or one_liner.startswith("Just")):
-                        one_liner = f"Thought you'd want to know, {user_title} — {one_liner}"
+                    if not (one_liner.startswith("Thought") or one_liner.startswith("Just") or one_liner.startswith("Sir")):
+                        one_liner = f"Sir, {one_liner}"
                     return score, one_liner
         except Exception as e:
             console.print(f"[dim yellow]LLM scoring failed: {e}[/dim yellow]")
 
-        return 7, f"Thought you'd want to know, {user_title} — {article['title']}."
+        return 7, f"Sir, {article['title']} — shall I look into the details for you?"
 
     async def check_news(self) -> List[Dict[str, Any]]:
         """
@@ -486,8 +487,8 @@ def detect_stock_velocity_anomaly(
                 depletion_str = estimated_depletion_dt.strftime("%b %d, %Y")
 
                 alert_text = (
-                    f"{item_name} (SKU: {sku}) is selling roughly {ratio:.1f}x faster than usual this week — "
-                    f"at this pace it'll run out around {depletion_str}, ahead of your normal reorder cycle."
+                    f"Sir, {item_name} (SKU: {sku}) is running low faster than usual, selling roughly {ratio:.1f}x faster this week — "
+                    f"at this pace it'll run out around {depletion_str}. Shall I place a reorder?"
                 )
 
                 alert_obj = {
