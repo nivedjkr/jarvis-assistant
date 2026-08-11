@@ -4,6 +4,7 @@ import json
 import asyncio
 import time
 import uuid
+import inspect
 import httpx
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
@@ -313,6 +314,9 @@ NEVER:
                     stream=False
                 )
             api_latency = time.time() - api_t0
+
+            while inspect.isawaitable(response):
+                response = await response
 
             if isinstance(response, str):
                 return response

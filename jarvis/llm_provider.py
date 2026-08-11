@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from openai import AsyncOpenAI
 import os
+import inspect
 from typing import List, Dict, Any, Optional
 from jarvis.config_manager import config
 from jarvis.error_recovery import recovery
@@ -43,12 +44,15 @@ class NVIDIAProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
-        return await recovery.call_with_recovery(
+        res = await recovery.call_with_recovery(
             self.name,
             self.client.chat.completions.create,
             "API temporarily unavailable, sir.",
             **kwargs
         )
+        while inspect.isawaitable(res):
+            res = await res
+        return res
 
 class GroqProvider(LLMProvider):
     def __init__(self):
@@ -72,12 +76,15 @@ class GroqProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
-        return await recovery.call_with_recovery(
+        res = await recovery.call_with_recovery(
             self.name,
             self.client.chat.completions.create,
             "Groq API temporarily unavailable, sir.",
             **kwargs
         )
+        while inspect.isawaitable(res):
+            res = await res
+        return res
 
 class AnthropicProvider(LLMProvider):
     def __init__(self):
@@ -111,12 +118,15 @@ class AnthropicProvider(LLMProvider):
             "messages": msgs
         }
 
-        return await recovery.call_with_recovery(
+        res = await recovery.call_with_recovery(
             self.name,
             self.client.messages.create,
             "Anthropic API temporarily unavailable, sir.",
             **kwargs
         )
+        while inspect.isawaitable(res):
+            res = await res
+        return res
 
 class OllamaProvider(LLMProvider):
     def __init__(self):
@@ -139,12 +149,15 @@ class OllamaProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
 
-        return await recovery.call_with_recovery(
+        res = await recovery.call_with_recovery(
             self.name,
             self.client.chat.completions.create,
             "Local Ollama service unavailable, sir.",
             **kwargs
         )
+        while inspect.isawaitable(res):
+            res = await res
+        return res
 
 def get_provider(name: Optional[str] = None) -> LLMProvider:
     providers = {
