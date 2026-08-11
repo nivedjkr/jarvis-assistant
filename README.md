@@ -98,21 +98,31 @@ JARVIS/
 ├── requirements.txt            ← Python dependencies (FastAPI, FAISS, edge-tts, etc.)
 ├── README.md                   ← Master project documentation
 │
+├── docs/                       ← Detailed Technical Documentation
+│   ├── ARCHITECTURE.md         ← System architecture & data flow diagrams
+│   ├── SETUP.md                ← Step-by-step installation & environment configuration
+│   └── TOOLS.md                ← Complete reference catalog of ~59 tools
+│
 ├── jarvis/                     ← Core Python Backend Engine
 │   ├── __init__.py             ← Package initialization
 │   ├── __main__.py             ← CLI entrypoint wrapper
 │   ├── api.py                  ← FastAPI + WebSocket bridge server (port 8765)
-│   ├── api_client.py           ← NVIDIA NIM API client (Nemotron model)
+│   ├── api_client.py           ← LLM API client with provider abstraction
 │   ├── apps.py                 ← Application controller & launcher
 │   ├── awareness.py            ← Proactive awareness & news surfacing engine
 │   ├── calendar_service.py     ← Google Calendar integration & event manager
 │   ├── cli.py                  ← Terminal CLI runner with rich formatting
+│   ├── config_manager.py       ← Central configuration system singleton
+│   ├── debug_panel.py          ← Real-time rich developer live debug dashboard
 │   ├── diagnostics.py          ← System diagnostics, health checks & self-healing
 │   ├── email_service.py        ← Email service & Gmail integration
+│   ├── error_recovery.py       ← Circuit breakers & retry mechanism
 │   ├── github_tool.py          ← GitHub CLI (`gh`) & repository workflow manager
 │   ├── google_auth.py          ← Google OAuth 2.0 authentication helper
+│   ├── health.py               ← Multi-service async startup health checker
+│   ├── llm_provider.py         ← Unified provider layer (NVIDIA, Groq, Anthropic, Ollama)
 │   ├── mcp_client.py           ← Model Context Protocol (MCP) client bridge
-│   ├── memory.py               ← SQLite persistent state & fact memory engine
+│   ├── memory.py               ← SQLite persistent state, fact memory & CRUD engine
 │   ├── projects.py             ← Task manager, project switcher & decision log
 │   ├── protocols.py            ← Automated multi-step macro protocols runner
 │   ├── semantic_memory.py      ← FAISS vector index & sentence-transformer embeddings
@@ -213,9 +223,13 @@ python -m jarvis.cli
 |---------|--------|
 | `/help` | Display comprehensive command summary & usage examples |
 | `/tools` | List all 59 active backend execution tool schemas |
+| `/config` | View, set, save, or reload configuration settings (`show`, `set`, `save`, `reset`) |
+| `/memory` | Fact CRUD management (`stats`, `list`, `delete`, `edit`, `clear`, `search`, `export`) |
+| `/debug` | Toggle live developer debug panel (`on`, `off`) |
+| `/provider` | Switch active LLM provider (`nvidia`, `groq`, `anthropic`, `ollama`) |
 | `/email` | Check recent unread emails in Gmail |
 | `/email summary` | Get executive email summary briefing |
-| `/diagnose` | Run comprehensive system health check & diagnostics |
+| `/diagnose` | Run comprehensive multi-service health check & diagnostics |
 | `/context` | Display session token count and message stats |
 | `/context clear` | Clear active conversation context memory |
 | `/history` | View recent conversation history |
