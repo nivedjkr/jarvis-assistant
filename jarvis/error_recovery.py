@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import inspect
 import time
 from typing import Callable, Any, Dict, Optional
 
@@ -95,10 +96,12 @@ class ErrorRecovery:
                     f"Trying again in a few minutes, sir.")
         
         try:
-            if asyncio.iscoroutinefunction(func):
+            if inspect.iscoroutinefunction(func):
                 result = await func(*args, **kwargs)
             else:
                 result = func(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    result = await result
             self.record_success(service)
             return result
         except Exception as e:
