@@ -198,6 +198,16 @@ OBSIDIAN & NOTE INSTRUCTIONS:
 - To append text or log entries to any existing note: call append_obsidian_note tool.
 - To append a log entry or note to today's daily note: call append_daily_note tool.
 
+CODING & DEBUG-LOOP INSTRUCTIONS:
+- Before making code edits in an unfamiliar project, call `inspect_project` first to understand project structure, entry points, and test framework.
+- When asked to fix a bug, implement a feature, or resolve failing tests, follow the verified Debug Loop:
+  1. Locate/inspect project files and test suites (`inspect_project`).
+  2. Run tests to observe exact failure tracebacks (`run_tests`).
+  3. Apply targeted code modifications.
+  4. Re-run `run_tests` to verify if the fix succeeded.
+  5. Repeat edit -> test loop up to 5 iterations max before reporting results.
+- NEVER claim a fix or build is complete without calling `run_tests` or verifying runtime execution output.
+
 
 NEVER:
 - Generate OAuth flows, login pages, fake authentication
@@ -328,130 +338,132 @@ NEVER:
         
         async def _do_chat():
             api_t0 = time.time()
-            if hasattr(self.provider, 'chat'):
-                response = await self.provider.chat(messages, tools=tool_schemas, max_tokens=300)
-            else:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    tools=tool_schemas,
-                    tool_choice="auto" if tool_schemas else None,
-                    max_tokens=300,
-                    stream=False
-                )
-            api_latency = time.time() - api_t0
+            max_turns = 5
+            current_turn = 0
+            final_response_text = ""
 
-            while inspect.isawaitable(response):
-                response = await response
+            while current_turn < max_turns:
+                current_turn += 1
+                if hasattr(self.provider, 'chat'):
+                    response = await self.provider.chat(messages, tools=tool_schemas, max_tokens=300)
+                else:
+                    response = await self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        tools=tool_schemas,
+                        tool_choice="auto" if tool_schemas else None,
+                        max_tokens=300,
+                        stream=False
+                    )
 
-            if isinstance(response, str):
-                lower_resp = response.lower()
-                is_err = any(k in lower_resp for k in ["unavailable", "authentication failed", "circuit open", "error:"])
-                if is_err:
-                    # Attempt provider failover if alternative keys exist
-                    from jarvis.llm_provider import GroqProvider, OllamaProvider, NVIDIAProvider
-                    current_name = getattr(self.provider, 'name', '')
-                    fallbacks = []
-                    if "Groq" not in current_name and os.getenv("GROQ_API_KEY"):
-                        fallbacks.append(GroqProvider)
-                    if "Ollama" not in current_name:
-                        fallbacks.append(OllamaProvider)
-                    if "NVIDIA" not in current_name and os.getenv("NVIDIA_NIM_API_KEY"):
-                        fallbacks.append(NVIDIAProvider)
+                while inspect.isawaitable(response):
+                    response = await response
 
-                    for fb_cls in fallbacks:
-                        try:
-                            fb_prov = fb_cls()
-                            print(f"[FAILOVER] Primary provider ({current_name}) failed. Attempting failover to {fb_prov.name}...")
-                            fb_res = await fb_prov.chat(messages, tools=tool_schemas, max_tokens=300)
-                            while inspect.isawaitable(fb_res):
-                                fb_res = await fb_res
-                            if not isinstance(fb_res, str) or not any(k in fb_res.lower() for k in ["unavailable", "authentication failed", "circuit open"]):
-                                print(f"[FAILOVER] Successfully recovered using {fb_prov.name}")
-                                response = fb_res
-                                break
-                        except Exception as fb_err:
-                            print(f"[FAILOVER] {fb_cls.__name__} failed: {fb_err}")
+                if isinstance(response, str):
+                    lower_resp = response.lower()
+                    is_err = any(k in lower_resp for k in ["unavailable", "authentication failed", "circuit open", "error:"])
+                    if is_err:
+                        from jarvis.llm_provider import GroqProvider, OllamaProvider, NVIDIAProvider
+                        current_name = getattr(self.provider, 'name', '')
+                        fallbacks = []
+                        if "Groq" not in current_name and os.getenv("GROQ_API_KEY"):
+                            fallbacks.append(GroqProvider)
+                        if "Ollama" not in current_name:
+                            fallbacks.append(OllamaProvider)
+                        if "NVIDIA" not in current_name and os.getenv("NVIDIA_NIM_API_KEY"):
+                            fallbacks.append(NVIDIAProvider)
 
-            if isinstance(response, str):
-                return response
+                        for fb_cls in fallbacks:
+                            try:
+                                fb_prov = fb_cls()
+                                print(f"[FAILOVER] Primary provider ({current_name}) failed. Attempting failover to {fb_prov.name}...")
+                                fb_res = await fb_prov.chat(messages, tools=tool_schemas, max_tokens=300)
+                                while inspect.isawaitable(fb_res):
+                                    fb_res = await fb_res
+                                if not isinstance(fb_res, str) or not any(k in fb_res.lower() for k in ["unavailable", "authentication failed", "circuit open"]):
+                                    print(f"[FAILOVER] Successfully recovered using {fb_prov.name}")
+                                    response = fb_res
+                                    break
+                            except Exception as fb_err:
+                                print(f"[FAILOVER] {fb_cls.__name__} failed: {fb_err}")
 
+                if isinstance(response, str):
+                    final_response_text = response
+                    break
 
-            choices = getattr(response, 'choices', [])
-            message = choices[0].message if choices else None
-            if not message:
-                return str(response)
+                choices = getattr(response, 'choices', [])
+                message = choices[0].message if choices else None
+                if not message:
+                    final_response_text = str(response)
+                    break
 
-            print(f"[DEBUG] Has tool calls: {bool(getattr(message, 'tool_calls', None))}")
-            
-            if message.tool_calls:
-                tool_calls_data = []
-                for tc in message.tool_calls:
-                    tool_calls_data.append({
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    })
-                messages.append({
-                    "role": "assistant",
-                    "content": message.content or "",
-                    "tool_calls": tool_calls_data
-                })
+                print(f"[DEBUG Turn {current_turn}] Has tool calls: {bool(getattr(message, 'tool_calls', None))}")
                 
-                tool_results = []
-                max_allowed_calls = 5
-                tool_calls_list = list(message.tool_calls)
-                calls_to_process = tool_calls_list[:max_allowed_calls]
-                overflow_count = len(tool_calls_list) - max_allowed_calls
-                
-                for tc in calls_to_process:
-                    name = tc.function.name
-                    try:
-                        args = json.loads(tc.function.arguments)
-                    except Exception:
-                        args = {}
-                    
-                    print(f"[TOOL] >>> {name}({args})")
-                    result = await tool_executor(name, args)
-                    print(f"[TOOL] <<< {repr(result)[:200]}")
-                    tool_results.append(result)
-                    
+                if message.tool_calls:
+                    tool_calls_data = []
+                    for tc in message.tool_calls:
+                        tool_calls_data.append({
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        })
                     messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": str(result)
+                        "role": "assistant",
+                        "content": message.content or "",
+                        "tool_calls": tool_calls_data
                     })
                     
-                    # Pause loop immediately if risky tool requires confirmation
-                    if "PENDING_CONFIRMATION" in str(result) or "CONFIRMATION REQUIRED" in str(result):
-                        print(f"[PIPELINE] Risky tool '{name}' requires confirmation. Halting loop.")
-                        break
+                    tool_results = []
+                    max_allowed_calls = 5
+                    tool_calls_list = list(message.tool_calls)
+                    calls_to_process = tool_calls_list[:max_allowed_calls]
+                    overflow_count = len(tool_calls_list) - max_allowed_calls
+                    
+                    for tc in calls_to_process:
+                        name = tc.function.name
+                        try:
+                            args = json.loads(tc.function.arguments)
+                        except Exception:
+                            args = {}
+                        
+                        print(f"[TOOL Turn {current_turn}] >>> {name}({args})")
+                        result = await tool_executor(name, args)
+                        print(f"[TOOL Turn {current_turn}] <<< {repr(result)[:200]}")
+                        tool_results.append(result)
+                        
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": str(result)
+                        })
+                        
+                        if "PENDING_CONFIRMATION" in str(result) or "CONFIRMATION REQUIRED" in str(result):
+                            print(f"[PIPELINE] Risky tool '{name}' requires confirmation. Halting loop.")
+                            break
 
-                if overflow_count > 0 and not any("PENDING_CONFIRMATION" in str(r) or "CONFIRMATION REQUIRED" in str(r) for r in tool_results):
-                    cap_notice = f"\n\n[NOTICE] Reached turn execution cap of {max_allowed_calls} tool calls. {overflow_count} remaining call(s) paused requiring user approval."
-                    tool_results.append(cap_notice)
-                
-                # If tool returned a confirmation prompt, reached turn cap, or detailed readout, return tool output directly
-                if any("PENDING_CONFIRMATION" in str(r) or "CONFIRMATION REQUIRED" in str(r) for r in tool_results):
-                    response_text = "\n\n".join(str(r) for r in tool_results)
-                elif overflow_count > 0:
-                    response_text = "\n\n".join(str(r) for r in tool_results)
-                elif any(str(r).startswith("===") or str(r).startswith("From:") or str(r).startswith("Found ") or str(r).startswith("Contents of") for r in tool_results):
-                    response_text = "\n\n".join(str(r) for r in tool_results)
+                    if overflow_count > 0 and not any("PENDING_CONFIRMATION" in str(r) or "CONFIRMATION REQUIRED" in str(r) for r in tool_results):
+                        cap_notice = f"\n\n[NOTICE] Reached tool call execution cap of {max_allowed_calls} calls. {overflow_count} remaining call(s) paused requiring user approval."
+                        tool_results.append(cap_notice)
+                    
+                    if any("PENDING_CONFIRMATION" in str(r) or "CONFIRMATION REQUIRED" in str(r) for r in tool_results):
+                        final_response_text = "\n\n".join(str(r) for r in tool_results)
+                        break
+                    elif overflow_count > 0:
+                        final_response_text = "\n\n".join(str(r) for r in tool_results)
+                        break
                 else:
-                    response_text = await self._stream_response(messages, max_tokens=300)
-            
-            else:
-                if message.content:
-                    response_text = message.content
-                    print(response_text)
-                else:
-                    response_text = await self._stream_response(messages, max_tokens=300)
-            
-            response_text = response_text or "Done, sir."
+                    if message.content:
+                        final_response_text = message.content
+                        print(final_response_text)
+                    else:
+                        final_response_text = await self._stream_response(messages, max_tokens=300)
+                    break
+
+            api_latency = time.time() - api_t0
+            response_text = final_response_text or "Done, sir."
             self.add_assistant_message(response_text, session_id=session_id)
             print(f"[PIPELINE] Response: {repr(response_text)}")
             

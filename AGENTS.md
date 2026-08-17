@@ -84,9 +84,18 @@ against the actual code. Before saying something works:
 - The `gh` CLI tools in `github_tool.py` previously passed list-form args with `shell=True`,
   silently dropping all arguments (see security rule #2). Confirmed fixed — don't reintroduce.
 
+## Coding-agent debug-loop pattern
+
+All coding modification tasks must follow the verified-not-claimed discipline using the built-in debug loop tools:
+1. **Call `inspect_project` first** to inspect directory structure, entry points, detected languages, and test files before editing unfamiliar projects. Never guess project structure.
+2. **Run tests (`run_tests`)** to capture exact pass/fail counts and failure tracebacks before and after code changes.
+3. **Iterative Verification Loop**: Edit code -> call `run_tests` -> inspect actual assertion error/traceback -> apply targeted fix -> re-run `run_tests`.
+4. **Execution Cap**: Cap debug iterations at a maximum of 5 turns before reporting remaining issues. Never claim a fix is complete without verifying that `run_tests` output passes cleanly.
+5. **Path & Process Security**: All debug loop tools (`inspect_project`, `run_tests`, `run_project`, `dependency_scan`, `secret_scan`) enforce `ALLOWED_ROOTS` path sandboxing and execute subprocesses strictly with list-form arguments and `shell=False`.
+
 ## Open / incomplete work
 
-- Coding-agent debug-loop tools (`inspect_project`, `run_tests`, `run_project`) have not yet been built or registered in `ToolRegistry`.
+- None at present.
 
 ## Persona
 
