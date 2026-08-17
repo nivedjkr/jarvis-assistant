@@ -86,12 +86,7 @@ against the actual code. Before saying something works:
 
 ## Open / incomplete work
 
-- `ObsidianMCPClient` (`jarvis/mcp_client.py`) is fully built but not yet wired into
-  `ToolRegistry` or the conversation flow. If asked to "integrate Obsidian," this is the actual
-  remaining work — see the class for `search_notes()`/`is_server_online()`.
-- Calendar tools are not yet registered in `ToolRegistry` (as of last check) — `CalendarService`
-  may exist as a backend class without corresponding tool registration; verify before assuming
-  either way.
+- Coding-agent debug-loop tools (`inspect_project`, `run_tests`, `run_project`) have not yet been built or registered in `ToolRegistry`.
 
 ## Persona
 
