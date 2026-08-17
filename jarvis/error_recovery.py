@@ -67,6 +67,16 @@ class ErrorRecovery:
             return True
         return False
 
+    def reset_circuit(self, service: Optional[str] = None):
+        """Reset circuit breaker for a specific service or all services"""
+        if service:
+            if service in self.circuit_breakers:
+                self.circuit_breakers[service] = {'open': False, 'failures': 0, 'opened_at': 0}
+                print(f"[CIRCUIT] {service} manually reset")
+        else:
+            self.circuit_breakers.clear()
+            print("[CIRCUIT] All circuit breakers manually reset")
+
     def record_failure(self, service: str):
         if service not in self.circuit_breakers:
             self.circuit_breakers[service] = {
@@ -93,7 +103,7 @@ class ErrorRecovery:
         
         if self.is_circuit_open(service):
             return (f"{service} is temporarily unavailable (circuit open). "
-                    f"Trying again in a few minutes, sir.")
+                    f"Use /provider reset to clear, or try again in a few minutes, sir.")
         
         try:
             if inspect.iscoroutinefunction(func):
@@ -107,18 +117,26 @@ class ErrorRecovery:
         except Exception as e:
             self.record_failure(service)
             error_msg = str(e)
+            lower_err = error_msg.lower()
             
             # Classify error type
-            if '403' in error_msg or 'auth' in error_msg.lower():
+            if '404' in error_msg or 'not found' in lower_err or 'notfounderror' in lower_err:
+                return f"{service} model/endpoint not found (HTTP 404). Check configured model name in config.yaml, sir."
+            elif '401' in error_msg or '403' in error_msg or 'auth' in lower_err or 'api_key' in lower_err or 'authenticationerror' in lower_err:
                 return f"{service} authentication failed. Check API key, sir."
-            elif '429' in error_msg or 'rate' in error_msg.lower():
-                return f"{service} rate limit hit. Waiting before retry, sir."
-            elif 'timeout' in error_msg.lower():
-                return f"{service} timed out. Network may be slow, sir."
-            elif 'connection' in error_msg.lower():
+            elif '429' in error_msg or 'rate' in lower_err or 'quota' in lower_err or 'ratelimiterror' in lower_err:
+                return f"{service} rate limit or quota exceeded. Waiting before retry, sir."
+            elif any(code in error_msg for code in ['500', '502', '503', '504']) or 'server error' in lower_err or 'internal server error' in lower_err:
+                return f"{service} provider server error (HTTP 5xx). Service may be experiencing temporary outage, sir."
+            elif '400' in error_msg or 'bad request' in lower_err or 'badrequesterror' in lower_err:
+                return f"{service} request invalid (HTTP 400): {error_msg[:120]}"
+            elif 'timeout' in lower_err or 'apitimeouterror' in lower_err:
+                return f"{service} timed out. Network or provider response delayed, sir."
+            elif 'connection' in lower_err or 'connect' in lower_err or 'apiconnectionerror' in lower_err:
                 return f"{service} unreachable. Check internet connection, sir."
             else:
-                return fallback_msg or f"{service} error: {error_msg[:100]}"
+                return fallback_msg or f"{service} error: {error_msg[:120]}"
 
 # Global instance
 recovery = ErrorRecovery()
+

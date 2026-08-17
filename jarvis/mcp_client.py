@@ -13,7 +13,7 @@ from typing import Dict, List, Any, Optional
 class ObsidianMCPClient:
     """Client for smart-connections-mcp server."""
 
-    def __init__(self, mcp_url: str = "http://127.0.0.1:3000", timeout: float = 3.0):
+    def __init__(self, mcp_url: str = "http://127.0.0.1:3000", timeout: float = 0.8):
         self.mcp_url = mcp_url.rstrip('/')
         self.timeout = timeout
 
@@ -52,9 +52,7 @@ class ObsidianMCPClient:
         headers = {"Content-Type": "application/json"}
         endpoints = [
             f"{self.mcp_url}/tools/call",
-            f"{self.mcp_url}/rpc",
-            f"{self.mcp_url}/messages",
-            self.mcp_url
+            f"{self.mcp_url}/rpc"
         ]
 
         for ep in endpoints:

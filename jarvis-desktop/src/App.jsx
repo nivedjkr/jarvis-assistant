@@ -219,6 +219,7 @@ export default function App() {
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 
         if (data.type === 'chunk') {
+          clearPendingTimeout()
           const chunkText = data.text || ''
           setMessages(prev => {
             const last = prev[prev.length - 1]
@@ -288,6 +289,7 @@ export default function App() {
           lastProcessedSentenceIndexRef.current = 0
         }
         else if (data.type === 'proactive_alert') {
+          clearPendingTimeout()
           const alertText = data.text || 'Notification received, sir.'
           setMessages(prev => [...prev, {
             role: 'jarvis',
@@ -309,8 +311,19 @@ export default function App() {
         }
         else if (data.type === 'status') {
           if (data.status === 'thinking') {
+            clearPendingTimeout()
             setOrbState('thinking')
+            // Re-arm timer for 60s while backend is actively processing/thinking
+            timeoutRef.current = setTimeout(() => {
+              setOrbState('idle')
+              setMessages(prev => [...prev, {
+                role: 'jarvis',
+                text: 'Connection timeout, sir. Please check if JARVIS backend is running.',
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+              }])
+            }, 60000)
           } else if (data.status === 'connected') {
+            clearPendingTimeout()
             setIsConnected(true)
             const greetingMsg = data.message || 'JARVIS online and standing by.'
             setMessages(prev => {
@@ -322,6 +335,7 @@ export default function App() {
             })
             speakResponse(greetingMsg, data.audio)
           } else if (data.status === 'disconnected') {
+            clearPendingTimeout()
             setIsConnected(false)
             setOrbState('idle')
           }
@@ -379,7 +393,7 @@ export default function App() {
         text: 'Connection timeout, sir. Please check if JARVIS backend is running.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
       }])
-    }, 30000)
+    }, 60000)
 
     if (cleanInput.startsWith('/')) {
       if (window.jarvis?.sendSlashCommand) {

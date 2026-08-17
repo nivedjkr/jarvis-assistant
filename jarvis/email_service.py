@@ -192,7 +192,7 @@ class EmailService:
     def format_unread_list(self, limit: int = 5) -> str:
         """Format /email command showing last N unread messages."""
         if not self.auth_manager.is_authenticated():
-            return "Gmail is not authenticated. Please run Google OAuth setup or place credentials.json in workspace."
+            return "Gmail is not authenticated. Please re-authenticate by typing '/google auth' or calling the 'authenticate_google' tool."
 
         unread = self.fetch_unread_messages(max_results=limit)
         if not unread:

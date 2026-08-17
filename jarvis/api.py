@@ -209,14 +209,23 @@ async def websocket_endpoint(ws: WebSocket):
                         })
                     elif cmd.startswith("/provider"):
                         from jarvis.llm_provider import get_provider
+                        from jarvis.error_recovery import recovery
                         parts = user_msg.strip().split(maxsplit=1)
-                        prov_name = parts[1] if len(parts) > 1 else ""
-                        if prov_name:
+                        prov_name = parts[1].strip() if len(parts) > 1 else ""
+                        if prov_name.lower() == "reset":
+                            recovery.reset_circuit()
+                            api_client.provider = get_provider()
+                            api_client.model = getattr(api_client.provider, 'model', 'default')
+                            res = f"Reset all LLM circuit breakers. Active provider: {api_client.provider.name}"
+                        elif prov_name:
                             api_client.provider = get_provider(prov_name)
                             api_client.model = getattr(api_client.provider, 'model', 'default')
                             res = f"LLM Provider switched to: {api_client.provider.name}"
                         else:
-                            res = f"Active Provider: {getattr(api_client.provider, 'name', 'NVIDIA NIM')}"
+                            cb_status = recovery.circuit_breakers
+                            open_cbs = [k for k, v in cb_status.items() if v.get('open')]
+                            open_msg = f" (Circuit open: {', '.join(open_cbs)})" if open_cbs else " (Circuits operational)"
+                            res = f"Active Provider: {getattr(api_client.provider, 'name', 'NVIDIA NIM')}{open_msg}. Use '/provider reset' to clear circuit breakers."
                         await ws.send_json({
                             "type": "response",
                             "text": res,
@@ -291,6 +300,14 @@ async def websocket_endpoint(ws: WebSocket):
                         await ws.send_json({
                             "type": "response",
                             "text": res,
+                            "status": "speaking"
+                        })
+                    elif cmd in ["/google auth", "/google login", "/email auth", "/calendar auth", "/google_auth", "/auth google"]:
+                        res = await tool_registry.execute("authenticate_google", {})
+                        await ws.send_json({
+                            "type": "response",
+                            "text": res,
+                            "tool_calls": [{"name": "authenticate_google"}],
                             "status": "speaking"
                         })
                     elif cmd in ["/email", "/check_email", "/checkemail"]:
@@ -497,6 +514,11 @@ async def chat_endpoint(request: dict):
     })
     
     return {"response": response}
+
+@app.post("/google/auth")
+async def google_auth_endpoint():
+    res = await tool_registry.execute("authenticate_google", {})
+    return {"status": "ok", "message": res}
 
 @app.post("/tts")
 async def tts_endpoint(request: dict):

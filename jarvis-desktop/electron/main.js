@@ -14,7 +14,7 @@ let backendFailed = false
 function checkPortInUse(port, host = '127.0.0.1') {
   return new Promise((resolve) => {
     const socket = new net.Socket()
-    socket.setTimeout(400)
+    socket.setTimeout(1000)
     
     socket.on('connect', () => {
       socket.destroy()

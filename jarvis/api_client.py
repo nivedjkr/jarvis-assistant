@@ -137,7 +137,7 @@ class JarvisAPIClient:
         current_date_str = now.strftime("%A, %B %d, %Y")
         current_time_str = now.strftime("%H:%M:%S")
 
-        return f"""You are JARVIS — Just A Rather Very Intelligent System.
+        prompt = f"""You are JARVIS — Just A Rather Very Intelligent System.
 Built by Nived. Running on his machine.
 
 CURRENT REAL-TIME CONTEXT:
@@ -190,12 +190,38 @@ EMAIL INSTRUCTIONS:
 - If recipient ('to') or message text ('body') is missing, ask the user to clarify before sending.
 - NEVER claim an email was sent if send_email returned a CONFIRMATION REQUIRED or CANNOT SEND message.
 
+OBSIDIAN & NOTE INSTRUCTIONS:
+- Auto-recall: Before answering any question that plausibly references something noted before, call search_obsidian tool first and fold returned results into context.
+- If search_obsidian returns no matching notes, state plainly that no matching notes were found in the Obsidian vault — NEVER guess or invent note content.
+- Note Linking: You have full permission to link notes using Obsidian [[wikilinks]] syntax (e.g., [[Note Title]] or [[Note Title|Alias]]). Use `links` parameter when creating notes, or call `link_obsidian_notes(source_title, target_title)` to link existing notes.
+- To create a markdown note: call create_obsidian_note tool.
+- To append text or log entries to any existing note: call append_obsidian_note tool.
+- To append a log entry or note to today's daily note: call append_daily_note tool.
+
+
 NEVER:
 - Generate OAuth flows, login pages, fake authentication
 - Invent file contents, prices, GitHub data, or email contents
 - Report success without tool verification
 - Write more than 3 sentences for routine responses
 - Use emojis"""
+
+        # Dynamically load AGENTS.md / Agents.md instructions into system prompt
+        root = Path(__file__).parent.parent
+        agents_paths = [root / "AGENTS.md", root / "Agents.md", root / ".agents" / "AGENTS.md"]
+        for p in agents_paths:
+            if p.exists():
+                try:
+                    content = p.read_text(encoding="utf-8").strip()
+                    if content:
+                        prompt += f"\n\nSTANDING DIRECTIVES & AGENT RULES ({p.name}):\n{content}"
+                        print(f"[API] Loaded system directives from {p.name}")
+                        break
+                except Exception as e:
+                    print(f"[API] Failed to read {p}: {e}")
+
+        return prompt
+
     
     def add_user_message(self, content: str, session_id: str = None):
         self.get_session(session_id).add_message("user", content)
@@ -319,7 +345,37 @@ NEVER:
                 response = await response
 
             if isinstance(response, str):
+                lower_resp = response.lower()
+                is_err = any(k in lower_resp for k in ["unavailable", "authentication failed", "circuit open", "error:"])
+                if is_err:
+                    # Attempt provider failover if alternative keys exist
+                    from jarvis.llm_provider import GroqProvider, OllamaProvider, NVIDIAProvider
+                    current_name = getattr(self.provider, 'name', '')
+                    fallbacks = []
+                    if "Groq" not in current_name and os.getenv("GROQ_API_KEY"):
+                        fallbacks.append(GroqProvider)
+                    if "Ollama" not in current_name:
+                        fallbacks.append(OllamaProvider)
+                    if "NVIDIA" not in current_name and os.getenv("NVIDIA_NIM_API_KEY"):
+                        fallbacks.append(NVIDIAProvider)
+
+                    for fb_cls in fallbacks:
+                        try:
+                            fb_prov = fb_cls()
+                            print(f"[FAILOVER] Primary provider ({current_name}) failed. Attempting failover to {fb_prov.name}...")
+                            fb_res = await fb_prov.chat(messages, tools=tool_schemas, max_tokens=300)
+                            while inspect.isawaitable(fb_res):
+                                fb_res = await fb_res
+                            if not isinstance(fb_res, str) or not any(k in fb_res.lower() for k in ["unavailable", "authentication failed", "circuit open"]):
+                                print(f"[FAILOVER] Successfully recovered using {fb_prov.name}")
+                                response = fb_res
+                                break
+                        except Exception as fb_err:
+                            print(f"[FAILOVER] {fb_cls.__name__} failed: {fb_err}")
+
+            if isinstance(response, str):
                 return response
+
 
             choices = getattr(response, 'choices', [])
             message = choices[0].message if choices else None

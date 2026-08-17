@@ -118,9 +118,14 @@ class HealthChecker:
 
     async def check_internet(self) -> str:
         import httpx
-        async with httpx.AsyncClient() as client:
-            r = await client.get("https://8.8.8.8", timeout=3.0)
-        return "Connected"
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                r = await client.get("https://1.1.1.1", timeout=3.0)
+            return f"Connected (HTTP {r.status_code})"
+        except Exception:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                r = await client.get("https://www.google.com", timeout=3.0)
+            return "Connected"
 
     async def check_disk_space(self) -> str:
         import shutil

@@ -195,6 +195,11 @@ class JarvisAssistant:
         elif cmd == '/speak on':
             self.voice_enabled = True
             return "Voice enabled, sir."
+        elif cmd.startswith('/google') or cmd.startswith('/auth'):
+            from jarvis.google_auth import GoogleAuthManager
+            auth_mgr = GoogleAuthManager()
+            ok, msg = auth_mgr.authenticate_interactive()
+            return msg
         elif cmd.startswith('/calendar'):
             if not getattr(self.tools, 'calendar_service', None):
                 return "Google Calendar service is unavailable."
@@ -203,7 +208,8 @@ class JarvisAssistant:
             if subcmd in ("auth", "login"):
                 auth_mgr = getattr(self.tools.calendar_service, 'auth_manager', None)
                 if not auth_mgr:
-                    return "GoogleAuthManager unavailable."
+                    from jarvis.google_auth import GoogleAuthManager
+                    auth_mgr = GoogleAuthManager()
                 ok, msg = auth_mgr.authenticate_interactive()
                 return msg
             elif subcmd == "search":
@@ -218,7 +224,14 @@ class JarvisAssistant:
                 return "Google Email service is unavailable."
             parts = cmd.split()
             subcmd = parts[1].lower() if len(parts) > 1 else ""
-            if subcmd == "summary":
+            if subcmd in ("auth", "login"):
+                auth_mgr = getattr(self.tools.email_service, 'auth_manager', None)
+                if not auth_mgr:
+                    from jarvis.google_auth import GoogleAuthManager
+                    auth_mgr = GoogleAuthManager()
+                ok, msg = auth_mgr.authenticate_interactive()
+                return msg
+            elif subcmd == "summary":
                 return self.tools.email_service.generate_email_summary_briefing()
             elif subcmd in ("sent", "sent_list"):
                 return self.tools.email_service.format_sent_list()

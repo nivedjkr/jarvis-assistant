@@ -45,8 +45,8 @@ github:
   check_interval_minutes: 30
 
 obsidian:
-  enabled: false
-  vault_path: ""
+  enabled: true
+  vault_path: "D:/OBSIDIAN/NIVED"
 
 trading:
   check_interval_seconds: 300

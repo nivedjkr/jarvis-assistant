@@ -2,7 +2,14 @@ from abc import ABC, abstractmethod
 from openai import AsyncOpenAI
 import os
 import inspect
+import httpx
 from typing import List, Dict, Any, Optional
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Ensure .env loaded
+load_dotenv(Path(__file__).parent.parent / '.env')
+
 from jarvis.config_manager import config
 from jarvis.error_recovery import recovery
 
@@ -25,7 +32,8 @@ class NVIDIAProvider(LLMProvider):
         base_url = config.get("api.base_url", "https://integrate.api.nvidia.com/v1")
         self.client = AsyncOpenAI(
             base_url=base_url,
-            api_key=os.getenv("NVIDIA_NIM_API_KEY") or "mock_key"
+            api_key=os.getenv("NVIDIA_NIM_API_KEY") or "mock_key",
+            timeout=httpx.Timeout(45.0, connect=10.0)
         )
         self.model = model_name
 
@@ -38,7 +46,8 @@ class NVIDIAProvider(LLMProvider):
             "model": self.model,
             "messages": messages,
             "max_tokens": max_tokens,
-            "stream": False
+            "stream": False,
+            "timeout": 45.0
         }
         if tools:
             kwargs["tools"] = tools
@@ -47,7 +56,7 @@ class NVIDIAProvider(LLMProvider):
         res = await recovery.call_with_recovery(
             self.name,
             self.client.chat.completions.create,
-            "API temporarily unavailable, sir.",
+            "NVIDIA NIM API temporarily unavailable, sir.",
             **kwargs
         )
         while inspect.isawaitable(res):
@@ -58,7 +67,8 @@ class GroqProvider(LLMProvider):
     def __init__(self):
         self.client = AsyncOpenAI(
             base_url="https://api.groq.com/openai/v1",
-            api_key=os.getenv("GROQ_API_KEY") or "mock_key"
+            api_key=os.getenv("GROQ_API_KEY") or "mock_key",
+            timeout=httpx.Timeout(45.0, connect=10.0)
         )
         self.model = "llama-3.3-70b-versatile"
 
@@ -70,7 +80,8 @@ class GroqProvider(LLMProvider):
         kwargs = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": max_tokens
+            "max_tokens": max_tokens,
+            "timeout": 45.0
         }
         if tools:
             kwargs["tools"] = tools
@@ -91,7 +102,8 @@ class AnthropicProvider(LLMProvider):
         try:
             import anthropic
             self.client = anthropic.AsyncAnthropic(
-                api_key=os.getenv("ANTHROPIC_API_KEY") or "mock_key"
+                api_key=os.getenv("ANTHROPIC_API_KEY") or "mock_key",
+                timeout=45.0
             )
         except ImportError:
             self.client = None
@@ -115,7 +127,8 @@ class AnthropicProvider(LLMProvider):
             "model": self.model,
             "max_tokens": max_tokens,
             "system": system,
-            "messages": msgs
+            "messages": msgs,
+            "timeout": 45.0
         }
 
         res = await recovery.call_with_recovery(
@@ -132,7 +145,8 @@ class OllamaProvider(LLMProvider):
     def __init__(self):
         self.client = AsyncOpenAI(
             base_url="http://localhost:11434/v1",
-            api_key="ollama"
+            api_key="ollama",
+            timeout=httpx.Timeout(45.0, connect=10.0)
         )
         self.model = "llama3.2"
 
@@ -144,7 +158,8 @@ class OllamaProvider(LLMProvider):
         kwargs = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": max_tokens
+            "max_tokens": max_tokens,
+            "timeout": 45.0
         }
         if tools:
             kwargs["tools"] = tools
@@ -172,5 +187,7 @@ def get_provider(name: Optional[str] = None) -> LLMProvider:
         print(f"[LLM] Unknown provider: {provider_name}, falling back to NVIDIA")
         cls = NVIDIAProvider
     provider = cls()
+    recovery.reset_circuit(provider.name)
     print(f"[LLM] Using provider: {provider.name}")
     return provider
+
