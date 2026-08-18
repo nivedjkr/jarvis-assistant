@@ -66,7 +66,7 @@ class BaseAgent:
         messages: List[Dict[str, Any]],
         tool_registry,
         llm_client,
-        max_tokens: int = 400
+        max_tokens: int = 2048
     ) -> Dict[str, Any]:
         """
         Execute one reasoning step via LLM provider.

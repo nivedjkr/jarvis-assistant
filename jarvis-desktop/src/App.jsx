@@ -84,13 +84,17 @@ export default function App() {
 
     isSpeakingRef.current = true
     const item = sentenceQueueRef.current.shift()
-    if (!item || !item.promise) {
+    if (!item || !item.text) {
       processNextSentence()
       return
     }
 
     try {
-      const audioData = await item.promise
+      let audioData = item.audioData || ''
+      if (!audioData && window.jarvis?.synthesizeSentence) {
+        audioData = await window.jarvis.synthesizeSentence(item.text)
+      }
+
       if (currentSession !== playbackSessionRef.current) return
 
       if (!audioData) {
@@ -146,10 +150,7 @@ export default function App() {
     for (const sentence of sentences) {
       const clean = cleanTextForSpeech(sentence)
       if (clean) {
-        const promise = window.jarvis?.synthesizeSentence
-          ? window.jarvis.synthesizeSentence(clean)
-          : Promise.resolve('')
-        sentenceQueueRef.current.push({ text: clean, promise })
+        sentenceQueueRef.current.push({ text: clean })
       }
     }
 

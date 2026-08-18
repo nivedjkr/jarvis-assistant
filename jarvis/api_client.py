@@ -182,9 +182,9 @@ GREETINGS & CASUAL CHAT:
 - DO NOT call open_website, web_search, open_url, or any tools for greetings or casual conversation.
 
 RESPONSE LENGTH:
-- Default: 1-2 sentences. You are spoken aloud.
-- Confirmations: one line. "Done." / "On it." / "Opened."
-- Never pad with filler or disclaimers.
+- Routine responses & confirmations: 1-2 concise sentences ("Done, sir.", "On it.").
+- Detailed explanations, code snippets, summaries, and technical reports: Full, comprehensive, and un-truncated output.
+- Never artificially truncate mid-sentence or mid-paragraph when providing detailed explanations.
 - Ask, don't pepper — one well-placed question beats three reflexive ones.
 
 TOOL USE — CRITICAL:
@@ -232,7 +232,7 @@ NEVER:
 - Generate OAuth flows, login pages, fake authentication
 - Invent file contents, prices, GitHub data, or email contents
 - Report success without tool verification
-- Write more than 3 sentences for routine responses
+- Truncate answers mid-thought or cut off responses artificially
 - Use emojis"""
 
         # Dynamically load AGENTS.md / Agents.md instructions into system prompt
@@ -298,7 +298,7 @@ NEVER:
     def clear_history(self, session_id: str = None):
         self.get_session(session_id).clear_history()
 
-    async def _stream_response(self, messages: list, max_tokens: int = 300) -> str:
+    async def _stream_response(self, messages: list, max_tokens: int = 2048) -> str:
         async def _do_stream():
             full_text = ""
             stream = await self.client.chat.completions.create(
@@ -322,7 +322,7 @@ NEVER:
     async def chat(self, tool_schemas: list = None, session_id: str = None) -> str:
         """Simple chat without tools"""
         try:
-            return await self._stream_response(self.get_messages(session_id), max_tokens=300)
+            return await self._stream_response(self.get_messages(session_id), max_tokens=2048)
         except Exception as e:
             print(f"[API] Error: {e}")
             return f"API error: {str(e)}"
@@ -380,14 +380,14 @@ NEVER:
             while current_turn < max_turns:
                 current_turn += 1
                 if hasattr(self.provider, 'chat'):
-                    response = await self.provider.chat(messages, tools=tool_schemas, max_tokens=300)
+                    response = await self.provider.chat(messages, tools=tool_schemas, max_tokens=2048)
                 else:
                     response = await self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
                         tools=tool_schemas,
                         tool_choice="auto" if tool_schemas else None,
-                        max_tokens=300,
+                        max_tokens=2048,
                         stream=False
                     )
 
@@ -412,7 +412,7 @@ NEVER:
                             try:
                                 fb_prov = fb_cls()
                                 print(f"[FAILOVER] Primary provider ({current_name}) failed. Attempting failover to {fb_prov.name}...")
-                                fb_res = await fb_prov.chat(messages, tools=tool_schemas, max_tokens=300)
+                                fb_res = await fb_prov.chat(messages, tools=tool_schemas, max_tokens=2048)
                                 while inspect.isawaitable(fb_res):
                                     fb_res = await fb_res
                                 if not isinstance(fb_res, str) or not any(k in fb_res.lower() for k in ["unavailable", "authentication failed", "circuit open"]):
@@ -494,7 +494,7 @@ NEVER:
                         final_response_text = message.content
                         print(final_response_text)
                     else:
-                        final_response_text = await self._stream_response(messages, max_tokens=300)
+                        final_response_text = await self._stream_response(messages, max_tokens=2048)
                     break
 
             api_latency = time.time() - api_t0

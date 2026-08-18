@@ -18,7 +18,7 @@ class LLMProvider(ABC):
     async def chat(
         self, messages: list,
         tools: Optional[list] = None,
-        max_tokens: int = 500) -> Any:
+        max_tokens: int = 2048) -> Any:
         pass
     
     @property
@@ -41,7 +41,7 @@ class NVIDIAProvider(LLMProvider):
     def name(self) -> str:
         return "NVIDIA NIM"
 
-    async def chat(self, messages: list, tools: Optional[list] = None, max_tokens: int = 500) -> Any:
+    async def chat(self, messages: list, tools: Optional[list] = None, max_tokens: int = 2048) -> Any:
         kwargs = {
             "model": self.model,
             "messages": messages,
@@ -76,7 +76,7 @@ class GroqProvider(LLMProvider):
     def name(self) -> str:
         return "Groq"
 
-    async def chat(self, messages: list, tools: Optional[list] = None, max_tokens: int = 500) -> Any:
+    async def chat(self, messages: list, tools: Optional[list] = None, max_tokens: int = 2048) -> Any:
         kwargs = {
             "model": self.model,
             "messages": messages,
@@ -113,7 +113,7 @@ class AnthropicProvider(LLMProvider):
     def name(self) -> str:
         return "Anthropic Claude"
 
-    async def chat(self, messages: list, tools: Optional[list] = None, max_tokens: int = 500) -> Any:
+    async def chat(self, messages: list, tools: Optional[list] = None, max_tokens: int = 2048) -> Any:
         if not self.client:
             raise RuntimeError("anthropic SDK is not installed.")
 
@@ -154,7 +154,7 @@ class OllamaProvider(LLMProvider):
     def name(self) -> str:
         return "Ollama (local)"
 
-    async def chat(self, messages: list, tools: Optional[list] = None, max_tokens: int = 500) -> Any:
+    async def chat(self, messages: list, tools: Optional[list] = None, max_tokens: int = 2048) -> Any:
         kwargs = {
             "model": self.model,
             "messages": messages,

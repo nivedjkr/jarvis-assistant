@@ -95,12 +95,12 @@ class PlanningAgent(BaseAgent):
 
         try:
             if hasattr(llm_client.provider, 'chat'):
-                res = await llm_client.provider.chat(messages, tools=None, max_tokens=350)
+                res = await llm_client.provider.chat(messages, tools=None, max_tokens=1024)
             else:
                 res = await llm_client.client.chat.completions.create(
                     model=llm_client.model,
                     messages=messages,
-                    max_tokens=350,
+                    max_tokens=1024,
                     stream=False
                 )
             
