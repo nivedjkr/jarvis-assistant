@@ -303,30 +303,9 @@ async def websocket_endpoint(ws: WebSocket):
                             "status": "speaking"
                         })
                     elif cmd in ["/google auth", "/google login", "/email auth", "/calendar auth", "/google_auth", "/auth google"]:
-                        from jarvis.google_auth import GoogleAuthManager
-                        auth_mgr = GoogleAuthManager()
-                        auth_url, _ = auth_mgr.get_auth_url(8080)
-                        if auth_url:
-                            try:
-                                import platform
-                                if platform.system() == "Windows":
-                                    os.startfile(auth_url)
-                                else:
-                                    import webbrowser
-                                    webbrowser.open(auth_url)
-                            except Exception:
-                                pass
-                            link_msg = (
-                                "Opening Google OAuth authorization in your web browser, sir.\n\n"
-                                f"If the browser does not open automatically, please click below:\n"
-                                f"[🔑 Click here to Authorize Google Services]({auth_url})"
-                            )
-                        else:
-                            link_msg = "Opening Google OAuth authorization in your web browser, sir. Please complete the login prompt."
-
                         await ws.send_json({
                             "type": "response",
-                            "text": link_msg,
+                            "text": "Opening Google OAuth authorization in your web browser, sir. Please complete the login prompt.",
                             "status": "speaking"
                         })
                         res = await tool_registry.execute("authenticate_google", {})

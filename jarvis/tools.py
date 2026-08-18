@@ -2239,24 +2239,14 @@ class ToolRegistry:
             required=[])
 
         async def authenticate_google() -> str:
-            import asyncio, platform, os
+            import asyncio
             auth_mgr = getattr(self.email_service, 'auth_manager', None) or getattr(self.calendar_service, 'auth_manager', None)
             if not auth_mgr:
                 from jarvis.google_auth import GoogleAuthManager
                 auth_mgr = GoogleAuthManager()
 
-            auth_url, port = auth_mgr.get_auth_url(8080)
-            if auth_url:
-                try:
-                    if platform.system() == "Windows":
-                        os.startfile(auth_url)
-                    else:
-                        import webbrowser
-                        webbrowser.open(auth_url)
-                except Exception as b_err:
-                    print(f"[GOOGLE_AUTH] Auto-open notice: {b_err}")
-
-            ok, msg = await asyncio.to_thread(auth_mgr.authenticate_interactive, port)
+            ok, msg = await asyncio.to_thread(auth_mgr.authenticate_interactive, 8080)
+            auth_url = getattr(auth_mgr, 'last_auth_url', '')
             if auth_url and not ok:
                 return (
                     f"Opening browser for login, sir. If the browser does not open automatically, please click below:\n\n"

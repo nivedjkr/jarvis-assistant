@@ -28,6 +28,7 @@ class GoogleAuthManager:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
         self.token_path = self.data_dir / "google_token.json"
+        self.last_auth_url: str = ""
         
         # Check root or data_dir for credentials.json
         self.credentials_path = Path("credentials.json")
@@ -66,6 +67,14 @@ class GoogleAuthManager:
                 except Exception:
                     pass
                 creds = None
+        elif creds and not creds.valid:
+            # Token exists but is invalid or expired without a refresh token. Purge stale token file.
+            try:
+                if self.token_path.exists():
+                    self.token_path.unlink()
+            except Exception:
+                pass
+            creds = None
 
         return creds
 
@@ -143,6 +152,7 @@ class GoogleAuthManager:
             flow = InstalledAppFlow.from_client_secrets_file(str(self.credentials_path), SCOPES)
             flow.redirect_uri = f"http://localhost:{port}/"
             auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
+            self.last_auth_url = auth_url
             return auth_url, port
         except Exception as e:
             print(f"[GOOGLE_AUTH] Error generating auth URL: {e}")
@@ -169,26 +179,21 @@ class GoogleAuthManager:
                 port = self._find_free_port(8080)
 
             flow = InstalledAppFlow.from_client_secrets_file(str(self.credentials_path), SCOPES)
-            flow.redirect_uri = f"http://localhost:{port}/"
-            auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
 
-            # Explicitly open browser on host OS to guarantee popup even in background processes
-            try:
-                import platform
-                if platform.system() == "Windows":
-                    os.startfile(auth_url)
-                else:
-                    import webbrowser
-                    webbrowser.open(auth_url)
-            except Exception as b_err:
-                print(f"[GOOGLE_AUTH] Browser auto-launch notice: {b_err}")
+            class _UrlCapturer:
+                def __init__(self, manager: "GoogleAuthManager"):
+                    self.manager = manager
+                def format(self, url: str = "") -> str:
+                    self.manager.last_auth_url = url
+                    return f"Please complete Google login at: {url}"
 
             creds = flow.run_local_server(
                 host='localhost',
                 port=port, 
                 prompt='consent', 
                 access_type='offline',
-                authorization_prompt_message=f"Please complete Google login at: {auth_url}"
+                open_browser=True,
+                authorization_prompt_message=_UrlCapturer(self)
             )
             
             if not creds or not creds.valid:

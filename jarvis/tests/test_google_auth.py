@@ -47,3 +47,31 @@ def test_google_auth_auto_purge_invalid_token(tmp_path):
 def test_authenticate_google_tool_registered():
     registry = ToolRegistry()
     assert "authenticate_google" in registry.tools
+
+
+def test_google_auth_interactive_state_consistency(tmp_path):
+    auth_mgr = GoogleAuthManager(data_dir=str(tmp_path))
+    fake_creds_path = tmp_path / "credentials.json"
+    fake_creds_path.write_text(json.dumps({
+        "installed": {
+            "client_id": "fake_id",
+            "client_secret": "fake_secret",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token"
+        }
+    }))
+    auth_mgr.credentials_path = fake_creds_path
+
+    mock_creds = MagicMock()
+    mock_creds.valid = True
+    mock_creds.to_json.return_value = '{"token": "xyz"}'
+
+    with patch("google_auth_oauthlib.flow.InstalledAppFlow.run_local_server", return_value=mock_creds) as mock_rls:
+        ok, msg = auth_mgr.authenticate_interactive(port=8080)
+        assert ok is True
+        assert "successful" in msg
+        mock_rls.assert_called_once()
+        _, kwargs = mock_rls.call_args
+        assert kwargs.get("open_browser") is True
+        assert hasattr(kwargs.get("authorization_prompt_message"), "format")
+
