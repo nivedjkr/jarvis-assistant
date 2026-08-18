@@ -100,12 +100,13 @@ class GroqProvider(LLMProvider):
 class AnthropicProvider(LLMProvider):
     def __init__(self):
         try:
-            import anthropic
+            import importlib
+            anthropic = importlib.import_module("anthropic")
             self.client = anthropic.AsyncAnthropic(
                 api_key=os.getenv("ANTHROPIC_API_KEY") or "mock_key",
                 timeout=45.0
             )
-        except ImportError:
+        except (ImportError, Exception):
             self.client = None
         self.model = "claude-sonnet-4-6"
 

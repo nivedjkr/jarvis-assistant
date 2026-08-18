@@ -35,7 +35,7 @@ def _load_config():
 
 async def with_retry(coro_func, max_retries: int = 3, base_delay: float = 1.5):
     """Execute coroutine with exponential backoff retry"""
-    last_exception = None
+    last_exception: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
             return await coro_func()
@@ -47,7 +47,9 @@ async def with_retry(coro_func, max_retries: int = 3, base_delay: float = 1.5):
                 await asyncio.sleep(delay)
             else:
                 print(f"[API] All {max_retries} attempts failed")
-    raise last_exception
+    if last_exception is not None:
+        raise last_exception
+    raise RuntimeError("Retry loop completed without result.")
 
 
 class ConversationSession:
