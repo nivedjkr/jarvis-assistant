@@ -303,6 +303,11 @@ async def websocket_endpoint(ws: WebSocket):
                             "status": "speaking"
                         })
                     elif cmd in ["/google auth", "/google login", "/email auth", "/calendar auth", "/google_auth", "/auth google"]:
+                        await ws.send_json({
+                            "type": "response",
+                            "text": "Opening Google OAuth authorization in your web browser, sir. Please complete the login and consent prompt.",
+                            "status": "speaking"
+                        })
                         res = await tool_registry.execute("authenticate_google", {})
                         await ws.send_json({
                             "type": "response",

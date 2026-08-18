@@ -136,7 +136,25 @@ class GoogleAuthManager:
                     pass
 
             flow = InstalledAppFlow.from_client_secrets_file(str(self.credentials_path), SCOPES)
-            creds = flow.run_local_server(port=port, prompt='consent', access_type='offline')
+            
+            # Explicitly open browser on host OS to guarantee popup even in background processes
+            try:
+                auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
+                import platform
+                if platform.system() == "Windows":
+                    os.startfile(auth_url)
+                else:
+                    import webbrowser
+                    webbrowser.open(auth_url)
+            except Exception as b_err:
+                print(f"[GOOGLE_AUTH] Browser auto-launch notice: {b_err}")
+
+            creds = flow.run_local_server(
+                port=port, 
+                prompt='consent', 
+                access_type='offline',
+                authorization_prompt_message="Please complete Google login in your web browser."
+            )
             
             if not creds or not creds.valid:
                 return False, "Authentication flow completed but credentials are not valid."
