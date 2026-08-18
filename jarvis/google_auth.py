@@ -118,7 +118,37 @@ class GoogleAuthManager:
             return write_scope in creds.scopes
         return True
 
-    def authenticate_interactive(self, port: int = 0) -> tuple[bool, str]:
+    def _is_port_available(self, port: int) -> bool:
+        import socket
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.5)
+                return s.connect_ex(('127.0.0.1', port)) != 0
+        except Exception:
+            return True
+
+    def _find_free_port(self, default_port: int = 8080) -> int:
+        for p in [default_port, 8766, 9090, 9876, 8088]:
+            if self._is_port_available(p):
+                return p
+        return 0
+
+    def get_auth_url(self, port: int = 8080) -> tuple[str, int]:
+        """Generate valid Google OAuth authorization URL and bound port."""
+        if not self.credentials_path.exists():
+            return "", port
+        if not self._is_port_available(port):
+            port = self._find_free_port(8080)
+        try:
+            flow = InstalledAppFlow.from_client_secrets_file(str(self.credentials_path), SCOPES)
+            flow.redirect_uri = f"http://localhost:{port}/"
+            auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
+            return auth_url, port
+        except Exception as e:
+            print(f"[GOOGLE_AUTH] Error generating auth URL: {e}")
+            return "", port
+
+    def authenticate_interactive(self, port: int = 8080) -> tuple[bool, str]:
         """
         Run interactive browser OAuth2 authentication flow.
         Forces prompt='consent' and access_type='offline' to guarantee a refresh token.
@@ -135,11 +165,15 @@ class GoogleAuthManager:
                 except Exception:
                     pass
 
+            if port == 0 or not self._is_port_available(port):
+                port = self._find_free_port(8080)
+
             flow = InstalledAppFlow.from_client_secrets_file(str(self.credentials_path), SCOPES)
-            
+            flow.redirect_uri = f"http://localhost:{port}/"
+            auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
+
             # Explicitly open browser on host OS to guarantee popup even in background processes
             try:
-                auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
                 import platform
                 if platform.system() == "Windows":
                     os.startfile(auth_url)
@@ -150,10 +184,11 @@ class GoogleAuthManager:
                 print(f"[GOOGLE_AUTH] Browser auto-launch notice: {b_err}")
 
             creds = flow.run_local_server(
+                host='localhost',
                 port=port, 
                 prompt='consent', 
                 access_type='offline',
-                authorization_prompt_message="Please complete Google login in your web browser."
+                authorization_prompt_message=f"Please complete Google login at: {auth_url}"
             )
             
             if not creds or not creds.valid:
