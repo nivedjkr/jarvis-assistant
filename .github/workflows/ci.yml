@@ -39,6 +39,7 @@ jobs:
       run: pytest jarvis/tests/ -v --tb=short
       env:
         NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Security check
       run: |
