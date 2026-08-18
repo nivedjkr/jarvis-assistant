@@ -42,6 +42,13 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Security check
-      shell: cmd
       run: |
-        git ls-files | findstr /E ".env .db token" >nul 2>&1 && echo FAIL && exit 1 || echo OK
+        python -c "
+        import subprocess, sys
+        out = subprocess.check_output(['git', 'ls-files'], text=True)
+        bad = [f for f in out.splitlines() if f.endswith(('.env', '.db', 'token'))]
+        if bad:
+            print('SECURITY CHECK FAILED:', bad)
+            sys.exit(1)
+        print('Security check passed: No sensitive files tracked in git.')
+        "
