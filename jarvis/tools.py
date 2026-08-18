@@ -4,8 +4,8 @@ import time
 import psutil
 import webbrowser
 import inspect
+import json
 from typing import Optional, Dict, List, Tuple, Any
-from pydantic import BaseModel, ValidationError
 
 def validate_tool_schemas(registry):
     errors = []
@@ -27,8 +27,6 @@ def validate_tool_schemas(registry):
         
         # Check required params exist in function
         sig = inspect.signature(func)
-        schema_params = schema['function']['parameters']\
-            .get('properties', {}).keys()
         func_params = sig.parameters.keys()
         
         for param in schema['function']['parameters']\
@@ -222,6 +220,13 @@ def open_url(url: str) -> str:
             return f"FAILED: {e}"
 
 class WebsiteOpenTool:
+    def __init__(self):
+        pass
+
+    def run(self, url: str):
+        webbrowser.open(url)
+        return f"Opening {url} in Google Chrome, sir."
+
     async def execute(self, site: str) -> str:
         s = site.lower().strip()
         SITES = {
@@ -241,12 +246,13 @@ class WebsiteOpenTool:
             'figma':     'https://www.figma.com',
             'stackoverflow': 'https://stackoverflow.com',
         }
-        url = SITES.get(s)
-        if url:
-            return open_url(url)
-        if '.' in site:
-            return open_url(site)
-        return open_url(f"https://www.google.com/search?q={site}")
+        target_url = SITES.get(s) or (site if '.' in site else f"https://www.google.com/search?q={site}")
+        chrome = find_chrome_path()
+        if chrome and os.path.exists(chrome):
+            subprocess.Popen([chrome, target_url])
+            return f"Opening {target_url} in Google Chrome, sir."
+        webbrowser.open(target_url)
+        return f"Opening {target_url} in Google Chrome, sir."
 
 class ToolRegistry:
     def __init__(self, email_service: Optional[Any] = None, calendar_service: Optional[Any] = None, obsidian_client: Optional[Any] = None):
@@ -980,7 +986,7 @@ class ToolRegistry:
                 return open_url(url)
             if '.' in site:
                 return open_url(site)
-            return f"Not a valid website name or URL. Use web_search for Google searches."
+            return "Not a valid website name or URL. Use web_search for Google searches."
         
         def web_search(query: str) -> str:
             q = query.strip()
@@ -3238,42 +3244,6 @@ def _grep_obsidian_vault(vault_path: str, query: str, limit: int = 3) -> List[Di
     return results[:limit]
 
 
-# Backward compatibility aliases for manual test runners
-class WebsiteOpenTool:
-    def __init__(self):
-        pass
 
-    def run(self, url: str):
-        import webbrowser
-        webbrowser.open(url)
-        return f"Opening {url} in Google Chrome, sir."
-
-    async def execute(self, site: str):
-        import os, subprocess, webbrowser
-        s = site.lower().strip()
-        SITES = {
-            'youtube':   'https://www.youtube.com',
-            'gmail':     'https://mail.google.com',
-            'github':    'https://www.github.com',
-            'google':    'https://www.google.com',
-            'reddit':    'https://www.reddit.com',
-            'twitter':   'https://www.twitter.com',
-            'x':         'https://www.x.com',
-            'linkedin':  'https://www.linkedin.com',
-            'netflix':   'https://www.netflix.com',
-            'spotify':   'https://open.spotify.com',
-            'claude':    'https://claude.ai',
-            'chatgpt':   'https://chat.openai.com',
-            'notion':    'https://www.notion.so',
-            'figma':     'https://www.figma.com',
-            'stackoverflow': 'https://stackoverflow.com',
-        }
-        target_url = SITES.get(s) or (site if '.' in site else f"https://www.google.com/search?q={site}")
-        chrome = find_chrome_path()
-        if chrome and os.path.exists(chrome):
-            subprocess.Popen([chrome, target_url])
-            return f"Opening {target_url} in Google Chrome, sir."
-        webbrowser.open(target_url)
-        return f"Opening {target_url} in Google Chrome, sir."
 
 

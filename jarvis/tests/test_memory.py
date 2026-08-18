@@ -18,3 +18,10 @@ def test_memory_stats(memory):
     stats = get_memory_stats()
     assert "total_facts" in stats
     assert isinstance(stats["total_facts"], int)
+
+def test_get_reminders_status(memory):
+    memory.add_reminder("Buy milk")
+    reminders = memory.get_reminders(status="pending")
+    assert len(reminders) >= 1
+    assert any(r["text"] == "Buy milk" for r in reminders)
+

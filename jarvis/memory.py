@@ -487,10 +487,15 @@ class Memory:
                 "completed": False
             }
 
-    def get_reminders(self) -> List[Dict]:
-        """Get all reminders"""
+    def get_reminders(self, status: Optional[str] = None) -> List[Dict]:
+        """Get all reminders, optionally filtered by status"""
         with self._get_connection() as conn:
-            rows = conn.execute("SELECT * FROM reminders ORDER BY id ASC").fetchall()
+            if status == "pending":
+                rows = conn.execute("SELECT * FROM reminders WHERE status = 'pending' OR completed = 0 ORDER BY id ASC").fetchall()
+            elif status:
+                rows = conn.execute("SELECT * FROM reminders WHERE status = ? ORDER BY id ASC", (status,)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM reminders ORDER BY id ASC").fetchall()
             result = []
             for row in rows:
                 r = dict(row)
@@ -500,8 +505,7 @@ class Memory:
 
     def get_pending_reminders(self) -> List[Dict]:
         """Get all pending/uncompleted reminders"""
-        reminders = self.get_reminders()
-        return [r for r in reminders if not r.get("completed")]
+        return self.get_reminders(status="pending")
 
     def get_fact_count(self) -> int:
         """Get total count of facts stored in DB"""

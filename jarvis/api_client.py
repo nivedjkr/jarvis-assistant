@@ -6,7 +6,7 @@ import time
 import uuid
 import inspect
 import httpx
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 from pathlib import Path
 from jarvis.config_manager import config
@@ -113,7 +113,14 @@ class JarvisAPIClient:
             self.semantic_memory = SemanticMemory()
         except Exception:
             self.semantic_memory = None
-            
+
+        try:
+            from jarvis.orchestration.dispatcher import AgentDispatcher
+            self.dispatcher = AgentDispatcher()
+        except Exception as e:
+            print(f"[API] AgentDispatcher init skipped: {e}")
+            self.dispatcher = None
+
         print(f"[API] Using Provider: {self.provider.name} | Model: {self.model}")
     
     @property
@@ -311,7 +318,8 @@ NEVER:
     async def chat_with_tools(
         self, tool_schemas: list, 
         tool_executor,
-        session_id: str = None) -> str:
+        session_id: str = None,
+        tool_registry: Any = None) -> str:
         """Full tool-calling pipeline with session isolation"""
         session = self.get_session(session_id)
         user_last = ""
@@ -320,6 +328,21 @@ NEVER:
                 if m.get('role') == 'user':
                     user_last = m.get('content', '')
                     break
+
+        # Check if Dispatcher handles as multi-step goal
+        if getattr(self, 'dispatcher', None) and user_last and tool_registry:
+            try:
+                dispatch_res = await self.dispatcher.dispatch(
+                    user_prompt=user_last,
+                    tool_registry=tool_registry,
+                    llm_client=self
+                )
+                if dispatch_res.get("handled"):
+                    resp_text = dispatch_res.get("content", "") or "Done, sir."
+                    self.add_assistant_message(resp_text, session_id=session_id)
+                    return resp_text
+            except Exception as e:
+                print(f"[DISPATCHER] Dispatch error, falling back to direct pipeline: {e}")
 
         messages = self.get_messages_with_memory(user_last, session_id)
         
