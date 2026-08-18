@@ -401,7 +401,8 @@ async def websocket_endpoint(ws: WebSocket):
                         response = await api_client.chat_with_tools(
                             tool_schemas=tool_registry.schemas,
                             tool_executor=tracking_executor,
-                            session_id=session_id
+                            session_id=session_id,
+                            tool_registry=tool_registry
                         )
                         await ws.send_json({
                             "type": "response",
@@ -438,7 +439,8 @@ async def websocket_endpoint(ws: WebSocket):
                     response = await api_client.chat_with_tools(
                         tool_schemas=tool_registry.schemas,
                         tool_executor=tracking_executor,
-                        session_id=session_id
+                        session_id=session_id,
+                        tool_registry=tool_registry
                     )
                     
                     # Intent fallback safety: ONLY trigger if user explicitly issued a direct command to check email and LLM produced no tool calls
@@ -503,7 +505,8 @@ async def chat_endpoint(request: dict):
     response = await api_client.chat_with_tools(
         tool_schemas=tool_registry.schemas,
         tool_executor=tool_registry.execute,
-        session_id=session_id
+        session_id=session_id,
+        tool_registry=tool_registry
     )
     
     # Push to all connected WebSocket clients

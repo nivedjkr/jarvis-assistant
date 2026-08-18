@@ -344,11 +344,23 @@ NEVER:
                     break
 
         # Check if Dispatcher handles as multi-step goal
-        if getattr(self, 'dispatcher', None) and user_last and tool_registry:
+        tr = tool_registry
+        if not tr and tool_executor:
+            class ToolExecutorAdapter:
+                def __init__(self, exec_fn, schemas):
+                    self._exec_fn = exec_fn
+                    self.schemas = schemas
+                async def execute(self, name: str, args: dict) -> str:
+                    return await self._exec_fn(name, args)
+                def get_schemas(self):
+                    return self.schemas
+            tr = ToolExecutorAdapter(tool_executor, tool_schemas)
+
+        if getattr(self, 'dispatcher', None) and user_last and tr:
             try:
                 dispatch_res = await self.dispatcher.dispatch(
                     user_prompt=user_last,
-                    tool_registry=tool_registry,
+                    tool_registry=tr,
                     llm_client=self
                 )
                 if dispatch_res.get("handled"):
