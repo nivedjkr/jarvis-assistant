@@ -83,6 +83,13 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) direc
 - **Projects & Task Engine (`projects.py`)**: Workspace manager, project switcher, task tracking, notes, and decision logging.
 - **Automation Protocols (`protocols.py`)**: Automated multi-step macro protocol execution.
 
+### 🤖 JARVIS Mk4 Safe Agentic Layer (`jarvis/agents/` & `jarvis/orchestration/`)
+- **Modular Logical Agents**: Specialized roles (`PlanningAgent`, `ResearchAgent`, `CodingAgent`, `SystemAgent`, `CommunicationAgent`) extending a unified `BaseAgent`.
+- **Direct Execution Bypass**: Simple requests ("What time is it?", "Open Chrome", "Check email") bypass agent orchestration completely with zero latency overhead.
+- **Goal Planning & Task Tracking**: Automatically decomposes multi-step goals into subtasks with dependency management and status tracking (`TaskTracker`).
+- **Bounded Agentic Loop**: Bounded reasoning-action execution loops (`AgenticLoop`) enforcing maximum iteration caps.
+- **Centralized Security Boundary**: All agent actions execute strictly via the existing `ToolRegistry` and security gates (`RISKY_TOOLS` + `/confirm`). No self-authorizing booleans in schemas.
+
 ---
 
 ## Architecture
@@ -106,6 +113,17 @@ JARVIS/
 ├── jarvis/                     ← Core Python Backend Engine
 │   ├── __init__.py             ← Package initialization
 │   ├── __main__.py             ← CLI entrypoint wrapper
+│   ├── agents/                 ← Mk4 Logical Agent Roles
+│   │   ├── base_agent.py       ← BaseAgent & AgentResponse classes
+│   │   ├── planning_agent.py   ← Request classifier & goal planner
+│   │   ├── research_agent.py   ← Web, memory & search research role
+│   │   ├── coding_agent.py     ← Software engineering & debug loop role
+│   │   ├── system_agent.py     ← System, app & filesystem role
+│   │   └── communication_agent.py ← Email, calendar & Obsidian role
+│   ├── orchestration/          ← Mk4 Orchestration Pipeline
+│   │   ├── task_tracker.py     ← TaskTracker & TaskItem state tracking
+│   │   ├── agentic_loop.py     ← Reusable bounded AgenticLoop engine
+│   │   └── dispatcher.py       ← AgentDispatcher routing & direct bypass
 │   ├── api.py                  ← FastAPI + WebSocket bridge server (port 8765)
 │   ├── api_client.py           ← LLM API client with provider abstraction
 │   ├── apps.py                 ← Application controller & launcher
