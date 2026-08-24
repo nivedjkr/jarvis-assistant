@@ -52,14 +52,28 @@ class PlanningAgent(BaseAgent):
         Fast heuristic classification to bypass LLM latency for common simple queries.
         """
         p_lower = prompt.lower().strip()
+
+        # Complex task keywords that explicitly require multi-step planning
+        multistep_indicators = [
+            "and then", "then ", "after that", "step 1", "step 2",
+            "first ", "workflow", "pipeline", "multi-step", "multistep",
+            "\n1.", "\n2.", "create ... and", "inspect ... then", "and also",
+            "build a", "web application", "full stack", "database",
+            "architecture", "system design"
+        ]
+        if any(ind in p_lower for ind in multistep_indicators):
+            return None
+
         simple_triggers = [
             "what time", "current time", "what date", "today's date",
-            "open chrome", "open notepad", "open calculator",
-            "cpu usage", "system status", "memory status",
-            "check email", "list emails", "unread emails",
-            "check calendar", "list calendar"
+            "open chrome", "open notepad", "open calculator", "open spotify",
+            "cpu usage", "system status", "memory status", "vitals", "disk usage",
+            "check email", "list emails", "unread emails", "email summary",
+            "check calendar", "list calendar", "weather", "git status", "git log",
+            "list files", "read file", "clipboard"
         ]
-        if any(trigger in p_lower for trigger in simple_triggers) and len(prompt.split()) <= 8:
+
+        if any(trigger in p_lower for trigger in simple_triggers) or len(prompt.split()) <= 8:
             return GoalPlan(
                 is_multi_step=False,
                 reasoning="Rule-based classification identified simple direct query."

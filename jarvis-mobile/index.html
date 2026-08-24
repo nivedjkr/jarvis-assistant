@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#08080b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>JARVIS Mobile</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <button class="icon-btn drawer-toggle" id="directivesToggleBtn" title="Directives & Protocols">
+          📋
+        </button>
+        <div class="brand-text">
+          <span class="title">J.A.R.V.I.S.</span>
+          <span class="subtitle">SYSTEM INTERFACE</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="vitals-badge" id="vitalsBadge" title="System Hardware Vitals">
+          <span class="vital-item" id="cpuVital">CPU: --%</span>
+          <span class="vital-divider">|</span>
+          <span class="vital-item" id="ramVital">RAM: --%</span>
+        </div>
+        <div class="status-badge" id="statusBadge">
+          <span class="status-dot"></span>
+          <span class="status-text" id="statusText">Connecting</span>
+        </div>
+        <button class="icon-btn" id="settingsToggleBtn" title="Settings">
+          ⚙️
+        </button>
+      </div>
+    </header>
+
+    <!-- Canvas Orb Section -->
+    <div class="orb-container" id="orbContainer">
+      <canvas id="orbCanvas" width="400" height="400"></canvas>
+      <div class="orb-state-label" id="orbStateLabel">IDLE</div>
+    </div>
+
+    <!-- Main Chat Log -->
+    <main class="chat-container" id="chatContainer">
+      <div class="messages-list" id="messagesList">
+        <!-- Messages injected dynamically -->
+      </div>
+    </main>
+
+    <!-- Quick Action Pills -->
+    <div class="action-pills" id="actionPills">
+      <button class="pill-btn" data-cmd="/email">📩 Check Email</button>
+      <button class="pill-btn" data-cmd="/diagnose">🩺 Diagnostics</button>
+      <button class="pill-btn" data-cmd="/vitals">📊 Hardware Vitals</button>
+      <button class="pill-btn" data-cmd="/tools">⚡ List Tools</button>
+      <button class="pill-btn" data-cmd="/help">❓ System Help</button>
+    </div>
+
+    <!-- Input Bar -->
+    <footer class="input-container">
+      <div class="input-wrapper">
+        <textarea id="userInput" placeholder="Send prompt or slash command..." rows="1"></textarea>
+        <button class="mic-btn" id="micBtn" title="Voice Input">
+          <span class="mic-icon">🎙️</span>
+        </button>
+        <button class="send-btn" id="sendBtn" title="Send Message">
+          <span>➤</span>
+        </button>
+      </div>
+    </footer>
+
+    <!-- Directives & Protocols Side Drawer -->
+    <aside class="drawer-overlay hidden" id="directivesDrawer">
+      <div class="drawer-card">
+        <div class="drawer-header">
+          <h3>Directives & Protocols</h3>
+          <button class="close-btn" id="closeDrawerBtn">&times;</button>
+        </div>
+        <div class="drawer-body">
+          <div class="drawer-section">
+            <h4>DIRECTIVES</h4>
+            <ul class="directives-list">
+              <li><span class="code">DIR-01</span> High-precision tool execution gate enforcement</li>
+              <li><span class="code">DIR-02</span> Automated memory fact synthesis & vector recall</li>
+              <li><span class="code">DIR-03</span> Proactive awareness & velocity anomaly tracking</li>
+              <li><span class="code">DIR-04</span> Untrusted external content sandboxing</li>
+            </ul>
+          </div>
+          <div class="drawer-section">
+            <h4>AUTOMATION PROTOCOLS</h4>
+            <div class="protocol-grid">
+              <button class="protocol-card" data-cmd="/email summary">
+                <span class="proto-title">📩 Executive Email Briefing</span>
+                <span class="proto-desc">Summarize Gmail inbox unread cards</span>
+              </button>
+              <button class="protocol-card" data-cmd="/diagnose">
+                <span class="proto-title">🩺 System Diagnostic Scan</span>
+                <span class="proto-desc">Run full multi-service health check</span>
+              </button>
+              <button class="protocol-card" data-cmd="/memory stats">
+                <span class="proto-title">🧠 Memory Vault Analytics</span>
+                <span class="proto-desc">Inspect SQLite + FAISS memory stats</span>
+              </button>
+              <button class="protocol-card" data-cmd="/provider">
+                <span class="proto-title">🤖 LLM Provider Circuit</span>
+                <span class="proto-desc">View & reset active NIM provider</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay hidden" id="settingsModal">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Connection Settings</h3>
+          <button class="close-btn" id="closeSettingsBtn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="wsHostInput">Backend Host / Tailscale IP</label>
+            <input type="text" id="wsHostInput" placeholder="e.g. 100.x.y.z:8765 or localhost:8765">
+            <small>Leave empty to auto-detect current host.</small>
+          </div>
+          <div class="form-group">
+            <label for="wsTokenInput">JARVIS WS Token</label>
+            <input type="password" id="wsTokenInput" placeholder="jarvis_secure_local_token_2026">
+          </div>
+          <div class="form-group">
+            <label for="ttsToggle">Voice TTS Output</label>
+            <div class="toggle-wrapper">
+              <input type="checkbox" id="ttsToggle" checked>
+              <span>Enable Edge-TTS speech synthesis</span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="resetSettingsBtn">Reset Defaults</button>
+          <button class="btn btn-primary" id="saveSettingsBtn">Save & Reconnect</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

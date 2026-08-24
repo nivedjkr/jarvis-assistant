@@ -1,18 +1,19 @@
 <div align="center">
 
-# J.A.R.V.I.S.
+# J.A.R.V.I.S. Mk 4.5
 ### Just A Rather Very Intelligent System
 
-*A personal AI assistant featuring an Electron + React desktop UI, live Gmail integration & Email UI panel, voice TTS engine, dual SQLite & FAISS vector memory, native GitHub & Git workflows, system diagnostics, proactive awareness, pre-commit security safeguards, and full PC control — powered by NVIDIA Nemotron.*
+*A personal AI assistant featuring an Electron + React desktop UI, Tailscale Mobile PWA integration, live Gmail integration & Email UI panel, voice TTS engine, dual SQLite & FAISS vector memory, native GitHub & Git workflows, system diagnostics, proactive awareness, pre-commit security safeguards, and full PC control — powered by NVIDIA Nemotron & Google Gemini.*
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
 ![Electron](https://img.shields.io/badge/Electron-Desktop-47848F?style=flat-square&logo=electron)
+![Mobile PWA](https://img.shields.io/badge/Mobile-PWA%20Tailscale-purple?style=flat-square&logo=pwa)
 ![React](https://img.shields.io/badge/React-18.x-61DAFB?style=flat-square&logo=react)
 ![NVIDIA](https://img.shields.io/badge/NVIDIA-Nemotron--3--Ultra--550b-76B900?style=flat-square&logo=nvidia)
 ![Gmail](https://img.shields.io/badge/Gmail-Google%20OAuth-EA4335?style=flat-square&logo=gmail)
 ![Memory](https://img.shields.io/badge/Memory-SQLite%20%2B%20FAISS-003B57?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=flat-square)
+![Version](https://img.shields.io/badge/Release-Mk%204.5-brightgreen?style=flat-square)
 
 **Built by [Nived](https://github.com/nivedjkr)**
 
@@ -88,7 +89,11 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) direc
 - **Direct Execution Bypass**: Simple requests ("What time is it?", "Open Chrome", "Check email") bypass agent orchestration completely with zero latency overhead.
 - **Goal Planning & Task Tracking**: Automatically decomposes multi-step goals into subtasks with dependency management and status tracking (`TaskTracker`).
 - **Bounded Agentic Loop**: Bounded reasoning-action execution loops (`AgenticLoop`) enforcing maximum iteration caps.
-- **Centralized Security Boundary**: All agent actions execute strictly via the existing `ToolRegistry` and security gates (`RISKY_TOOLS` + `/confirm`). No self-authorizing booleans in schemas.
+### 📱 Secure Mobile Access & Tailscale PWA (`jarvis-mobile/`)
+- **Zero Public Exposure**: Access JARVIS securely over LAN or private [Tailscale](https://tailscale.com) mesh networks without opening public router ports.
+- **Standalone PWA Client**: Lightweight, mobile-first Web App (`jarvis-mobile/`) featuring dark glassmorphism, responsive chat log, quick action pills, and Web App Manifest (`manifest.json`) for home screen installation.
+- **Voice & Speech Support**: Native Web Speech API voice input (`🎙️`) combined with backend Edge-TTS voice synthesis (`/tts_sentence`).
+- **Strict Security Controls**: Enforced `JARVIS_ALLOW_REMOTE=true` flag for `0.0.0.0` binding, CORS regex restricting origins to LAN/Tailscale IP ranges (`100.64.0.0/10`, `*.ts.net`), and mandatory `JARVIS_WS_TOKEN` auth on WebSocket endpoints.
 
 ---
 
@@ -221,6 +226,19 @@ npm run dev
 ```bash
 python -m jarvis.cli
 ```
+
+#### Option C: Secure Mobile Web Access (Tailscale PWA)
+
+1. Enable remote access in `.env`:
+   ```env
+   JARVIS_ALLOW_REMOTE=true
+   JARVIS_WS_TOKEN=jarvis_secure_local_token_2026
+   ```
+2. Start backend server:
+   ```bash
+   python -m jarvis.api
+   ```
+3. Open `http://<tailscale-ip>:8765/mobile` on your mobile phone connected to your Tailnet and select **"Add to Home Screen"**.
 
 ---
 

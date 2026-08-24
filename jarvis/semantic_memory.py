@@ -20,6 +20,14 @@ class SemanticMemory:
             from sentence_transformers import SentenceTransformer
             self.model = SentenceTransformer('all-MiniLM-L6-v2')  # small, fast, local
         return self.model
+
+    def prewarm(self):
+        """Pre-load embedding model during startup to eliminate first-query latency."""
+        try:
+            self._get_model()
+            print("[SEMANTIC] Embedding model pre-warmed successfully.")
+        except Exception as e:
+            print(f"[SEMANTIC] Pre-warm notice: {e}")
     
     def _load_existing(self):
         if self.facts_path.exists():

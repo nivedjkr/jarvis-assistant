@@ -175,10 +175,48 @@ class OllamaProvider(LLMProvider):
             res = await res
         return res
 
+class GeminiProvider(LLMProvider):
+    def __init__(self):
+        model_name = config.get("api.gemini_model", "gemini-2.0-flash")
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "mock_key"
+        self.client = AsyncOpenAI(
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=api_key,
+            timeout=httpx.Timeout(45.0, connect=10.0)
+        )
+        self.model = model_name
+
+    @property
+    def name(self) -> str:
+        return "Google Gemini"
+
+    async def chat(self, messages: list, tools: Optional[list] = None, max_tokens: int = 2048) -> Any:
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": False,
+            "timeout": 45.0
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        res = await recovery.call_with_recovery(
+            self.name,
+            self.client.chat.completions.create,
+            "Google Gemini API temporarily unavailable, sir.",
+            **kwargs
+        )
+        while inspect.isawaitable(res):
+            res = await res
+        return res
+
 def get_provider(name: Optional[str] = None) -> LLMProvider:
     providers = {
         "nvidia": NVIDIAProvider,
         "groq": GroqProvider,
+        "gemini": GeminiProvider,
         "anthropic": AnthropicProvider,
         "ollama": OllamaProvider
     }

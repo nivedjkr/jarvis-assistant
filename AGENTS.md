@@ -26,6 +26,7 @@ against the actual code. Before saying something works:
 - **`jarvis-desktop/`** — Electron + React frontend. `App.jsx` handles the WebSocket connection
   and routes `state_update` messages to panel components (`EmailPanel`, `DirectivesPanel`,
   `SystemVitals`).
+- **`jarvis-mobile/`** — Plain HTML/JS PWA mobile client (no Electron). Served directly at `/mobile` by FastAPI when `JARVIS_ALLOW_REMOTE=true` or accessible over LAN/Tailscale.
 - Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`) live in their own
   files and are instantiated once in `ToolRegistry.__init__`, then reused — never create a second
   competing instance of a service elsewhere.
@@ -67,9 +68,26 @@ against the actual code. Before saying something works:
 
 5. **The WebSocket requires a valid `JARVIS_WS_TOKEN`.** Don't relax `allow_origins` back to `*`,
    and don't remove the token check in `api.py`.
+   - Remote connections (`0.0.0.0` binding) are ONLY enabled when `JARVIS_ALLOW_REMOTE=true`. Default remains `127.0.0.1` (localhost only).
+   - Do not bind to `0.0.0.0` without both the Tailscale/private network layer and `JARVIS_WS_TOKEN` auth check active.
+   - CORS origin regex restricts incoming origins to localhost, private LAN ranges (`192.168.*`, `10.*`, `172.16-31.*`), and Tailscale IP/domain patterns (`100.64.0.0/10`, `*.ts.net`).
 
 6. **Tool-call loops must respect `max_allowed_calls`** in `api_client.py` — never let a single
    model response auto-execute an unbounded number of tool calls.
+
+## Tailscale & Mobile Access Setup
+
+1. **Install Tailscale**: Install Tailscale on the host machine running JARVIS and on your mobile device (iOS/Android) from [tailscale.com](https://tailscale.com). Join both devices to the same private Tailnet.
+2. **Configure `.env`**:
+   ```env
+   JARVIS_ALLOW_REMOTE=true
+   JARVIS_WS_TOKEN=jarvis_secure_local_token_2026
+   ```
+3. **Run Backend**: Launch `python -m jarvis.api`. The backend will display `Remote access ENABLED (listening on 0.0.0.0:8765)`.
+4. **Access Mobile PWA**:
+   - Open your mobile browser and navigate to `http://<tailscale-ip>:8765/mobile` (e.g., `http://100.115.20.10:8765/mobile`).
+   - Tap "Add to Home Screen" in your browser menu to install the JARVIS Progressive Web App (PWA).
+   - Configure your Tailscale IP and `JARVIS_WS_TOKEN` in the mobile app settings if re-connecting from external networks.
 
 ## Known regressions — don't reintroduce these
 

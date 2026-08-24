@@ -65,3 +65,17 @@ python -m jarvis.debug_panel
 ```bash
 pytest jarvis/tests/ -v
 ```
+
+## 7. Mobile Access via Tailscale (PWA)
+
+To access JARVIS from a mobile phone without exposing the backend to the public internet:
+
+1. Install **Tailscale** on both host PC and mobile phone.
+2. In `.env`, set:
+   ```env
+   JARVIS_ALLOW_REMOTE=true
+   JARVIS_WS_TOKEN=jarvis_secure_local_token_2026
+   ```
+3. Start backend: `python -m jarvis.api`
+4. On your phone, visit `http://<tailscale-ip>:8765/mobile` and select **"Add to Home Screen"**.
+

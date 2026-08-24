@@ -1,0 +1,18 @@
+{
+  "name": "J.A.R.V.I.S. Mobile Assistant",
+  "short_name": "JARVIS",
+  "description": "Mobile PWA client for J.A.R.V.I.S. Personal AI Assistant",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#040406",
+  "theme_color": "#08080b",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

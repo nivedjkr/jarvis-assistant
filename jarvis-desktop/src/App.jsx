@@ -247,7 +247,7 @@ export default function App() {
                 lastProcessedSentenceIndexRef.current += sentence.length
                 const clean = cleanTextForSpeech(sentence)
                 if (clean) {
-                  sentenceQueueRef.current.push(clean)
+                  sentenceQueueRef.current.push({ text: clean })
                   if (!isSpeakingRef.current) {
                     processNextSentence()
                   }

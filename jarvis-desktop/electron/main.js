@@ -11,6 +11,30 @@ let jarvisProcess
 let ws
 let backendFailed = false
 
+function loadDotEnv(envPath) {
+  if (fs.existsSync(envPath)) {
+    try {
+      const content = fs.readFileSync(envPath, 'utf8')
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim()
+        if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+          const parts = trimmed.split('=')
+          const key = parts[0].trim()
+          const val = parts.slice(1).join('=').trim()
+          if (key && !process.env[key]) {
+            process.env[key] = val
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[ELECTRON] Error parsing .env file:', e)
+    }
+  }
+}
+
+const rootEnvFile = path.resolve(__dirname, '..', '..', '.env')
+loadDotEnv(rootEnvFile)
+
 function checkPortInUse(port, host = '127.0.0.1') {
   return new Promise((resolve) => {
     const socket = new net.Socket()
@@ -282,6 +306,7 @@ function connectWebSocket() {
     return
   }
   try {
+    loadDotEnv(rootEnvFile)
     const wsToken = process.env.JARVIS_WS_TOKEN || 'jarvis_secure_local_token_2026'
     ws = new WebSocket(`ws://127.0.0.1:8765/ws?token=${wsToken}`)
     

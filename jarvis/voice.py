@@ -430,17 +430,25 @@ class TTSEngine:
         await self.speak(phrase)
 
 
+_SENTENCE_AUDIO_CACHE: Dict[str, bytes] = {}
+_SENTENCE_CACHE_LOCK = threading.Lock()
+
 async def synthesize_sentence(text: str, voice: str = "en-GB-RyanNeural") -> bytes:
     """
-    Synthesize a single sentence using edge-tts with en-GB-RyanNeural voice.
-    Saves to a temporary file and returns raw audio bytes.
+    Synthesize a single sentence using edge-tts with en-GB-RyanNeural voice and in-memory LRU cache.
     """
     clean_text = _clean_text_for_speech(text)
     if not clean_text:
         return b""
+
+    cache_key = f"{voice}:{clean_text}"
+    with _SENTENCE_CACHE_LOCK:
+        if cache_key in _SENTENCE_AUDIO_CACHE:
+            return _SENTENCE_AUDIO_CACHE[cache_key]
+
     try:
         import edge_tts
-        communicate = edge_tts.Communicate(clean_text, voice)
+        communicate = edge_tts.Communicate(clean_text, voice, rate="+12%")
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
             temp_path = temp_file.name
         
@@ -452,6 +460,12 @@ async def synthesize_sentence(text: str, voice: str = "en-GB-RyanNeural") -> byt
             os.unlink(temp_path)
         except Exception:
             pass
+
+        with _SENTENCE_CACHE_LOCK:
+            if len(_SENTENCE_AUDIO_CACHE) > 300:
+                _SENTENCE_AUDIO_CACHE.pop(next(iter(_SENTENCE_AUDIO_CACHE)))
+            _SENTENCE_AUDIO_CACHE[cache_key] = audio_bytes
+
         return audio_bytes
     except Exception as e:
         console.print(f"[red]Error in synthesize_sentence: {e}[/red]")

@@ -6,6 +6,7 @@ import time
 import uuid
 import inspect
 import httpx
+import re
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 from pathlib import Path
@@ -300,7 +301,7 @@ NEVER:
     def clear_history(self, session_id: str = None):
         self.get_session(session_id).clear_history()
 
-    async def _stream_response(self, messages: list, max_tokens: int = 2048) -> str:
+    async def _stream_response(self, messages: list, max_tokens: int = 2048, chunk_callback=None) -> str:
         async def _do_stream():
             full_text = ""
             stream = await self.client.chat.completions.create(
@@ -308,13 +309,20 @@ NEVER:
                 messages=messages,
                 max_tokens=max_tokens,
                 stream=True,
-                timeout=httpx.Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0)
+                timeout=httpx.Timeout(connect=20.0, read=180.0, write=30.0, pool=10.0)
             )
             async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta.content or ""
                     if delta:
                         print(delta, end="", flush=True)
+                        if chunk_callback:
+                            try:
+                                res = chunk_callback(delta)
+                                if asyncio.iscoroutine(res):
+                                    await res
+                            except Exception:
+                                pass
                         full_text += delta
             print()  # newline after streaming
             return full_text
@@ -333,7 +341,8 @@ NEVER:
         self, tool_schemas: list, 
         tool_executor,
         session_id: str = None,
-        tool_registry: Any = None) -> str:
+        tool_registry: Any = None,
+        chunk_callback=None) -> str:
         """Full tool-calling pipeline with session isolation"""
         session = self.get_session(session_id)
         user_last = ""
@@ -343,7 +352,28 @@ NEVER:
                     user_last = m.get('content', '')
                     break
 
-        # Check if Dispatcher handles as multi-step goal
+        ACTION_TOOL_TRIGGERS = {
+            'email', 'mail', 'inbox', 'gmail', 'calendar', 'obsidian',
+            'git', 'github', 'repo', 'file', 'dir', 'folder',
+            'weather', 'disk', 'vitals', 'create', 'delete', 'update',
+            'write', 'list', 'open', 'close', 'spotify', 'chrome', 'clipboard',
+            'gist', 'commit', 'pull', 'branch', 'pr', 'issue', 'inventory', 'reminders',
+            'watchlist', 'project', 'protocol', 'inspect'
+        }
+        
+        lower_user = user_last.lower().strip()
+        words = set(re.findall(r'\b\w+\b', lower_user)) if lower_user else set()
+        needs_tools = bool(words & ACTION_TOOL_TRIGGERS) or lower_user.startswith('/')
+
+        messages = self.get_messages_with_memory(user_last, session_id)
+
+        if not needs_tools and user_last:
+            print(f"[FAST-PATH] Direct conversational stream for session '{session.session_id}'")
+            resp_text = await self._stream_response(messages, max_tokens=768, chunk_callback=chunk_callback)
+            self.add_assistant_message(resp_text, session_id=session_id)
+            return resp_text
+
+        # Check if Dispatcher handles as multi-step goal (only for tool-dependent queries)
         tr = tool_registry
         if not tr and tool_executor:
             class ToolExecutorAdapter:
@@ -369,8 +399,6 @@ NEVER:
                     return resp_text
             except Exception as e:
                 print(f"[DISPATCHER] Dispatch error, falling back to direct pipeline: {e}")
-
-        messages = self.get_messages_with_memory(user_last, session_id)
         
         print(f"[PIPELINE] Calling API for session '{session.session_id}' with "
               f"{len(tool_schemas)} tools")
@@ -507,8 +535,15 @@ NEVER:
                     if message.content:
                         final_response_text = message.content
                         print(final_response_text)
+                        if chunk_callback:
+                            try:
+                                res = chunk_callback(final_response_text)
+                                if asyncio.iscoroutine(res):
+                                    await res
+                            except Exception:
+                                pass
                     else:
-                        final_response_text = await self._stream_response(messages, max_tokens=2048)
+                        final_response_text = await self._stream_response(messages, max_tokens=2048, chunk_callback=chunk_callback)
                     break
 
             api_latency = time.time() - api_t0

@@ -7,6 +7,7 @@ os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 import asyncio
 import json
@@ -25,7 +26,15 @@ from jarvis.tools import ToolRegistry
 from jarvis.voice import TTSEngine
 from jarvis.diagnostics import run_diagnostics, run_diagnostics_sync
 
-app = FastAPI()
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if hasattr(api_client, 'semantic_memory') and api_client.semantic_memory:
+        asyncio.create_task(asyncio.to_thread(api_client.semantic_memory.prewarm))
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -37,9 +46,19 @@ ALLOWED_ORIGINS = [
     "vscode-webview://*"
 ]
 
+custom_origins = os.getenv("JARVIS_ALLOWED_ORIGINS", "")
+if custom_origins:
+    for origin in custom_origins.split(","):
+        origin_clean = origin.strip()
+        if origin_clean and origin_clean != "*" and origin_clean not in ALLOWED_ORIGINS:
+            ALLOWED_ORIGINS.append(origin_clean)
+
+ALLOW_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1|100\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3}|[a-zA-Z0-9\.\-]+\.ts\.net)(:\d+)?"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=ALLOW_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
@@ -47,10 +66,25 @@ app.add_middleware(
 
 WS_AUTH_TOKEN = os.getenv("JARVIS_WS_TOKEN", "jarvis_secure_local_token_2026")
 
-# Shared instances
+@app.get("/mobile/config.json")
+async def mobile_config_endpoint():
+    return {
+        "ws_token": WS_AUTH_TOKEN,
+        "status": "online"
+    }
+
+mobile_dir = Path(__file__).parent.parent / "jarvis-mobile"
+if mobile_dir.exists():
+    try:
+        cfg_file = mobile_dir / "config.json"
+        cfg_file.write_text(json.dumps({"ws_token": WS_AUTH_TOKEN, "status": "online"}), encoding="utf-8")
+    except Exception:
+        pass
+    app.mount("/mobile", StaticFiles(directory=str(mobile_dir), html=True), name="mobile")
+
 api_client = JarvisAPIClient()
 tool_registry = ToolRegistry()
-tts_engine = TTSEngine()  # Single shared TTS engine
+tts_engine = TTSEngine()
 
 def handle_tool_state_change(domain: str, action: str, payload: dict):
     from datetime import datetime
@@ -128,16 +162,16 @@ async def websocket_endpoint(ws: WebSocket):
 
     session_id = f"electron_{uuid.uuid4().hex[:8]}"
     
-    # Run startup health check and send report to desktop client
-    report = await run_diagnostics(check_nvidia=True)
-    await ws.send_json({
-        "type": "status",
-        "status": "connected",
-        "message": "JARVIS online, sir.",
-        "health_check": report.to_dict()
-    })
-    
     try:
+        # Run startup health check and send report to desktop/mobile client
+        report = await run_diagnostics(check_nvidia=True)
+        await ws.send_json({
+            "type": "status",
+            "status": "connected",
+            "message": "JARVIS online, sir.",
+            "health_check": report.to_dict()
+        })
+        
         while True:
             data = await ws.receive_json()
             msg_type = data.get("type", "message")
@@ -402,13 +436,25 @@ async def websocket_endpoint(ws: WebSocket):
                             executed_tools.append({"name": name, "args": args})
                             return await tool_registry.execute(name, args)
 
-                        api_client.add_user_message(user_msg, session_id=session_id)
-                        response = await api_client.chat_with_tools(
-                            tool_schemas=tool_registry.schemas,
-                            tool_executor=tracking_executor,
-                            session_id=session_id,
-                            tool_registry=tool_registry
-                        )
+                        async def send_chunk(chunk_text: str):
+                            try:
+                                await ws.send_json({"type": "chunk", "text": chunk_text})
+                            except Exception:
+                                pass
+
+                        try:
+                            api_client.add_user_message(user_msg, session_id=session_id)
+                            response = await api_client.chat_with_tools(
+                                tool_schemas=tool_registry.schemas,
+                                tool_executor=tracking_executor,
+                                session_id=session_id,
+                                tool_registry=tool_registry,
+                                chunk_callback=send_chunk
+                            )
+                        except Exception as err:
+                            print(f"[API ERROR] Error processing slash command/query: {err}")
+                            response = f"I encountered an error processing your request, sir: {err}"
+
                         await ws.send_json({
                             "type": "response",
                             "text": response,
@@ -440,13 +486,24 @@ async def websocket_endpoint(ws: WebSocket):
                         executed_tools.append({"name": name, "args": args})
                         return await tool_registry.execute(name, args)
 
-                    api_client.add_user_message(user_msg, session_id=session_id)
-                    response = await api_client.chat_with_tools(
-                        tool_schemas=tool_registry.schemas,
-                        tool_executor=tracking_executor,
-                        session_id=session_id,
-                        tool_registry=tool_registry
-                    )
+                    async def send_chunk(chunk_text: str):
+                        try:
+                            await ws.send_json({"type": "chunk", "text": chunk_text})
+                        except Exception:
+                            pass
+
+                    try:
+                        api_client.add_user_message(user_msg, session_id=session_id)
+                        response = await api_client.chat_with_tools(
+                            tool_schemas=tool_registry.schemas,
+                            tool_executor=tracking_executor,
+                            session_id=session_id,
+                            tool_registry=tool_registry,
+                            chunk_callback=send_chunk
+                        )
+                    except Exception as err:
+                        print(f"[API ERROR] Error processing message: {err}")
+                        response = f"I encountered an error processing your request, sir: {err}"
                     
                     # Intent fallback safety: ONLY trigger if user explicitly issued a direct command to check email and LLM produced no tool calls
                     if not executed_tools:
@@ -468,7 +525,7 @@ async def websocket_endpoint(ws: WebSocket):
                                 executed_tools.append({"name": "email_summary", "args": {}})
                                 response = res
 
-                    # Send response back to Electron
+                    # Send response back to Electron / Web clients
                     await ws.send_json({
                         "type": "response",
                         "text": response,
@@ -579,14 +636,24 @@ async def vitals_endpoint():
     except Exception:
         return {}
 
+def get_host_binding() -> str:
+    allow_remote = os.getenv("JARVIS_ALLOW_REMOTE", "false").strip().lower() in ("true", "1", "yes")
+    return "0.0.0.0" if allow_remote else "127.0.0.1"
+
 if __name__ == "__main__":
+    host = get_host_binding()
     print("[API] Starting JARVIS WebSocket server...")
     print("[API] Running startup health check...")
     report = run_diagnostics_sync(check_nvidia=True)
     print(report.format_plain())
-    print("[API] Electron can connect at ws://127.0.0.1:8765/ws")
+    if host == "0.0.0.0":
+        print("[API] Remote access ENABLED via JARVIS_ALLOW_REMOTE=true (listening on 0.0.0.0:8765)")
+        print("[API] Tailscale / LAN connection active with JARVIS_WS_TOKEN auth required.")
+    else:
+        print("[API] Localhost-only mode (listening on 127.0.0.1:8765). Set JARVIS_ALLOW_REMOTE=true for LAN/Tailscale access.")
+    print("[API] WebSocket clients can connect at ws://127.0.0.1:8765/ws")
     try:
-        uvicorn.run(app, host="127.0.0.1", port=8765, log_level="info")
+        uvicorn.run(app, host=host, port=8765, log_level="info")
     except (OSError, Exception) as e:
         err_str = str(e)
         if "10048" in err_str or "98" in err_str or "address already in use" in err_str.lower():
