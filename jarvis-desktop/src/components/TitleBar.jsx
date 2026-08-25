@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import './TitleBar.css'
 
-export default function TitleBar({ isConnected = true, onToggleSessions, onToggleCalendar, isCalendarOpen = false }) {
+export default function TitleBar({ 
+  isConnected = true, 
+  onToggleSessions, 
+  onToggleCalendar, 
+  isCalendarOpen = false,
+  onToggleDirectives,
+  isDirectivesOpen = true
+}) {
   const [timeStr, setTimeStr] = useState('')
   const [isFullscreen, setIsFullscreen] = useState(false)
 
@@ -71,6 +78,14 @@ export default function TitleBar({ isConnected = true, onToggleSessions, onToggl
           style={{ marginLeft: '4px' }}
         >
           📅
+        </button>
+        <button 
+          className={`sessions-toggle-btn ${isDirectivesOpen ? 'active' : ''}`}
+          onClick={onToggleDirectives} 
+          title="Directives & Tasks"
+          style={{ marginLeft: '4px' }}
+        >
+          📋
         </button>
         <div className={`status-dot ${isConnected ? 'online' : 'offline'}`} />
         <span className="brand-mark">J.A.R.V.I.S. // COMMAND DECK</span>

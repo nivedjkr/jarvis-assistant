@@ -16,6 +16,7 @@ export default function App() {
   const [lastStateUpdate, setLastStateUpdate] = useState(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
+  const [isDirectivesOpen, setIsDirectivesOpen] = useState(true)
   const [currentSessionId, setCurrentSessionId] = useState(null)
 
   const activeAudioRef = useRef(null)
@@ -477,6 +478,8 @@ export default function App() {
         onToggleSessions={() => setIsSidebarOpen(prev => !prev)} 
         onToggleCalendar={() => setIsCalendarOpen(prev => !prev)}
         isCalendarOpen={isCalendarOpen}
+        onToggleDirectives={() => setIsDirectivesOpen(prev => !prev)}
+        isDirectivesOpen={isDirectivesOpen}
       />
       
       <div style={{
@@ -522,7 +525,12 @@ export default function App() {
           <ChatLog messages={messages} />
         </div>
 
-        <DirectivesPanel isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
+        <DirectivesPanel 
+          isConnected={isConnected} 
+          lastStateUpdate={lastStateUpdate} 
+          isOpen={isDirectivesOpen}
+          onClose={() => setIsDirectivesOpen(false)}
+        />
         <EmailPanel isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
       </div>
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import './DirectivesPanel.css'
 
-export default function DirectivesPanel({ isConnected = true, lastStateUpdate = null }) {
+export default function DirectivesPanel({ isConnected = true, lastStateUpdate = null, isOpen = true, onClose }) {
   const [directives, setDirectives] = useState([
     { id: 1, text: 'Review portfolio AAPL target', completed: false },
     { id: 2, text: 'Backup SQLite memory DB', completed: false },
@@ -28,19 +28,20 @@ export default function DirectivesPanel({ isConnected = true, lastStateUpdate = 
   }
 
   useEffect(() => {
-    fetchDirectives()
-    const timer = setInterval(fetchDirectives, 5000)
-    return () => clearInterval(timer)
-  }, [isConnected])
+    if (isOpen) {
+      fetchDirectives()
+      const timer = setInterval(fetchDirectives, 5000)
+      return () => clearInterval(timer)
+    }
+  }, [isConnected, isOpen])
 
   // Handle incoming real-time state_update events over WebSocket
   useEffect(() => {
-    if (!lastStateUpdate) return
-    const { domain, action, payload } = lastStateUpdate
+    if (!lastStateUpdate || !isOpen) return
+    const { domain, payload } = lastStateUpdate
     if (domain === 'directives' || domain === 'inventory') {
       fetchDirectives()
       if (payload && payload.text) {
-        // If it's a new directive, append or flash top item
         setDirectives(prev => {
           const exists = prev.some(d => d.text === payload.text)
           if (!exists) {
@@ -55,7 +56,7 @@ export default function DirectivesPanel({ isConnected = true, lastStateUpdate = 
       const t = setTimeout(() => setFlashingItem(null), 1600)
       return () => clearTimeout(t)
     }
-  }, [lastStateUpdate])
+  }, [lastStateUpdate, isOpen])
 
   const toggleDirective = (id) => {
     setDirectives(prev =>
@@ -65,9 +66,31 @@ export default function DirectivesPanel({ isConnected = true, lastStateUpdate = 
     )
   }
 
+  if (!isOpen) return null
+
   return (
     <aside className={`directives-panel ${flashingItem === 'panel' ? 'state-flash-highlight' : ''}`}>
-      <div className="directives-header">DIRECTIVES</div>
+      <div className="directives-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>DIRECTIVES</span>
+        {onClose && (
+          <button 
+            className="directives-close-btn" 
+            onClick={onClose} 
+            title="Close Directives Panel"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: '12px',
+              padding: '0 4px',
+              lineHeight: 1
+            }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
       
       <div className="directives-list">
         {directives.length === 0 ? (
