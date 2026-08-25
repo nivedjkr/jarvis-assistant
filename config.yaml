@@ -90,3 +90,10 @@ proactive:
     - cybersecurity
     - space technology
     - software engineering
+
+browser:
+  headless: true
+  nav_timeout_seconds: 15
+  idle_timeout_minutes: 5
+  max_screenshot_width: 1280
+

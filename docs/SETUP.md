@@ -29,6 +29,7 @@ OPENWEATHER_API_KEY=your_openweather_key
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install pydantic pytest pytest-asyncio httpx
+playwright install chromium
 ```
 
 ## 4. Install Desktop UI Dependencies

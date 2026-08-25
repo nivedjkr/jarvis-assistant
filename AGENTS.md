@@ -27,7 +27,7 @@ against the actual code. Before saying something works:
   and routes `state_update` messages to panel components (`EmailPanel`, `DirectivesPanel`,
   `SystemVitals`).
 - **`jarvis-mobile/`** — Plain HTML/JS PWA mobile client (no Electron). Served directly at `/mobile` by FastAPI when `JARVIS_ALLOW_REMOTE=true` or accessible over LAN/Tailscale.
-- Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`) live in their own
+- Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`, `BrowserService`) live in their own
   files and are instantiated once in `ToolRegistry.__init__`, then reused — never create a second
   competing instance of a service elsewhere.
 - Current model: `nvidia/nemotron-3-ultra-550b-a55b` (NVIDIA NIM, free endpoint, 1M context,
@@ -115,6 +115,7 @@ All coding modification tasks must follow the verified-not-claimed discipline us
 - Session management tools: `list_sessions`, `new_session`, `switch_session`, `rename_session`, `delete_session`.
 - Desktop sessions UI uses a top-left 3-dots button (`⋮`) triggering a floating overlay drawer so layout geometry of the central Orb and Chat log remains uncompressed.
 - Proactive Obsidian memory filing uses vault folder structure: `Memory/profile.md`, `Memory/topics/<topic>.md`, `Memory/people/<name>.md`, `Memory/areas/<project>.md`. System prompt directs JARVIS to evaluate user messages for durable facts, search Obsidian first, extend existing notes, filter throwaway queries, and avoid credential logging.
+- Headless Browsing Engine (`jarvis/browser_service.py`): Manages a persistent Playwright Chromium instance with async-sync thread loop bridging, 15s navigation timeout, and 5m idle auto-close timer. Exposed tools: `browse_page`, `browse_click`, `browse_screenshot`, `browse_extract_links`, `browse_close`. `browse_click` is integrated into `RISKY_TOOLS` confirmation gate and logged to `CommandLogger`. All page text is wrapped in `<untrusted_external_content source='browser'>` prompt-injection defense boundaries.
 
 ## Open / incomplete work
 

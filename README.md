@@ -50,6 +50,12 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) direc
 - **TitleBar Command Controls**: Dragable custom window header with native window management and instant `[?] HELP` command reference modal.
 - **FastAPI WebSocket Bridge**: High-performance bidirectional WebSocket communication (`ws://127.0.0.1:8765/ws`) connecting the Python backend to the React interface with tool execution badges (`⚡ TOOL EXECUTED`).
 
+### 🌐 Headless Web Browsing & DOM Rendering (Playwright Engine)
+- **Playwright Headless Chromium**: Full single-page application (SPA) and JavaScript DOM rendering (`browse_page`, `browse_click`, `browse_screenshot`, `browse_extract_links`, `browse_close`).
+- **Prompt-Injection Defense**: Automatic `<untrusted_external_content source='browser'>` wrapping for all web-harvested text.
+- **Resource Management**: 15s per-navigation timeout and 5m idle auto-close timer to prevent orphaned browser processes.
+- **Safety Gates & Logging**: `browse_click` target logging and human confirmation gate integration.
+
 ### 💻 Full System Access & Local PC Control
 - **File & Directory Management**: Create, read, write, list, copy, move, rename, and delete local files and folders.
 - **Application Controller (`apps.py`)**: Launch, monitor, and terminate local desktop applications by name.

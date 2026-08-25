@@ -336,6 +336,13 @@ OBSIDIAN & NOTE INSTRUCTIONS:
 - To append text or log entries to any existing note: call append_obsidian_note tool.
 - To append a log entry or note to today's daily note: call append_daily_note tool.
 
+HEADLESS BROWSING INSTRUCTIONS:
+- Prefer web_search_live or get_webpage_content for simple search queries and static web pages.
+- ONLY reach for browse_page or browse_click when the target page requires JavaScript rendering (single-page applications, dynamic DOM) or multi-step navigation. Do not default to browse_page for simple queries.
+- Use browse_screenshot to capture a visual rendering of the active browser page when requested.
+- Use browse_extract_links to harvest page hyperlinks and navigation structure.
+- Call browse_close to explicitly release browser resources after completing multi-step web interaction.
+
 PROACTIVE OBSIDIAN MEMORY FILING INSTRUCTIONS:
 - Evaluate whether the user's message contains a durable fact worth remembering — a stated preference, a decision, a recurring topic, or a fact about a person or project — as distinct from small talk or a throwaway question (e.g. "what's 2+2" or "hello").
 - If a durable fact is present:

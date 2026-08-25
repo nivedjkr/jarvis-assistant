@@ -7,7 +7,7 @@ This document catalogs all registered tool schemas available to JARVIS, organize
 |----------|-------|-------------------|
 | File Operations | 7 | `read_file`, `write_file`, `list_files`, `delete_file`, `create_directory` |
 | Application Control | 3 | `open_application`, `close_application`, `list_running_applications` |
-| Browser Navigation | 3 | `open_url`, `open_website`, `search_web` |
+| Browser Navigation (Playwright) | 8 | `open_url`, `open_website`, `web_search`, `web_search_live`, `get_webpage_content`, `browse_page`, `browse_click`, `browse_screenshot`, `browse_extract_links`, `browse_close` |
 | System Telemetry | 2 | `get_system_status`, `run_diagnostics` |
 | Clipboard Management | 2 | `copy_to_clipboard`, `get_clipboard` |
 | GitHub & Git Workflow | 18 | `git_status`, `git_log`, `git_commit`, `git_push`, `gh_list_repos`, `gh_list_issues`, `gh_create_issue`, `gh_merge_pr`, `gh_ci_status` |
@@ -54,3 +54,16 @@ This document catalogs all registered tool schemas available to JARVIS, organize
   - *Trigger*: "What is my cpu usage?"
 - `run_diagnostics`: Execute multi-check health suite.
   - *Trigger*: "Run system diagnostics"
+
+## 5. Headless Browser (Playwright Engine)
+- `browse_page`: Render JS-heavy web pages / SPAs and extract clean readable text.
+  - *Trigger*: "Browse https://example.com and read the pricing section"
+- `browse_click`: Click dynamic elements or buttons on active web pages (requires confirmation gate if action is risky).
+  - *Trigger*: "Click the Accept cookies button"
+- `browse_screenshot`: Capture full-page/viewport screenshot of active headless session.
+  - *Trigger*: "Take a screenshot of the open page"
+- `browse_extract_links`: Extract all hyperlink anchors and URLs from active or target page.
+  - *Trigger*: "Extract all documentation links on this site"
+- `browse_close`: Explicitly terminate Playwright headless Chromium browser session.
+  - *Trigger*: "Close the browser session"
+
