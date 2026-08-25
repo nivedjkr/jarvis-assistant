@@ -3363,7 +3363,11 @@ def _resolve_obsidian_vault_path() -> Optional[str]:
                     return vp
     except Exception:
         pass
-    return vault_path if (vault_path and os.path.exists(vault_path)) else None
+
+    # Default fallback: local vault in jarvis/data/obsidian_vault
+    fallback = os.path.abspath(os.path.join("jarvis", "data", "obsidian_vault"))
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
 
 
 def _grep_obsidian_vault(vault_path: str, query: str, limit: int = 3) -> List[Dict[str, Any]]:
