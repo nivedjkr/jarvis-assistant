@@ -496,13 +496,16 @@ export default function App() {
           onSwitchSession={handleSwitchSession}
           onNewSession={handleNewSession}
           onDeleteSession={handleDeleteSession}
-          onOpenFullCalendar={() => setIsCalendarOpen(true)}
         />
         <CalendarPanel 
           isOpen={isCalendarOpen} 
           onClose={() => setIsCalendarOpen(false)} 
         />
-        <SystemVitals isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
+        <SystemVitals 
+          isConnected={isConnected} 
+          lastStateUpdate={lastStateUpdate} 
+          onOpenFullCalendar={() => setIsCalendarOpen(true)}
+        />
 
         <div style={{
           display: 'flex',

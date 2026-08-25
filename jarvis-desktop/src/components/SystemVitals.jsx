@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import './SystemVitals.css'
+import MiniCalendar from './MiniCalendar'
 
-export default function SystemVitals({ isConnected = true }) {
+export default function SystemVitals({ isConnected = true, onOpenFullCalendar }) {
   const [vitals, setVitals] = useState({
     cpu_pct: 12,
     ram_pct: 42,
@@ -94,6 +95,11 @@ export default function SystemVitals({ isConnected = true }) {
             <span className="telemetry-val">{vitals.tool_calls_today ?? 0}</span>
           </div>
         </div>
+      </div>
+
+      {/* MINI CALENDAR UNDER COMMANDS & TOOL CALLS */}
+      <div style={{ marginTop: 'auto', padding: '0' }}>
+        <MiniCalendar onOpenFullCalendar={onOpenFullCalendar} />
       </div>
     </aside>
   )
