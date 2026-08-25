@@ -146,18 +146,18 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
       {/* REMINDERS SECTION */}
       <div className="sidebar-section">
         <div className="sidebar-section-title">
-          <span>Reminders</span>
+          <span>Calendar & Reminders</span>
           <span>{reminders.length}</span>
         </div>
         <div className="sidebar-list">
           {reminders.length === 0 ? (
-            <div className="sidebar-empty">No pending reminders</div>
+            <div className="sidebar-empty">No Google Calendar events</div>
           ) : (
             reminders.map((r, i) => (
               <div key={i} className="sidebar-item">
-                <div className="sidebar-item-name">{r.text}</div>
+                <div className="sidebar-item-name">{r.summary || r.title || r.text || 'Calendar Event'}</div>
                 <div className="sidebar-item-sub">
-                  {r.due_date ? `Due: ${r.due_date.slice(11, 16)}` : 'Pending'}
+                  📅 {r.start ? new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : (r.due_date || 'Upcoming')}
                 </div>
               </div>
             ))

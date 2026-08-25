@@ -8,12 +8,14 @@ import DirectivesPanel from './components/DirectivesPanel'
 import EmailPanel from './components/EmailPanel'
 
 import Sidebar from './components/Sidebar'
+import CalendarPanel from './components/CalendarPanel'
 
 export default function App() {
   const [orbState, setOrbState] = useState('idle')
   const [isConnected, setIsConnected] = useState(true)
   const [lastStateUpdate, setLastStateUpdate] = useState(null)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [currentSessionId, setCurrentSessionId] = useState(null)
 
   const activeAudioRef = useRef(null)
@@ -473,6 +475,8 @@ export default function App() {
       <TitleBar 
         isConnected={isConnected} 
         onToggleSessions={() => setIsSidebarOpen(prev => !prev)} 
+        onToggleCalendar={() => setIsCalendarOpen(prev => !prev)}
+        isCalendarOpen={isCalendarOpen}
       />
       
       <div style={{
@@ -489,6 +493,10 @@ export default function App() {
           onSwitchSession={handleSwitchSession}
           onNewSession={handleNewSession}
           onDeleteSession={handleDeleteSession}
+        />
+        <CalendarPanel 
+          isOpen={isCalendarOpen} 
+          onClose={() => setIsCalendarOpen(false)} 
         />
         <SystemVitals isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
 

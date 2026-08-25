@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   listSentEmails: () => ipcRenderer.invoke('send-slash-command', '/email sent'),
   deleteSentEmail: (index = 1) => ipcRenderer.invoke('send-slash-command', `/email delete ${index}`),
 
+  getCalendarEvents: () => ipcRenderer.invoke('get-calendar-events'),
+
+  toggleFullScreen: () => ipcRenderer.invoke('toggle-fullscreen'),
   minimize: () => ipcRenderer.invoke('window-minimize'),
   close: () => ipcRenderer.invoke('window-close')
 })

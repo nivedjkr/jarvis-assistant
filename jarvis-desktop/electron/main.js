@@ -548,6 +548,17 @@ ipcMain.handle('check-email', () => {
 })
 
 
+ipcMain.handle('get-calendar-events', () => fetchJson('http://127.0.0.1:8765/calendar/events'))
+
+ipcMain.handle('toggle-fullscreen', () => {
+  if (mainWindow) {
+    const isFS = mainWindow.isFullScreen()
+    mainWindow.setFullScreen(!isFS)
+    return !isFS
+  }
+  return false
+})
+
 ipcMain.handle('window-minimize', () => mainWindow && mainWindow.minimize())
 ipcMain.handle('window-close', () => {
   killBackendProcess()

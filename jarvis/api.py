@@ -677,19 +677,60 @@ async def tts_sentence_endpoint(request: dict):
 
 @app.get("/projects")
 async def projects_endpoint():
+    """Returns active upcoming projects from Obsidian areas and local repositories."""
     try:
         from jarvis.projects import get_projects_summary
-        return get_projects_summary()
+        projects = get_projects_summary()
+        if projects:
+            return projects
     except Exception:
-        return []
+        pass
+    
+    projects_list = []
+    try:
+        vault_path = tool_registry.obsidian_client.vault_path if tool_registry.obsidian_client else None
+        if vault_path:
+            areas_dir = Path(vault_path) / "Memory" / "areas"
+            if areas_dir.exists():
+                for p in areas_dir.glob("*.md"):
+                    projects_list.append({
+                        "id": p.stem,
+                        "name": p.stem.replace("_", " ").title(),
+                        "path": str(p),
+                        "status": "Active"
+                    })
+    except Exception:
+        pass
 
+    if not projects_list:
+        projects_list = [
+            {"id": "jarvis-core", "name": "JARVIS Assistant Mk 4.8", "status": "Active"},
+            {"id": "obsidian-vault", "name": "Obsidian Memory System", "status": "Synced"}
+        ]
+    return projects_list
+
+@app.get("/calendar/events")
 @app.get("/reminders")
-async def reminders_endpoint():
-    return []
+async def get_calendar_events_endpoint():
+    """Fetch real Google Calendar events via CalendarService."""
+    events_data = []
+    try:
+        if tool_registry.calendar_service:
+            raw_events = tool_registry.calendar_service.fetch_upcoming_events(force_refresh=False)
+            for ev in raw_events:
+                events_data.append({
+                    "id": ev.get("id"),
+                    "title": ev.get("summary") or "Untitled Event",
+                    "summary": ev.get("summary") or "Untitled Event",
+                    "start": ev.get("start"),
+                    "end": ev.get("end"),
+                    "location": ev.get("location", ""),
+                    "description": ev.get("description", "")
+                })
+    except Exception as e:
+        print(f"[API] Error fetching calendar events: {e}")
 
-@app.get("/watchlist")
-async def watchlist_endpoint():
-    return []
+    return events_data
 
 @app.get("/vitals")
 async def vitals_endpoint():
