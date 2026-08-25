@@ -22,6 +22,13 @@
   const directivesToggleBtn = document.getElementById('directivesToggleBtn');
   const closeDrawerBtn = document.getElementById('closeDrawerBtn');
 
+  // Sessions Drawer Elements
+  const sessionsDrawer = document.getElementById('sessionsDrawer');
+  const sessionsToggleBtn = document.getElementById('sessionsToggleBtn');
+  const closeSessionsBtn = document.getElementById('closeSessionsBtn');
+  const newSessionBtn = document.getElementById('newSessionBtn');
+  const sessionsList = document.getElementById('sessionsList');
+
   // Settings Modal Elements
   const settingsModal = document.getElementById('settingsModal');
   const settingsToggleBtn = document.getElementById('settingsToggleBtn');
@@ -46,6 +53,12 @@
   let recognition = null;
   let orbState = 'idle';
   let thinkingTimeout = null;
+
+  let currentSessionId = localStorage.getItem('jarvis_session_id');
+  if (!currentSessionId) {
+    currentSessionId = 'mobile_' + Math.random().toString(36).substring(2, 10);
+    localStorage.setItem('jarvis_session_id', currentSessionId);
+  }
 
   const DEFAULT_TOKEN = 'jarvis_secure_local_token_2026';
 
@@ -443,7 +456,7 @@
     const host = getWsHost();
     const token = await resolveWsToken();
     const wsProto = window.location.protocol.startsWith('https') ? 'wss' : 'ws';
-    const wsUrl = `${wsProto}://${host}/ws?token=${token}`;
+    const wsUrl = `${wsProto}://${host}/ws?token=${token}&session_id=${currentSessionId}`;
 
     console.log(`[WS] Connecting to ${wsUrl}...`);
     statusText.textContent = 'Connecting';
@@ -505,11 +518,36 @@
         clearThinkingTimeout();
         statusText.textContent = 'Connected';
         setOrbState('idle');
-        if (messagesList.children.length === 0) {
+        if (data.session_id) {
+          currentSessionId = data.session_id;
+          localStorage.setItem('jarvis_session_id', currentSessionId);
+        }
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
+          messagesList.innerHTML = '';
+          data.messages.forEach(m => {
+            appendMessage(m.role === 'assistant' ? 'jarvis' : m.role, m.content);
+          });
+        } else if (messagesList.children.length === 0) {
           appendMessage('jarvis', data.message || 'JARVIS online and standing by, sir.');
           enqueueSentence(data.message || 'JARVIS online and standing by, sir.');
         }
       }
+    } else if (data.type === 'sessions_list') {
+      renderSessionsList(data.sessions || [], data.current_session_id);
+    } else if (data.type === 'session_switched' || data.type === 'session_created') {
+      if (data.session_id) {
+        currentSessionId = data.session_id;
+        localStorage.setItem('jarvis_session_id', currentSessionId);
+      }
+      messagesList.innerHTML = '';
+      if (Array.isArray(data.messages) && data.messages.length > 0) {
+        data.messages.forEach(m => {
+          appendMessage(m.role === 'assistant' ? 'jarvis' : m.role, m.content);
+        });
+      } else {
+        appendMessage('jarvis', 'New conversation started, sir. How can I assist you?');
+      }
+      if (sessionsDrawer) sessionsDrawer.classList.add('hidden');
     } else if (data.type === 'chunk') {
       clearThinkingTimeout();
       setOrbState('thinking');
@@ -660,8 +698,62 @@
     if (pill && pill.dataset.cmd) sendMessage(pill.dataset.cmd);
   });
 
+  function renderSessionsList(sessions, activeId) {
+    if (!sessionsList) return;
+    sessionsList.innerHTML = '';
+    if (!sessions || sessions.length === 0) {
+      sessionsList.innerHTML = '<div style="color: var(--text-muted); font-size: 0.75rem; font-style: italic;">No past sessions found</div>';
+      return;
+    }
+
+    sessions.forEach(s => {
+      const card = document.createElement('div');
+      card.className = `session-card ${s.session_id === (activeId || currentSessionId) ? 'active' : ''}`;
+      
+      const title = document.createElement('div');
+      title.className = 'session-title-text';
+      title.textContent = s.title || 'Untitled Session';
+
+      const meta = document.createElement('div');
+      meta.className = 'session-meta-text';
+      const la = s.last_active;
+      const dateStr = la ? new Date(typeof la === 'number' && la < 1e11 ? la * 1000 : la).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'Recent';
+      meta.textContent = `${dateStr} · ${s.message_count || 0} msgs`;
+
+      card.appendChild(title);
+      card.appendChild(meta);
+
+      card.addEventListener('click', () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'switch_session', session_id: s.session_id }));
+        }
+      });
+
+      sessionsList.appendChild(card);
+    });
+  }
+
   directivesToggleBtn.addEventListener('click', () => directivesDrawer.classList.remove('hidden'));
   closeDrawerBtn.addEventListener('click', () => directivesDrawer.classList.add('hidden'));
+
+  if (sessionsToggleBtn) {
+    sessionsToggleBtn.addEventListener('click', () => {
+      sessionsDrawer.classList.remove('hidden');
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_sessions' }));
+      }
+    });
+  }
+  if (closeSessionsBtn) {
+    closeSessionsBtn.addEventListener('click', () => sessionsDrawer.classList.add('hidden'));
+  }
+  if (newSessionBtn) {
+    newSessionBtn.addEventListener('click', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'new_session' }));
+      }
+    });
+  }
 
   directivesDrawer.addEventListener('click', (e) => {
     const card = e.target.closest('.protocol-card');

@@ -23,6 +23,9 @@
         <button class="icon-btn drawer-toggle" id="directivesToggleBtn" title="Directives & Protocols">
           📋
         </button>
+        <button class="icon-btn" id="sessionsToggleBtn" title="Conversations & History">
+          💬
+        </button>
         <div class="brand-text">
           <span class="title">J.A.R.V.I.S.</span>
           <span class="subtitle">SYSTEM INTERFACE</span>
@@ -78,6 +81,24 @@
         </button>
       </div>
     </footer>
+
+    <!-- Sessions Drawer -->
+    <aside class="drawer-overlay hidden" id="sessionsDrawer">
+      <div class="drawer-card">
+        <div class="drawer-header">
+          <h3>Past Sessions</h3>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn btn-primary" id="newSessionBtn" style="padding: 4px 10px; font-size: 0.72rem; border-radius: 6px;">+ New Chat</button>
+            <button class="close-btn" id="closeSessionsBtn">&times;</button>
+          </div>
+        </div>
+        <div class="drawer-body">
+          <div class="sessions-list" id="sessionsList">
+            <!-- Sessions injected dynamically -->
+          </div>
+        </div>
+      </div>
+    </aside>
 
     <!-- Directives & Protocols Side Drawer -->
     <aside class="drawer-overlay hidden" id="directivesDrawer">

@@ -111,6 +111,11 @@ All coding modification tasks must follow the verified-not-claimed discipline us
 4. **Execution Cap**: Cap debug iterations at a maximum of 5 turns before reporting remaining issues. Never claim a fix is complete without verifying that `run_tests` output passes cleanly.
 5. **Path & Process Security**: All debug loop tools (`inspect_project`, `run_tests`, `run_project`, `dependency_scan`, `secret_scan`) enforce `ALLOWED_ROOTS` path sandboxing and execute subprocesses strictly with list-form arguments and `shell=False`.
 
+- Persistent multi-session conversations are stored in `jarvis.db` (`sessions` & `session_messages` tables). Clients reuse a stable `session_id` to auto-resume conversations across restarts.
+- Session management tools: `list_sessions`, `new_session`, `switch_session`, `rename_session`, `delete_session`.
+- Desktop sessions UI uses a top-left 3-dots button (`⋮`) triggering a floating overlay drawer so layout geometry of the central Orb and Chat log remains uncompressed.
+- Proactive Obsidian memory filing uses vault folder structure: `Memory/profile.md`, `Memory/topics/<topic>.md`, `Memory/people/<name>.md`, `Memory/areas/<project>.md`. System prompt directs JARVIS to evaluate user messages for durable facts, search Obsidian first, extend existing notes, filter throwaway queries, and avoid credential logging.
+
 ## Open / incomplete work
 
 - None at present.

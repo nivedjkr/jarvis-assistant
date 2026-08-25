@@ -396,6 +396,7 @@ class ToolRegistry:
         self._register_calendar_tools()
         self._register_obsidian_tools()
         self._register_coding_agent_tools()
+        self._register_session_tools()
         print(f"[TOOLS] Registered {len(self.tools)} tools: "
               f"{list(self.tools.keys())}")
     
@@ -2715,6 +2716,100 @@ class ToolRegistry:
                 "text": {"type": "string", "description": "Text content or log entry to append to the note."}
             },
             required=["title", "text"])
+
+    def _register_session_tools(self):
+        def list_sessions() -> str:
+            from jarvis.memory import Memory
+            mem = Memory()
+            sessions = mem.list_sessions()
+            if not sessions:
+                return "No past sessions found."
+            lines = []
+            for s in sessions:
+                sid = s["session_id"]
+                title = s.get("title", "Untitled")
+                msg_count = s.get("message_count", 0)
+                from datetime import datetime
+                la = s.get("last_active")
+                dt_str = datetime.fromtimestamp(la).strftime("%Y-%m-%d %H:%M") if la else "Unknown"
+                lines.append(f"• ID: {sid} | Title: {title} | Messages: {msg_count} | Last active: {dt_str}")
+            return "Active Sessions:\n" + "\n".join(lines)
+
+        def new_session(title: Optional[str] = None) -> str:
+            import uuid
+            from jarvis.memory import Memory
+            sid = f"session_{uuid.uuid4().hex[:8]}"
+            t_clean = (title or "").strip() or "New Conversation"
+            mem = Memory()
+            mem.save_session(sid, title=t_clean)
+            return f"Created new session '{sid}' with title '{t_clean}'."
+
+        def switch_session(session_id: str = "") -> str:
+            sid = (session_id or "").strip()
+            if not sid:
+                return "CANNOT SWITCH SESSION: session_id is required."
+            from jarvis.memory import Memory
+            mem = Memory()
+            s = mem.get_session(sid)
+            if not s:
+                return f"CANNOT SWITCH SESSION: Session '{sid}' not found."
+            return f"Switched to session '{sid}' (Title: '{s.get('title', 'Untitled')}')."
+
+        def rename_session(session_id: str = "", title: str = "") -> str:
+            sid = (session_id or "").strip()
+            t_clean = (title or "").strip()
+            if not sid or not t_clean:
+                return "CANNOT RENAME SESSION: Both session_id and title are required."
+            from jarvis.memory import Memory
+            mem = Memory()
+            success = mem.rename_session(sid, t_clean)
+            if success:
+                return f"Successfully renamed session '{sid}' to '{t_clean}'."
+            return f"FAILED: Session '{sid}' not found."
+
+        def delete_session(session_id: str = "") -> str:
+            sid = (session_id or "").strip()
+            if not sid:
+                return "CANNOT DELETE SESSION: session_id is required."
+            from jarvis.memory import Memory
+            mem = Memory()
+            success = mem.delete_session(sid)
+            if success:
+                return f"Successfully deleted session '{sid}'."
+            return f"FAILED: Session '{sid}' not found."
+
+        self._add("list_sessions", list_sessions,
+            "List all persistent conversation sessions with IDs, titles, message counts, and last active timestamps.",
+            {})
+
+        self._add("new_session", new_session,
+            "Start a new persistent conversation session with an optional title.",
+            {
+                "title": {"type": "string", "description": "Optional title for the new session."}
+            },
+            required=[])
+
+        self._add("switch_session", switch_session,
+            "Switch context to an existing session by session_id.",
+            {
+                "session_id": {"type": "string", "description": "Target session ID to switch to."}
+            },
+            required=["session_id"])
+
+        self._add("rename_session", rename_session,
+            "Rename an existing session's title.",
+            {
+                "session_id": {"type": "string", "description": "Session ID to rename."},
+                "title": {"type": "string", "description": "New title for the session."}
+            },
+            required=["session_id", "title"])
+
+        self._add("delete_session", delete_session,
+            "Delete a persistent conversation session by session_id.",
+            {
+                "session_id": {"type": "string", "description": "Session ID to delete."}
+            },
+            required=["session_id"])
 
     def _register_coding_agent_tools(self):
         def inspect_project(path: str = ".") -> str:

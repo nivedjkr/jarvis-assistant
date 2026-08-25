@@ -160,21 +160,91 @@ async def websocket_endpoint(ws: WebSocket):
     else:
         await manager.connect(ws)
 
-    session_id = f"electron_{uuid.uuid4().hex[:8]}"
+    req_session_id = ws.query_params.get("session_id")
+    if req_session_id and req_session_id.strip():
+        session_id = req_session_id.strip()
+    else:
+        session_id = f"electron_{uuid.uuid4().hex[:8]}"
+    
+    active_sess = api_client.get_session(session_id)
     
     try:
         # Run startup health check and send report to desktop/mobile client
         report = await run_diagnostics(check_nvidia=True)
+        initial_msgs = [{"role": m["role"], "content": m["content"]} for m in active_sess.messages]
         await ws.send_json({
             "type": "status",
             "status": "connected",
             "message": "JARVIS online, sir.",
+            "session_id": session_id,
+            "session_title": active_sess.title,
+            "messages": initial_msgs,
             "health_check": report.to_dict()
         })
         
         while True:
             data = await ws.receive_json()
             msg_type = data.get("type", "message")
+
+            if msg_type == "get_sessions" or msg_type == "list_sessions":
+                sessions = api_client.list_sessions()
+                await ws.send_json({
+                    "type": "sessions_list",
+                    "sessions": sessions,
+                    "current_session_id": session_id
+                })
+                continue
+
+            if msg_type == "switch_session":
+                target_sid = data.get("session_id", "").strip()
+                if target_sid:
+                    session_id = target_sid
+                    sess = api_client.get_session(session_id)
+                    msgs = [{"role": m["role"], "content": m["content"]} for m in sess.messages]
+                    await ws.send_json({
+                        "type": "session_switched",
+                        "session_id": session_id,
+                        "title": sess.title,
+                        "messages": msgs
+                    })
+                continue
+
+            if msg_type == "new_session":
+                title = data.get("title", "New Conversation")
+                new_sess = api_client.new_session(title=title)
+                session_id = new_sess.session_id
+                await ws.send_json({
+                    "type": "session_created",
+                    "session_id": session_id,
+                    "title": new_sess.title,
+                    "messages": []
+                })
+                continue
+
+            if msg_type == "rename_session":
+                target_sid = data.get("session_id", session_id)
+                new_title = data.get("title", "").strip()
+                if target_sid and new_title:
+                    api_client.rename_session(target_sid, new_title)
+                    sessions = api_client.list_sessions()
+                    await ws.send_json({
+                        "type": "sessions_list",
+                        "sessions": sessions,
+                        "current_session_id": session_id
+                    })
+                continue
+
+            if msg_type == "delete_session":
+                target_sid = data.get("session_id", "").strip()
+                if target_sid:
+                    api_client.delete_session(target_sid)
+                    sessions = api_client.list_sessions()
+                    await ws.send_json({
+                        "type": "sessions_list",
+                        "sessions": sessions,
+                        "current_session_id": session_id
+                    })
+                continue
             
             if msg_type == "confirm_action":
                 act_id = data.get("action_id", "")
@@ -635,6 +705,50 @@ async def vitals_endpoint():
         }
     except Exception:
         return {}
+
+@app.get("/sessions")
+@app.get("/api/sessions")
+async def get_sessions_endpoint():
+    return api_client.list_sessions()
+
+@app.post("/sessions/new")
+@app.post("/api/sessions/new")
+async def new_session_endpoint(request: dict = None):
+    title = (request or {}).get("title", "New Conversation")
+    sess = api_client.new_session(title=title)
+    return {
+        "session_id": sess.session_id,
+        "title": sess.title,
+        "created_at": sess.created_at,
+        "last_active": sess.last_active
+    }
+
+@app.get("/sessions/{session_id}/messages")
+@app.get("/api/sessions/{session_id}/messages")
+async def session_messages_endpoint(session_id: str):
+    sess = api_client.get_session(session_id)
+    return {
+        "session_id": session_id,
+        "title": sess.title,
+        "messages": [{"role": m["role"], "content": m["content"]} for m in sess.messages]
+    }
+
+@app.post("/sessions/{session_id}/rename")
+@app.post("/api/sessions/{session_id}/rename")
+async def rename_session_endpoint(session_id: str, request: dict):
+    title = (request or {}).get("title", "").strip()
+    if not title:
+        return {"status": "error", "message": "Title required"}
+    success = api_client.rename_session(session_id, title)
+    return {"status": "ok" if success else "error", "session_id": session_id, "title": title}
+
+@app.delete("/sessions/{session_id}")
+@app.post("/sessions/{session_id}/delete")
+@app.delete("/api/sessions/{session_id}")
+@app.post("/api/sessions/{session_id}/delete")
+async def delete_session_endpoint(session_id: str):
+    success = api_client.delete_session(session_id)
+    return {"status": "ok" if success else "error", "session_id": session_id}
 
 def get_host_binding() -> str:
     allow_remote = os.getenv("JARVIS_ALLOW_REMOTE", "false").strip().lower() in ("true", "1", "yes")

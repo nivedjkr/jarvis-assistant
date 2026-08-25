@@ -1,12 +1,21 @@
 import React, { useState, useEffect } from 'react'
 import './Sidebar.css'
 
-export default function Sidebar({ isOpen, onClose }) {
+export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSession, onNewSession, onDeleteSession }) {
   const [projects, setProjects] = useState([])
   const [reminders, setReminders] = useState([])
   const [watchlist, setWatchlist] = useState([])
+  const [sessions, setSessions] = useState([])
 
   const fetchLiveData = async () => {
+    if (window.jarvis?.getSessions) {
+      try {
+        const s = await window.jarvis.getSessions()
+        setSessions(Array.isArray(s) ? s : [])
+      } catch (e) {
+        console.log('Error fetching sessions:', e)
+      }
+    }
     if (window.jarvis?.getProjects) {
       try {
         const p = await window.jarvis.getProjects()
@@ -36,18 +45,76 @@ export default function Sidebar({ isOpen, onClose }) {
   useEffect(() => {
     if (isOpen) {
       fetchLiveData()
-      const interval = setInterval(fetchLiveData, 60000)
+      const interval = setInterval(fetchLiveData, 15000)
       return () => clearInterval(interval)
     }
   }, [isOpen])
+
+  const handleDeleteSession = (e, sid) => {
+    e.stopPropagation()
+    if (window.confirm('Delete this conversation permanently?')) {
+      if (onDeleteSession) {
+        onDeleteSession(sid)
+      } else if (window.jarvis?.deleteSession) {
+        window.jarvis.deleteSession(sid)
+      }
+      setSessions(prev => prev.filter(s => s.session_id !== sid))
+    }
+  }
+
+  const formatTimestamp = (ts) => {
+    if (!ts) return 'Recent'
+    try {
+      const d = new Date(typeof ts === 'number' && ts < 1e11 ? ts * 1000 : ts)
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+    } catch (e) {
+      return 'Recent'
+    }
+  }
 
   if (!isOpen) return null
 
   return (
     <div className="sidebar-container">
       <div className="sidebar-header">
-        <div className="sidebar-title">LIVE TELEMETRY</div>
+        <div className="sidebar-title">SAVED SESSIONS & TELEMETRY</div>
         <button className="sidebar-close-btn" onClick={onClose}>✕</button>
+      </div>
+
+      {/* SESSIONS SECTION */}
+      <div className="sidebar-section">
+        <div className="sidebar-section-title">
+          <span>Past Sessions</span>
+          <button className="sidebar-action-btn" onClick={() => onNewSession && onNewSession()}>+ New Chat</button>
+        </div>
+        <div className="sidebar-list">
+          {sessions.length === 0 ? (
+            <div className="sidebar-empty">No past sessions</div>
+          ) : (
+            sessions.map((s, i) => (
+              <div 
+                key={s.session_id || i} 
+                className={`sidebar-item ${s.session_id === currentSessionId ? 'active' : ''}`}
+                onClick={() => onSwitchSession && onSwitchSession(s.session_id)}
+                style={{ cursor: 'pointer' }}
+              >
+                <div className="sidebar-item-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div className="sidebar-item-name">{s.title || 'Untitled Session'}</div>
+                  <button 
+                    className="sidebar-delete-btn"
+                    title="Delete session"
+                    onClick={(e) => handleDeleteSession(e, s.session_id)}
+                  >
+                    🗑️
+                  </button>
+                </div>
+                <div className="sidebar-item-sub">
+                  {formatTimestamp(s.last_active)} · {s.message_count || 0} msgs
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       {/* PROJECTS SECTION */}

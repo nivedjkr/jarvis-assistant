@@ -668,3 +668,44 @@ html, body {
   border-color: var(--border-color);
   color: var(--text-main);
 }
+
+/* Session Cards in Mobile Drawer */
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.session-card.active {
+  border-color: var(--cyan-primary);
+  background: rgba(0, 240, 255, 0.12);
+}
+
+.session-card:active {
+  background: rgba(0, 240, 255, 0.2);
+}
+
+.session-title-text {
+  font-size: 0.8rem;
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.session-meta-text {
+  font-size: 0.68rem;
+  color: var(--cyan-primary);
+  margin-top: 3px;
+}

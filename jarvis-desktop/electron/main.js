@@ -297,6 +297,21 @@ async function startJarvisBackend() {
   }, 5000)
 }
 
+function getOrCreateSessionId() {
+  try {
+    const sessionFile = path.join(app.getPath('userData'), 'session_config.json')
+    if (fs.existsSync(sessionFile)) {
+      const data = JSON.parse(fs.readFileSync(sessionFile, 'utf8'))
+      if (data.session_id) return data.session_id
+    }
+    const newId = 'electron_' + Math.random().toString(36).substring(2, 10)
+    fs.writeFileSync(sessionFile, JSON.stringify({ session_id: newId }))
+    return newId
+  } catch (e) {
+    return 'electron_default'
+  }
+}
+
 function connectWebSocket() {
   if (backendFailed) {
     console.warn('[WS] Backend process failed. Skipping WebSocket connection retry.')
@@ -308,7 +323,8 @@ function connectWebSocket() {
   try {
     loadDotEnv(rootEnvFile)
     const wsToken = process.env.JARVIS_WS_TOKEN || 'jarvis_secure_local_token_2026'
-    ws = new WebSocket(`ws://127.0.0.1:8765/ws?token=${wsToken}`)
+    const sessionId = getOrCreateSessionId()
+    ws = new WebSocket(`ws://127.0.0.1:8765/ws?token=${wsToken}&session_id=${sessionId}`)
     
     ws.on('open', () => {
       console.log('[WS] Connected to JARVIS backend')
@@ -391,6 +407,32 @@ ipcMain.handle('send-slash-command', (event, command) => {
         text: 'JARVIS backend is offline or reconnecting, sir. Please try again shortly.'
       })
     }
+  }
+})
+
+ipcMain.handle('get-sessions', () => fetchJson('http://127.0.0.1:8765/sessions'))
+
+ipcMain.handle('switch-session', (event, sid) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'switch_session', session_id: sid }))
+  }
+})
+
+ipcMain.handle('new-session', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'new_session' }))
+  }
+})
+
+ipcMain.handle('rename-session', (event, payload) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'rename_session', session_id: payload?.session_id, title: payload?.title }))
+  }
+})
+
+ipcMain.handle('delete-session', (event, sid) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'delete_session', session_id: sid }))
   }
 })
 

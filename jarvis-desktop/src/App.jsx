@@ -7,10 +7,14 @@ import SystemVitals from './components/SystemVitals'
 import DirectivesPanel from './components/DirectivesPanel'
 import EmailPanel from './components/EmailPanel'
 
+import Sidebar from './components/Sidebar'
+
 export default function App() {
   const [orbState, setOrbState] = useState('idle')
   const [isConnected, setIsConnected] = useState(true)
   const [lastStateUpdate, setLastStateUpdate] = useState(null)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [currentSessionId, setCurrentSessionId] = useState(null)
 
   const activeAudioRef = useRef(null)
   const timeoutRef = useRef(null)
@@ -326,19 +330,46 @@ export default function App() {
           } else if (data.status === 'connected') {
             clearPendingTimeout()
             setIsConnected(true)
-            const greetingMsg = data.message || 'JARVIS online and standing by.'
-            setMessages(prev => {
-              if (prev.length === 1 && prev[0].role === 'jarvis' && prev[0].text.includes('standing by')) {
-                return [{ role: 'jarvis', text: greetingMsg, timestamp: timeStr }]
-              }
-              if (prev.some(m => m.text === greetingMsg)) return prev
-              return [...prev, { role: 'jarvis', text: greetingMsg, timestamp: timeStr }]
-            })
-            speakResponse(greetingMsg, data.audio)
+            if (data.session_id) {
+              setCurrentSessionId(data.session_id)
+            }
+            if (Array.isArray(data.messages) && data.messages.length > 0) {
+              const formatted = data.messages.map(m => ({
+                role: m.role === 'assistant' ? 'jarvis' : m.role,
+                text: m.content,
+                timestamp: timeStr
+              }))
+              setMessages(formatted)
+            } else {
+              const greetingMsg = data.message || 'JARVIS online and standing by.'
+              setMessages(prev => {
+                if (prev.length === 1 && prev[0].role === 'jarvis' && prev[0].text.includes('standing by')) {
+                  return [{ role: 'jarvis', text: greetingMsg, timestamp: timeStr }]
+                }
+                if (prev.some(m => m.text === greetingMsg)) return prev
+                return [...prev, { role: 'jarvis', text: greetingMsg, timestamp: timeStr }]
+              })
+              speakResponse(greetingMsg, data.audio)
+            }
           } else if (data.status === 'disconnected') {
             clearPendingTimeout()
             setIsConnected(false)
             setOrbState('idle')
+          }
+        }
+        else if (data.type === 'session_switched' || data.type === 'session_created') {
+          if (data.session_id) {
+            setCurrentSessionId(data.session_id)
+          }
+          if (Array.isArray(data.messages) && data.messages.length > 0) {
+            const formatted = data.messages.map(m => ({
+              role: m.role === 'assistant' ? 'jarvis' : m.role,
+              text: m.content,
+              timestamp: timeStr
+            }))
+            setMessages(formatted)
+          } else {
+            setMessages([getInitialGreeting()])
           }
         }
       })
@@ -407,6 +438,27 @@ export default function App() {
     }
   }
 
+  const handleSwitchSession = (sessionId) => {
+    stopSpeech()
+    if (window.jarvis?.switchSession) {
+      window.jarvis.switchSession(sessionId)
+    }
+  }
+
+  const handleNewSession = () => {
+    stopSpeech()
+    if (window.jarvis?.newSession) {
+      window.jarvis.newSession()
+    }
+  }
+
+  const handleDeleteSession = (sessionId) => {
+    stopSpeech()
+    if (window.jarvis?.deleteSession) {
+      window.jarvis.deleteSession(sessionId)
+    }
+  }
+
   return (
     <div style={{
       display: 'flex',
@@ -418,14 +470,26 @@ export default function App() {
       fontFamily: "'JetBrains Mono', monospace",
       overflow: 'hidden'
     }}>
-      <TitleBar isConnected={isConnected} />
+      <TitleBar 
+        isConnected={isConnected} 
+        onToggleSessions={() => setIsSidebarOpen(prev => !prev)} 
+      />
       
       <div style={{
         display: 'flex',
         flex: 1,
         height: 'calc(100vh - 88px)',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        position: 'relative'
       }}>
+        <Sidebar 
+          isOpen={isSidebarOpen} 
+          onClose={() => setIsSidebarOpen(false)} 
+          currentSessionId={currentSessionId}
+          onSwitchSession={handleSwitchSession}
+          onNewSession={handleNewSession}
+          onDeleteSession={handleDeleteSession}
+        />
         <SystemVitals isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
 
         <div style={{

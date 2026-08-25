@@ -19,6 +19,25 @@
   gap: 10px;
 }
 
+.sessions-toggle-btn {
+  background: transparent;
+  border: none;
+  color: #00D9FF;
+  font-size: 16px;
+  font-weight: bold;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+  -webkit-app-region: no-drag;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.sessions-toggle-btn:hover {
+  background: rgba(0, 217, 255, 0.15);
+  color: #66e5ff;
+}
+
 .status-dot {
   width: 7px;
   height: 7px;

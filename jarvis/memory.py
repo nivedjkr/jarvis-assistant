@@ -7,6 +7,7 @@ import sqlite3
 import json
 import os
 import re
+import time
 import threading
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
@@ -238,6 +239,28 @@ class Memory:
                     quantity REAL,
                     reason TEXT,
                     timestamp TIMESTAMP
+                )
+            """)
+
+            # Sessions table: persistent multi-session metadata
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    title TEXT,
+                    created_at REAL,
+                    last_active REAL
+                )
+            """)
+
+            # Session messages table: transcript log per session
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS session_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT,
+                    role TEXT,
+                    content TEXT,
+                    timestamp REAL,
+                    FOREIGN KEY(session_id) REFERENCES sessions(session_id)
                 )
             """)
             
@@ -877,7 +900,99 @@ class Memory:
                 """, (sku.strip(),)).fetchall()
             else:
                 rows = conn.execute("SELECT * FROM inventory_log ORDER BY id DESC").fetchall()
-            return [dict(row) for row in rows]
+    # Session Persistence Methods
+    def save_session(self, session_id: str, title: str = "New Conversation", created_at: Optional[float] = None, last_active: Optional[float] = None):
+        """Insert or update a conversation session record."""
+        now = time.time()
+        c_at = created_at if created_at is not None else now
+        l_act = last_active if last_active is not None else now
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO sessions (session_id, title, created_at, last_active)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    title = excluded.title,
+                    last_active = excluded.last_active
+            """, (session_id, title, c_at, l_act))
+            conn.commit()
+
+    def add_session_message(self, session_id: str, role: str, content: str, timestamp: Optional[float] = None):
+        """Append a message to a persistent session and update last_active."""
+        ts = timestamp if timestamp is not None else time.time()
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT session_id, title FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+            if not row:
+                conn.execute(
+                    "INSERT INTO sessions (session_id, title, created_at, last_active) VALUES (?, ?, ?, ?)",
+                    (session_id, "New Conversation", ts, ts)
+                )
+            else:
+                conn.execute(
+                    "UPDATE sessions SET last_active=? WHERE session_id=?",
+                    (ts, session_id)
+                )
+
+            conn.execute("""
+                INSERT INTO session_messages (session_id, role, content, timestamp)
+                VALUES (?, ?, ?, ?)
+            """, (session_id, role, content, ts))
+            conn.commit()
+
+    def get_session_messages(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """Retrieve recent messages for a session ordered chronologically."""
+        with self._get_connection() as conn:
+            rows = conn.execute("""
+                SELECT role, content, timestamp FROM session_messages
+                WHERE session_id = ?
+                ORDER BY id ASC
+            """, (session_id,)).fetchall()
+            messages = [{"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in rows]
+            return messages[-limit:] if limit > 0 else messages
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """Retrieve all active sessions sorted by last_active DESC with message counts."""
+        with self._get_connection() as conn:
+            rows = conn.execute("""
+                SELECT s.session_id, s.title, s.created_at, s.last_active,
+                       COUNT(m.id) as message_count
+                FROM sessions s
+                LEFT JOIN session_messages m ON s.session_id = m.session_id
+                GROUP BY s.session_id
+                ORDER BY s.last_active DESC
+            """).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get details for a single session."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT session_id, title, created_at, last_active FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+            if not row:
+                return None
+            res = dict(row)
+            cnt = conn.execute("SELECT COUNT(*) FROM session_messages WHERE session_id=?", (session_id,)).fetchone()[0]
+            res["message_count"] = cnt
+            return res
+
+    def rename_session(self, session_id: str, title: str) -> bool:
+        """Rename a session's title."""
+        with self._get_connection() as conn:
+            cur = conn.execute("UPDATE sessions SET title=? WHERE session_id=?", (title, session_id))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def delete_session(self, session_id: str) -> bool:
+        """Delete a session and its messages."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM session_messages WHERE session_id=?", (session_id,))
+            cur = conn.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def clear_session_messages(self, session_id: str):
+        """Clear all messages in a session."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM session_messages WHERE session_id=?", (session_id,))
+            conn.commit()
 
 
 class CommandLogger:

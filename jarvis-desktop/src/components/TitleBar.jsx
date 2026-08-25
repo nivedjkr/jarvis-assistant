@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import './TitleBar.css'
 
-export default function TitleBar({ isConnected = true }) {
+export default function TitleBar({ isConnected = true, onToggleSessions }) {
   const [timeStr, setTimeStr] = useState('')
 
   useEffect(() => {
@@ -38,6 +38,13 @@ export default function TitleBar({ isConnected = true }) {
   return (
     <div className="command-title-bar">
       <div className="title-left">
+        <button 
+          className="sessions-toggle-btn" 
+          onClick={onToggleSessions} 
+          title="Past Sessions (Conversations)"
+        >
+          ⋮
+        </button>
         <div className={`status-dot ${isConnected ? 'online' : 'offline'}`} />
         <span className="brand-mark">J.A.R.V.I.S. // COMMAND DECK</span>
       </div>

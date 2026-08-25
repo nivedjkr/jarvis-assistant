@@ -54,17 +54,57 @@ async def with_retry(coro_func, max_retries: int = 3, base_delay: float = 1.5):
 
 
 class ConversationSession:
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, title: str = "New Conversation", created_at: Optional[float] = None, last_active: Optional[float] = None, db_path: Optional[str] = None):
         self.session_id = session_id
-        self.messages = []
-        self.created_at = time.time()
-        self.last_active = time.time()
+        self.title = title
+        self.created_at = created_at or time.time()
+        self.last_active = last_active or time.time()
+        self.db_path = db_path
         self.max_messages = 40
         self.token_budget = 4000
+        self.messages: List[Dict[str, Any]] = []
+        self._load_from_db()
     
+    def _load_from_db(self):
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            s_info = mem.get_session(self.session_id)
+            if s_info:
+                if s_info.get("title"):
+                    self.title = s_info["title"]
+                if s_info.get("created_at"):
+                    self.created_at = s_info["created_at"]
+                if s_info.get("last_active"):
+                    self.last_active = s_info["last_active"]
+            db_msgs = mem.get_session_messages(self.session_id, limit=self.max_messages)
+            if db_msgs:
+                self.messages = [{"role": m["role"], "content": m["content"]} for m in db_msgs]
+        except Exception as e:
+            print(f"[SESSION] DB load error for '{self.session_id}': {e}")
+
     def add_message(self, role: str, content: str):
+        now = time.time()
         self.messages.append({"role": role, "content": content})
-        self.last_active = time.time()
+        self.last_active = now
+        
+        # Auto-generate title from first user message if default
+        if self.title in ("New Conversation", "cli", "") and role == "user":
+            clean_title = content.strip().replace("\n", " ")
+            if len(clean_title) > 35:
+                clean_title = clean_title[:32] + "..."
+            if clean_title:
+                self.title = clean_title
+        
+        # Write message directly to SQLite database
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            mem.save_session(self.session_id, title=self.title, created_at=self.created_at, last_active=self.last_active)
+            mem.add_session_message(self.session_id, role, content, timestamp=now)
+        except Exception as e:
+            print(f"[SESSION] DB write error for '{self.session_id}': {e}")
+
         self._trim_history()
     
     def _trim_history(self):
@@ -96,6 +136,12 @@ class ConversationSession:
 
     def clear_history(self):
         self.messages = []
+        try:
+            from jarvis.memory import Memory
+            mem = Memory()
+            mem.clear_session_messages(self.session_id)
+        except Exception as e:
+            print(f"[SESSION] DB clear error: {e}")
         print(f"[CONTEXT] History cleared for session '{self.session_id}'.")
 
 
@@ -110,6 +156,7 @@ class JarvisAPIClient:
         self.token_budget = 4000
         self.sessions: Dict[str, ConversationSession] = {}
         self.default_session = "cli"
+        self._load_sessions_from_db()
         
         try:
             from jarvis.semantic_memory import SemanticMemory
@@ -126,6 +173,75 @@ class JarvisAPIClient:
 
         print(f"[API] Using Provider: {self.provider.name} | Model: {self.model}")
     
+    def _load_sessions_from_db(self):
+        try:
+            from jarvis.memory import Memory
+            mem = Memory()
+            db_sessions = mem.list_sessions()
+            for s in db_sessions:
+                sid = s["session_id"]
+                self.sessions[sid] = ConversationSession(
+                    session_id=sid,
+                    title=s.get("title", "New Conversation"),
+                    created_at=s.get("created_at"),
+                    last_active=s.get("last_active")
+                )
+            print(f"[SESSION] Loaded {len(self.sessions)} sessions from database.")
+        except Exception as e:
+            print(f"[SESSION] Error loading sessions from DB: {e}")
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        try:
+            from jarvis.memory import Memory
+            mem = Memory()
+            return mem.list_sessions()
+        except Exception:
+            return [
+                {
+                    "session_id": s.session_id,
+                    "title": s.title,
+                    "created_at": s.created_at,
+                    "last_active": s.last_active,
+                    "message_count": len(s.messages)
+                }
+                for s in self.sessions.values()
+            ]
+
+    def new_session(self, session_id: Optional[str] = None, title: str = "New Conversation") -> ConversationSession:
+        sid = session_id or f"session_{uuid.uuid4().hex[:8]}"
+        sess = ConversationSession(sid, title=title)
+        self.sessions[sid] = sess
+        try:
+            from jarvis.memory import Memory
+            mem = Memory()
+            mem.save_session(sid, title=title, created_at=sess.created_at, last_active=sess.last_active)
+        except Exception as e:
+            print(f"[SESSION] Error saving new session to DB: {e}")
+        return sess
+
+    def switch_session(self, session_id: str) -> ConversationSession:
+        return self.get_session(session_id)
+
+    def rename_session(self, session_id: str, title: str) -> bool:
+        sess = self.get_session(session_id)
+        sess.title = title
+        try:
+            from jarvis.memory import Memory
+            mem = Memory()
+            return mem.rename_session(session_id, title)
+        except Exception:
+            return False
+
+    def delete_session(self, session_id: str) -> bool:
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+        try:
+            from jarvis.memory import Memory
+            mem = Memory()
+            return mem.delete_session(session_id)
+        except Exception:
+            return False
+
     @property
     def messages(self) -> list:
         return self.get_session().messages
@@ -219,6 +335,22 @@ OBSIDIAN & NOTE INSTRUCTIONS:
 - To create a markdown note: call create_obsidian_note tool.
 - To append text or log entries to any existing note: call append_obsidian_note tool.
 - To append a log entry or note to today's daily note: call append_daily_note tool.
+
+PROACTIVE OBSIDIAN MEMORY FILING INSTRUCTIONS:
+- Evaluate whether the user's message contains a durable fact worth remembering — a stated preference, a decision, a recurring topic, or a fact about a person or project — as distinct from small talk or a throwaway question (e.g. "what's 2+2" or "hello").
+- If a durable fact is present:
+  1. ALWAYS call search_obsidian first to check whether a relevant memory note already exists in the vault.
+  2. If a relevant note exists, append/extend it using append_obsidian_note.
+  3. If no relevant note exists, create one using create_obsidian_note in the appropriate subfolder structure under Memory/:
+     - Memory/profile.md for personal preferences, user identity, and user habits (one file for profile facts).
+     - Memory/topics/<topic>.md for topic-specific facts, technical decisions, and reference info.
+     - Memory/people/<name>.md for facts about specific individuals.
+     - Memory/areas/<project>.md for facts about projects or areas of responsibility.
+- JUDGMENT RULES:
+  * Don't file the same fact twice: do not create a new note or append duplicate text for something already captured.
+  * Don't log passwords, API keys, tokens, or confidential credentials mentioned in passing.
+  * Always prefer updating an existing file in Memory/ over creating near-duplicate files.
+  * Do NOT log transient or throwaway queries (e.g., math calculations like "what's 2+2", greetings, casual chit-chat, simple web searches).`
 
 CODING & DEBUG-LOOP INSTRUCTIONS:
 - Before making code edits in an unfamiliar project, call `inspect_project` first to understand project structure, entry points, and test framework.
@@ -358,7 +490,8 @@ NEVER:
             'weather', 'disk', 'vitals', 'create', 'delete', 'update',
             'write', 'list', 'open', 'close', 'spotify', 'chrome', 'clipboard',
             'gist', 'commit', 'pull', 'branch', 'pr', 'issue', 'inventory', 'reminders',
-            'watchlist', 'project', 'protocol', 'inspect'
+            'watchlist', 'project', 'protocol', 'inspect', 'remember', 'prefer', 'preference',
+            'favorite', 'decided', 'decision', 'always', 'never'
         }
         
         lower_user = user_last.lower().strip()
