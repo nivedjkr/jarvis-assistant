@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import './Sidebar.css'
+import MiniCalendar from './MiniCalendar'
 
-export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSession, onNewSession, onDeleteSession }) {
+export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSession, onNewSession, onDeleteSession, onOpenFullCalendar }) {
   const [projects, setProjects] = useState([])
   const [reminders, setReminders] = useState([])
   const [watchlist, setWatchlist] = useState([])
@@ -120,6 +121,9 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
           )}
         </div>
       </div>
+
+      {/* MINI CALENDAR SECTION */}
+      <MiniCalendar onOpenFullCalendar={onOpenFullCalendar} />
 
       {/* PROJECTS SECTION */}
       <div className="sidebar-section">

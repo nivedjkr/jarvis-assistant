@@ -493,6 +493,7 @@ export default function App() {
           onSwitchSession={handleSwitchSession}
           onNewSession={handleNewSession}
           onDeleteSession={handleDeleteSession}
+          onOpenFullCalendar={() => setIsCalendarOpen(true)}
         />
         <CalendarPanel 
           isOpen={isCalendarOpen} 
