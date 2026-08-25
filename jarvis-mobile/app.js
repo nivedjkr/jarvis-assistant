@@ -710,9 +710,40 @@
       const card = document.createElement('div');
       card.className = `session-card ${s.session_id === (activeId || currentSessionId) ? 'active' : ''}`;
       
+      const headerRow = document.createElement('div');
+      headerRow.style.display = 'flex';
+      headerRow.style.justifyContent = 'space-between';
+      headerRow.style.alignItems = 'center';
+      headerRow.style.width = '100%';
+
       const title = document.createElement('div');
       title.className = 'session-title-text';
       title.textContent = s.title || 'Untitled Session';
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'session-delete-btn';
+      delBtn.innerHTML = '🗑️';
+      delBtn.title = 'Delete session';
+      delBtn.style.background = 'transparent';
+      delBtn.style.border = 'none';
+      delBtn.style.color = 'var(--text-muted)';
+      delBtn.style.fontSize = '0.75rem';
+      delBtn.style.padding = '2px 4px';
+      delBtn.style.cursor = 'pointer';
+      delBtn.style.borderRadius = '4px';
+
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm('Delete this conversation permanently?')) {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'delete_session', session_id: s.session_id }));
+          }
+          card.remove();
+        }
+      });
+
+      headerRow.appendChild(title);
+      headerRow.appendChild(delBtn);
 
       const meta = document.createElement('div');
       meta.className = 'session-meta-text';
@@ -720,7 +751,7 @@
       const dateStr = la ? new Date(typeof la === 'number' && la < 1e11 ? la * 1000 : la).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'Recent';
       meta.textContent = `${dateStr} · ${s.message_count || 0} msgs`;
 
-      card.appendChild(title);
+      card.appendChild(headerRow);
       card.appendChild(meta);
 
       card.addEventListener('click', () => {
