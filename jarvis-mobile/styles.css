@@ -4,18 +4,18 @@
   --bg-dark: #040406;
   --bg-card: #08080c;
   --bg-drawer: #0d0e15;
-  --bg-bubble-jarvis: #0b0c12;
-  --bg-bubble-user: #0b1f2b;
-  --border-color: rgba(255, 255, 255, 0.08);
-  --border-cyan: rgba(0, 240, 255, 0.25);
-  --cyan-primary: #00f0ff;
-  --cyan-glow: rgba(0, 240, 255, 0.4);
+  --bg-bubble-jarvis: rgba(255, 255, 255, 0.025);
+  --bg-bubble-user: rgba(167, 139, 250, 0.12);
+  --border-color: rgba(255, 255, 255, 0.07);
+  --border-accent: rgba(167, 139, 250, 0.25);
   --purple-accent: #a78bfa;
+  --accent: #a78bfa;
+  --accent-dim: rgba(167, 139, 250, 0.15);
   --text-main: #e8e6e0;
-  --text-muted: #8a8d9b;
+  --text-muted: #6b6b74;
   --accent-alert: #ff4757;
-  --accent-success: #2ed573;
-  --accent-warning: #ffa502;
+  --accent-success: #4ade80;
+  --accent-warning: #f0b429;
   --font-mono: 'JetBrains Mono', monospace, -apple-system, sans-serif;
   --sat: env(safe-area-inset-top);
   --sab: env(safe-area-inset-bottom);
@@ -55,7 +55,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  background: rgba(8, 8, 12, 0.95);
+  background: rgba(13, 14, 21, 0.95);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
   z-index: 100;
@@ -69,6 +69,8 @@ html, body {
 
 .drawer-toggle {
   font-size: 0.95rem;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .brand-text {
@@ -80,8 +82,8 @@ html, body {
   font-size: 0.95rem;
   font-weight: 700;
   letter-spacing: 2px;
-  color: var(--cyan-primary);
-  text-shadow: 0 0 8px rgba(0, 240, 255, 0.3);
+  color: var(--purple-accent);
+  text-shadow: 0 0 8px rgba(167, 139, 250, 0.3);
 }
 
 .brand-text .subtitle {
@@ -101,12 +103,12 @@ html, body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  background: rgba(0, 240, 255, 0.05);
-  border: 1px solid rgba(0, 240, 255, 0.15);
+  padding: 4px 10px;
+  background: var(--accent-dim);
+  border: 1px solid var(--border-accent);
   border-radius: 10px;
   font-size: 0.65rem;
-  color: var(--cyan-primary);
+  color: var(--purple-accent);
 }
 
 .vital-divider {

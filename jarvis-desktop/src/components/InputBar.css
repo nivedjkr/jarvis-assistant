@@ -2,23 +2,26 @@
   height: 52px;
   min-height: 52px;
   max-height: 52px;
-  background: #0e0e13;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   padding: 0 16px;
   gap: 12px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.terminal-input-bar:focus-within {
+  border-top-color: var(--border-hover);
+  box-shadow: 0 -2px 12px var(--accent-dim);
 }
 
 .prompt-symbol {
   font-size: 16px;
   font-weight: 700;
-  background: linear-gradient(135deg, #a78bfa 0%, #d946a8 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--accent);
   user-select: none;
 }
 
@@ -27,21 +30,21 @@
   background: transparent;
   border: none;
   outline: none;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
-  color: #e8e6e0;
+  color: var(--text-primary);
   letter-spacing: 0.03em;
 }
 
 .terminal-input-field::placeholder {
-  color: #6b6b74;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
 .send-hint {
   font-size: 10px;
   letter-spacing: 0.15em;
-  color: #6b6b74;
+  color: var(--text-muted);
   font-weight: 500;
   user-select: none;
   white-space: nowrap;

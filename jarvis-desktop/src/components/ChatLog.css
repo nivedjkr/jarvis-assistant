@@ -6,14 +6,23 @@
   flex-direction: column;
   gap: 16px;
   background: transparent;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
+}
+
+.chat-log-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.chat-log-container::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: var(--radius-sm);
 }
 
 .chat-message {
   display: flex;
   flex-direction: column;
   max-width: 88%;
-  animation: fadeInMsg 250ms ease-out forwards;
+  animation: fadeInMsg 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .chat-message.jarvis {
@@ -34,7 +43,7 @@
 .chat-message-header {
   font-size: 10px;
   letter-spacing: 0.15em;
-  color: #6b6b74;
+  color: var(--text-muted);
   margin-bottom: 4px;
   display: flex;
   align-items: center;
@@ -44,47 +53,47 @@
 }
 
 .who-label {
-  color: #a78bfa;
+  color: var(--accent);
 }
 
 .chat-message.user .who-label {
-  color: #e8e6e0;
+  color: var(--text-primary);
 }
 
 .chat-message.alert-msg .who-label {
-  color: #f0b429;
+  color: var(--warning);
 }
 
 .divider-slash {
-  color: rgba(255, 255, 255, 0.15);
+  color: var(--border-subtle);
 }
 
 .time-label {
-  color: #6b6b74;
+  color: var(--text-muted);
 }
 
 .chat-message-body {
   font-size: 12px;
-  line-height: 1.6;
-  color: #e8e6e0;
+  line-height: 1.65;
+  color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
-  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
 }
 
 .chat-message.user .chat-message-body {
-  background: rgba(167, 139, 250, 0.08);
-  border-color: rgba(167, 139, 250, 0.2);
+  background: var(--surface-active);
+  border-color: var(--border-hover);
   color: #ffffff;
 }
 
 .chat-message.alert-msg .chat-message-body {
   background: rgba(240, 180, 41, 0.08);
   border-color: rgba(240, 180, 41, 0.25);
-  color: #f0b429;
+  color: var(--warning);
 }
 
 .tool-calls-container {
@@ -97,11 +106,11 @@
 .tool-call-badge {
   font-size: 10px;
   letter-spacing: 0.08em;
-  color: #a78bfa;
-  background: rgba(167, 139, 250, 0.06);
-  border: 1px solid rgba(167, 139, 250, 0.2);
-  padding: 3px 8px;
-  border-radius: 3px;
+  color: var(--accent);
+  background: var(--surface-hover);
+  border: 1px solid var(--border-hover);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -114,7 +123,7 @@
 @keyframes fadeInMsg {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;

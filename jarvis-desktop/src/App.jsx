@@ -465,9 +465,9 @@ export default function App() {
       flexDirection: 'column',
       height: '100vh',
       width: '100vw',
-      background: '#040406',
-      color: '#e8e6e0',
-      fontFamily: "'JetBrains Mono', monospace",
+      background: 'var(--bg-primary)',
+      color: 'var(--text-primary)',
+      fontFamily: 'var(--font-mono)',
       overflow: 'hidden'
     }}>
       <TitleBar 
@@ -497,9 +497,9 @@ export default function App() {
           flexDirection: 'column',
           flex: 1,
           overflow: 'hidden',
-          borderLeft: '1px solid rgba(255, 255, 255, 0.07)',
-          borderRight: '1px solid rgba(255, 255, 255, 0.07)',
-          background: '#08080b'
+          borderLeft: '1px solid var(--border-subtle)',
+          borderRight: '1px solid var(--border-subtle)',
+          background: 'var(--bg-secondary)'
         }}>
           <div style={{
             display: 'flex',

@@ -2,23 +2,23 @@
   width: 220px;
   min-width: 220px;
   max-width: 220px;
-  background: #0e0e13;
+  background: var(--bg-secondary);
   height: 100%;
   display: flex;
   flex-direction: column;
   padding: 16px 14px;
   gap: 16px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   box-sizing: border-box;
 }
 
 .directives-header {
   font-size: 10px;
   letter-spacing: 0.18em;
-  color: #6b6b74;
+  color: var(--text-muted);
   font-weight: 600;
   text-transform: uppercase;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--border-subtle);
   padding-bottom: 6px;
 }
 
@@ -30,9 +30,18 @@
   flex: 1;
 }
 
+.directives-list::-webkit-scrollbar {
+  width: 3px;
+}
+
+.directives-list::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
 .no-directives {
   font-size: 10px;
-  color: #6b6b74;
+  color: var(--text-muted);
   letter-spacing: 0.1em;
   font-style: italic;
   margin-top: 10px;
@@ -44,22 +53,22 @@
   gap: 8px;
   font-size: 11px;
   line-height: 1.4;
-  color: #e8e6e0;
+  color: var(--text-primary);
   padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .directive-item:hover {
-  border-color: rgba(167, 139, 250, 0.25);
-  background: rgba(167, 139, 250, 0.04);
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
 }
 
 .directive-marker {
-  color: #a78bfa;
+  color: var(--accent);
   font-size: 10px;
   margin-top: 1px;
 }
@@ -69,36 +78,14 @@
 }
 
 .directive-item.completed .directive-marker {
-  color: #6b6b74;
+  color: var(--text-muted);
 }
 
 .directive-item.completed .directive-text {
   text-decoration: line-through;
-  color: #6b6b74;
+  color: var(--text-muted);
 }
 
 .directive-text {
   word-break: break-word;
-}
-
-@keyframes flashGlow {
-  0% {
-    background: rgba(0, 240, 255, 0.35);
-    border-color: rgba(0, 240, 255, 0.8);
-    box-shadow: 0 0 15px rgba(0, 240, 255, 0.6);
-  }
-  50% {
-    background: rgba(167, 139, 250, 0.3);
-    border-color: rgba(167, 139, 250, 0.7);
-    box-shadow: 0 0 10px rgba(167, 139, 250, 0.4);
-  }
-  100% {
-    background: rgba(255, 255, 255, 0.02);
-    border-color: rgba(255, 255, 255, 0.05);
-    box-shadow: none;
-  }
-}
-
-.state-flash-highlight {
-  animation: flashGlow 1.5s ease-out;
 }

@@ -1,15 +1,15 @@
 .command-title-bar {
   height: 36px;
-  background: #0e0e13;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.15em;
-  color: #e8e6e0;
+  color: var(--text-primary);
   -webkit-app-region: drag;
 }
 
@@ -21,21 +21,22 @@
 
 .sessions-toggle-btn {
   background: transparent;
-  border: none;
-  color: #00D9FF;
-  font-size: 16px;
+  border: 1px solid transparent;
+  color: var(--accent);
+  font-size: 15px;
   font-weight: bold;
-  padding: 2px 6px;
+  padding: 2px 8px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   -webkit-app-region: no-drag;
   transition: all 0.2s ease;
   line-height: 1;
 }
 
 .sessions-toggle-btn:hover {
-  background: rgba(0, 217, 255, 0.15);
-  color: #66e5ff;
+  background: var(--accent-dim);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
 }
 
 .status-dot {
@@ -46,19 +47,20 @@
 }
 
 .status-dot.online {
-  background: #4ade80;
+  background: var(--success);
   box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
 }
 
 .status-dot.offline {
-  background: #f0b429;
+  background: var(--warning);
   box-shadow: 0 0 8px rgba(240, 180, 41, 0.4);
 }
 
 .brand-mark {
   font-weight: 600;
-  color: #e8e6e0;
+  color: var(--text-primary);
   text-transform: uppercase;
+  letter-spacing: 0.18em;
 }
 
 .title-right {
@@ -69,12 +71,12 @@
 }
 
 .session-id {
-  color: #6b6b74;
+  color: var(--text-muted);
   font-size: 10px;
 }
 
 .live-clock {
-  color: #a78bfa;
+  color: var(--accent);
   font-size: 11px;
   font-weight: 500;
 }
@@ -88,7 +90,7 @@
 .control-btn {
   background: transparent;
   border: none;
-  color: #6b6b74;
+  color: var(--text-muted);
   font-family: inherit;
   font-size: 11px;
   width: 22px;
@@ -97,21 +99,21 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   transition: all 0.2s ease;
 }
 
 .control-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #e8e6e0;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .control-btn.help:hover {
-  background: rgba(167, 139, 250, 0.2);
-  color: #a78bfa;
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 
 .control-btn.close:hover {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
+  background: rgba(255, 71, 87, 0.2);
+  color: var(--danger);
 }
