@@ -34,6 +34,10 @@
   font-size: 12px;
   color: var(--text-primary);
   letter-spacing: 0.03em;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text !important;
+  caret-color: var(--accent) !important;
 }
 
 .terminal-input-field::placeholder {

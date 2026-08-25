@@ -60,6 +60,14 @@ html, body, #root {
   user-select: none;
 }
 
+input, textarea, [contenteditable="true"] {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text !important;
+  caret-color: var(--accent) !important;
+  -webkit-app-region: no-drag;
+}
+
 ::-webkit-scrollbar {
   width: 4px;
   height: 4px;

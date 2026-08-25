@@ -422,6 +422,10 @@ html, body {
   font-size: 0.88rem;
   resize: none;
   max-height: 80px;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text !important;
+  caret-color: var(--accent) !important;
 }
 
 #userInput::placeholder {
