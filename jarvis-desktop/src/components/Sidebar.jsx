@@ -59,6 +59,10 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
         window.jarvis.deleteSession(sid)
       }
       setSessions(prev => prev.filter(s => s.session_id !== sid))
+      if (sid === currentSessionId) {
+        if (onNewSession) onNewSession()
+        else if (window.jarvis?.newSession) window.jarvis.newSession()
+      }
     }
   }
 

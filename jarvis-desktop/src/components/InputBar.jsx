@@ -6,7 +6,23 @@ export default function InputBar({ onSend }) {
   const inputRef = useRef(null)
 
   useEffect(() => {
+    // Focus input field immediately when mounted
     inputRef.current?.focus()
+
+    // Global listener to re-focus input box whenever user starts typing outside any form control
+    const handleGlobalKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const activeEl = document.activeElement
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+        return
+      }
+      if (inputRef.current && e.key.length === 1) {
+        inputRef.current.focus()
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown)
   }, [])
 
   const handleContainerClick = () => {
@@ -34,7 +50,7 @@ export default function InputBar({ onSend }) {
       
       setTimeout(() => {
         inputRef.current?.focus()
-      }, 10)
+      }, 50)
     }
   }
 

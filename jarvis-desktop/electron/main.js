@@ -515,6 +515,32 @@ ipcMain.handle('get-projects', () => fetchJson('http://127.0.0.1:8765/projects')
 ipcMain.handle('get-reminders', () => fetchJson('http://127.0.0.1:8765/reminders'))
 ipcMain.handle('get-watchlist', () => fetchJson('http://127.0.0.1:8765/watchlist'))
 ipcMain.handle('get-vitals', () => fetchJson('http://127.0.0.1:8765/vitals'))
+ipcMain.handle('get-sessions', () => fetchJson('http://127.0.0.1:8765/sessions'))
+
+ipcMain.handle('switch-session', (event, sessionId) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'switch_session', session_id: sessionId }))
+  }
+})
+
+ipcMain.handle('new-session', () => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'new_session' }))
+  }
+})
+
+ipcMain.handle('rename-session', (event, { session_id, title }) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'rename_session', session_id, title }))
+  }
+})
+
+ipcMain.handle('delete-session', (event, sessionId) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'delete_session', session_id: sessionId }))
+  }
+})
+
 ipcMain.handle('check-email', () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'slash_command', command: '/email' }))
