@@ -237,7 +237,52 @@ async def websocket_endpoint(ws: WebSocket):
                     })
                 continue
 
+            if msg_type == "get_missions" or msg_type == "list_missions":
+                missions = proactive_engine.mission_manager.list_missions()
+                await ws.send_json({
+                    "type": "missions_list",
+                    "missions": [m.to_dict() for m in missions]
+                })
+                continue
+
+            if msg_type == "get_mission":
+                mid = data.get("mission_id", "").strip()
+                m = proactive_engine.mission_manager.get_mission(mid)
+                await ws.send_json({
+                    "type": "mission_details",
+                    "mission": m.to_dict() if m else None
+                })
+                continue
+
+            if msg_type == "mission_action":
+                action = data.get("action", "").lower().strip()
+                mid = data.get("mission_id", "").strip()
+                res_text = "Mission action completed."
+                try:
+                    if action == "pause":
+                        m = proactive_engine.mission_manager.pause_mission(mid)
+                        res_text = f"Paused mission '{m.title}', sir."
+                    elif action == "resume":
+                        m = proactive_engine.mission_manager.resume_mission(mid)
+                        res_text = f"Resumed mission '{m.title}', sir."
+                    elif action == "cancel":
+                        m = proactive_engine.mission_manager.cancel_mission(mid)
+                        res_text = f"Cancelled mission '{m.title}', sir."
+                    elif action == "approve":
+                        m = proactive_engine.mission_manager.approve_mission(mid)
+                        res_text = f"Approved and activated mission '{m.title}', sir."
+                except Exception as me:
+                    res_text = f"Mission error: {me}"
+
+                await ws.send_json({
+                    "type": "response",
+                    "text": res_text,
+                    "status": "speaking"
+                })
+                continue
+
             if msg_type == "delete_session":
+
                 target_sid = data.get("session_id", "").strip()
                 if target_sid:
                     api_client.delete_session(target_sid)
@@ -314,7 +359,64 @@ async def websocket_endpoint(ws: WebSocket):
                             "text": res,
                             "status": "speaking"
                         })
+                    elif cmd.startswith("/missions") or cmd.startswith("/mission"):
+                        parts = user_msg.strip().split(maxsplit=2)
+                        subcmd = parts[0].lower()
+                        arg1 = parts[1].lower() if len(parts) > 1 else ""
+                        arg2 = parts[2] if len(parts) > 2 else ""
+
+                        if subcmd == "/missions" or not arg1:
+                            missions = proactive_engine.mission_manager.list_missions()
+                            if not missions:
+                                res = "No active or proposed missions found, sir."
+                            else:
+                                lines = [f"• [{m.id}] {m.title} ({m.status.value}) - Progress: {m.progress_percentage}% ({m.completed_task_count}/{m.task_count} tasks)" for m in missions]
+                                res = "=== ACTIVE & PROPOSED MISSIONS ===\n" + "\n".join(lines)
+                        elif arg1 == "pause" and arg2:
+                            try:
+                                m = proactive_engine.mission_manager.pause_mission(arg2)
+                                res = f"Paused mission '{m.title}' [{m.id}], sir."
+                            except Exception as me:
+                                res = f"Error pausing mission: {me}"
+                        elif arg1 == "resume" and arg2:
+                            try:
+                                m = proactive_engine.mission_manager.resume_mission(arg2)
+                                res = f"Resumed mission '{m.title}' [{m.id}], sir."
+                            except Exception as me:
+                                res = f"Error resuming mission: {me}"
+                        elif arg1 == "cancel" and arg2:
+                            try:
+                                m = proactive_engine.mission_manager.cancel_mission(arg2)
+                                res = f"Cancelled mission '{m.title}' [{m.id}], sir."
+                            except Exception as me:
+                                res = f"Error cancelling mission: {me}"
+                        elif arg1 in ("approve", "confirm") and arg2:
+                            try:
+                                m = proactive_engine.mission_manager.approve_mission(arg2)
+                                res = f"Approved and activated mission '{m.title}' [{m.id}], sir. Created {m.task_count} initial tasks."
+                            except Exception as me:
+                                res = f"Error approving mission: {me}"
+                        else:
+                            # Assume arg1 is mission ID
+                            m = proactive_engine.mission_manager.get_mission(arg1)
+                            if not m:
+                                res = f"Mission '{arg1}' not found, sir."
+                            else:
+                                task_lines = [f"  [{t.id}] {t.title} ({t.status.value})" for t in m.tasks]
+                                res = (
+                                    f"Mission: {m.title} [{m.id}]\n"
+                                    f"Status: {m.status.value} | Progress: {m.progress_percentage}%\n"
+                                    f"Objective: {m.objective}\n"
+                                    f"Tasks ({len(m.tasks)}):\n" + ("\n".join(task_lines) if task_lines else "  No tasks created yet.")
+                                )
+
+                        await ws.send_json({
+                            "type": "response",
+                            "text": res,
+                            "status": "speaking"
+                        })
                     elif cmd.startswith("/provider"):
+
                         from jarvis.llm_provider import get_provider
                         from jarvis.error_recovery import recovery
                         parts = user_msg.strip().split(maxsplit=1)
@@ -824,7 +926,65 @@ async def delete_session_endpoint(session_id: str):
     success = api_client.delete_session(session_id)
     return {"status": "ok" if success else "error", "session_id": session_id}
 
+@app.get("/missions")
+@app.get("/api/missions")
+async def list_missions_endpoint(status: Optional[str] = None):
+    m_status = None
+    if status:
+        try:
+            from jarvis.mission_manager import MissionStatus
+            m_status = MissionStatus(status.upper())
+        except Exception:
+            pass
+    missions = proactive_engine.mission_manager.list_missions(status=m_status)
+    return [m.to_dict() for m in missions]
+
+@app.get("/missions/{mission_id}")
+@app.get("/api/missions/{mission_id}")
+async def get_mission_endpoint(mission_id: str):
+    m = proactive_engine.mission_manager.get_mission(mission_id)
+    if not m:
+        return {"error": "Mission not found"}
+    return m.to_dict()
+
+@app.post("/missions/{mission_id}/pause")
+@app.post("/api/missions/{mission_id}/pause")
+async def pause_mission_endpoint(mission_id: str):
+    try:
+        m = proactive_engine.mission_manager.pause_mission(mission_id)
+        return m.to_dict()
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/missions/{mission_id}/resume")
+@app.post("/api/missions/{mission_id}/resume")
+async def resume_mission_endpoint(mission_id: str):
+    try:
+        m = proactive_engine.mission_manager.resume_mission(mission_id)
+        return m.to_dict()
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/missions/{mission_id}/cancel")
+@app.post("/api/missions/{mission_id}/cancel")
+async def cancel_mission_endpoint(mission_id: str):
+    try:
+        m = proactive_engine.mission_manager.cancel_mission(mission_id)
+        return m.to_dict()
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/missions/{mission_id}/approve")
+@app.post("/api/missions/{mission_id}/approve")
+async def approve_mission_endpoint(mission_id: str):
+    try:
+        m = proactive_engine.mission_manager.approve_mission(mission_id)
+        return m.to_dict()
+    except Exception as e:
+        return {"error": str(e)}
+
 def get_host_binding() -> str:
+
     allow_remote = os.getenv("JARVIS_ALLOW_REMOTE", "false").strip().lower() in ("true", "1", "yes")
     return "0.0.0.0" if allow_remote else "127.0.0.1"
 

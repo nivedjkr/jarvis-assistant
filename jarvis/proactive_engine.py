@@ -13,6 +13,7 @@ import re
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Callable
+from jarvis.mission_manager import MissionManager, MissionDetector, MissionStatus
 
 
 class TaskStatus(str, Enum):
@@ -176,13 +177,16 @@ class ProactiveFollowUpEngine:
     and event-driven follow-up delivery.
     """
 
-    def __init__(self, cooldown_seconds: float = 30.0):
+    def __init__(self, cooldown_seconds: float = 30.0, db_path: str = "jarvis/data/jarvis.db"):
         self.relevance_gate = RelevanceGate()
         self.value_gate = ValueGate()
+        self.mission_detector = MissionDetector()
+        self.mission_manager = MissionManager(db_path=db_path)
         self.cooldown_seconds = cooldown_seconds
         self.active_tasks: Dict[str, ProactiveTask] = {}
         self.running_async_tasks: Dict[str, asyncio.Task] = {}
         self.last_followup_time: Dict[str, float] = {}
+
 
     def is_session_in_cooldown(self, session_id: str) -> bool:
         last = self.last_followup_time.get(session_id, 0.0)
@@ -238,8 +242,47 @@ class ProactiveFollowUpEngine:
                     "session_id": session_id
                 })
 
+                # Check for Mission Proposal candidate
+                m_eval = await self.mission_detector.evaluate(user_prompt, main_response)
+                if m_eval.get("should_propose_mission"):
+                    proposed_mission = self.mission_manager.propose_mission(
+                        title=m_eval["title"],
+                        objective=m_eval["objective"],
+                        description=m_eval.get("reason", ""),
+                        source_conversation_id=session_id
+                    )
+
+                    await _emit_event({
+                        "type": "mission_event",
+                        "event": "mission_proposed",
+                        "mission": proposed_mission.to_dict(),
+                        "session_id": session_id
+                    })
+
+                    followup_text = (
+                        f"That sounds like an ongoing objective, sir. "
+                        f"Shall I create an active mission for it? "
+                        f"(Mission: '{proposed_mission.title}' [ID: {proposed_mission.id}])"
+                    )
+
+                    task.status = TaskStatus.COMPLETED
+                    task.final_outcome = TaskOutcome.FOLLOW_UP_SENT
+                    task.completed_at = time.time()
+                    self.last_followup_time[session_id] = time.time()
+
+                    await _emit_event({
+                        "type": "proactive_followup",
+                        "event": "proactive_followup_sent",
+                        "task_id": task_id,
+                        "session_id": session_id,
+                        "text": followup_text,
+                        "mission_id": proposed_mission.id
+                    })
+                    return task
+
                 # Check Cooldown
                 if self.is_session_in_cooldown(session_id):
+
                     task.status = TaskStatus.COMPLETED
                     task.final_outcome = TaskOutcome.NO_ACTION
                     task.completed_at = time.time()
