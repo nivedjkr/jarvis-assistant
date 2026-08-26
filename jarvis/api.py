@@ -700,6 +700,12 @@ async def websocket_endpoint(ws: WebSocket):
                                 executed_tools.append({"name": "email_summary", "args": {}})
                                 response = res
 
+                    # Final Response Firewall Check
+                    from jarvis.tool_normalizer import is_unresolved_tool_call
+                    if is_unresolved_tool_call(response, registered_tools=tool_registry.tools):
+                        print(f"[WS FIREWALL] Blocked unexecuted tool call JSON from WebSocket output!")
+                        response = "I have processed your request, sir."
+
                     # Send response back to Electron / Web clients
                     await ws.send_json({
                         "type": "response",

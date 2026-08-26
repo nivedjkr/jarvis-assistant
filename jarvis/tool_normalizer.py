@@ -270,3 +270,39 @@ def normalize_tool_calls(
                 normalized.append(tc_dict)
 
     return normalized if normalized else None
+
+
+from enum import Enum
+
+
+class ResponseClassification(str, Enum):
+    TOOL_CALL = "TOOL_CALL"
+    INTERMEDIATE = "INTERMEDIATE"
+    FINAL = "FINAL"
+
+
+def classify_response(
+    response: Any,
+    registered_tools: Optional[Any] = None
+) -> ResponseClassification:
+    """
+    Classifies LLM response into TOOL_CALL or FINAL.
+    """
+    normalized = normalize_tool_calls(response, registered_tools=registered_tools)
+    if normalized:
+        return ResponseClassification.TOOL_CALL
+    return ResponseClassification.FINAL
+
+
+def is_unresolved_tool_call(
+    content: Any,
+    registered_tools: Optional[Any] = None
+) -> bool:
+    """
+    Final Response Firewall check. Returns True if content is unexecuted tool call JSON.
+    """
+    if not content:
+        return False
+    normalized = normalize_tool_calls(content, registered_tools=registered_tools)
+    return bool(normalized)
+

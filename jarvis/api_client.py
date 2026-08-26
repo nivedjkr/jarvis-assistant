@@ -7,11 +7,33 @@ import uuid
 import inspect
 import httpx
 import re
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 from pathlib import Path
 from jarvis.config_manager import config
-from jarvis.tool_normalizer import normalize_tool_calls
+from jarvis.tool_normalizer import (
+    normalize_tool_calls, classify_response, is_unresolved_tool_call, ResponseClassification
+)
+
+
+@dataclass
+class AgentResult:
+    final_answer: str
+    status: str = "COMPLETE"  # "COMPLETE" | "PARTIAL_COMPLETE" | "FAILED" | "TIMEOUT"
+    tool_count: int = 0
+    iterations: int = 0
+    execution_trace: List[Dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "final_answer": self.final_answer,
+            "status": self.status,
+            "tool_count": self.tool_count,
+            "iterations": self.iterations,
+            "execution_trace": self.execution_trace
+        }
+
 
 # Find .env relative to this file's location
 env_path = Path(__file__).parent.parent / '.env'
@@ -483,7 +505,7 @@ NEVER:
         session_id: str = None,
         tool_registry: Any = None,
         chunk_callback=None) -> str:
-        """Full tool-calling pipeline with session isolation"""
+        """Full tool-calling pipeline with session isolation and canonical AgentRuntime loop"""
         session = self.get_session(session_id)
         user_last = ""
         if session.messages:
@@ -492,29 +514,8 @@ NEVER:
                     user_last = m.get('content', '')
                     break
 
-        ACTION_TOOL_TRIGGERS = {
-            'email', 'mail', 'inbox', 'gmail', 'calendar', 'obsidian',
-            'git', 'github', 'repo', 'file', 'dir', 'folder',
-            'weather', 'disk', 'vitals', 'create', 'delete', 'update',
-            'write', 'list', 'open', 'close', 'spotify', 'chrome', 'clipboard',
-            'gist', 'commit', 'pull', 'branch', 'pr', 'issue', 'inventory', 'reminders',
-            'watchlist', 'project', 'protocol', 'inspect', 'remember', 'prefer', 'preference',
-            'favorite', 'decided', 'decision', 'always', 'never'
-        }
-        
-        lower_user = user_last.lower().strip()
-        words = set(re.findall(r'\b\w+\b', lower_user)) if lower_user else set()
-        needs_tools = bool(words & ACTION_TOOL_TRIGGERS) or lower_user.startswith('/')
-
         messages = self.get_messages_with_memory(user_last, session_id)
 
-        if not needs_tools and user_last:
-            print(f"[FAST-PATH] Direct conversational stream for session '{session.session_id}'")
-            resp_text = await self._stream_response(messages, max_tokens=768, chunk_callback=chunk_callback)
-            self.add_assistant_message(resp_text, session_id=session_id)
-            return resp_text
-
-        # Check if Dispatcher handles as multi-step goal (only for tool-dependent queries)
         tr = tool_registry
         if not tr and tool_executor:
             class ToolExecutorAdapter:
@@ -537,12 +538,12 @@ NEVER:
                 if dispatch_res.get("handled"):
                     resp_text = dispatch_res.get("content", "") or "Done, sir."
                     self.add_assistant_message(resp_text, session_id=session_id)
+                    self.last_agent_result = AgentResult(final_answer=resp_text, status="COMPLETE", tool_count=0, iterations=1, execution_trace=[])
                     return resp_text
             except Exception as e:
                 print(f"[DISPATCHER] Dispatch error, falling back to direct pipeline: {e}")
         
-        print(f"[PIPELINE] Calling API for session '{session.session_id}' with "
-              f"{len(tool_schemas)} tools")
+        print(f"[PIPELINE] Calling API for session '{session.session_id}' with {len(tool_schemas)} tools")
         
         pipeline_t0 = time.time()
         try:
@@ -559,6 +560,8 @@ NEVER:
             max_turns = 5
             current_turn = 0
             final_response_text = ""
+            execution_trace = []
+            status = "COMPLETE"
 
             registered = tool_registry.tools if tool_registry and hasattr(tool_registry, 'tools') else tool_schemas
 
@@ -607,10 +610,14 @@ NEVER:
                             except Exception as fb_err:
                                 print(f"[FAILOVER] {fb_cls.__name__} failed: {fb_err}")
 
-                tool_calls = normalize_tool_calls(response, registered_tools=registered)
-                print(f"[DEBUG Turn {current_turn}] Normalized tool calls: {tool_calls}")
+                # Classify Response
+                classification = classify_response(response, registered_tools=registered)
 
-                if tool_calls:
+                if classification == ResponseClassification.TOOL_CALL:
+                    tool_calls = normalize_tool_calls(response, registered_tools=registered)
+                    tool_names = [tc['name'] for tc in tool_calls]
+                    print(f"[AGENT] Tool call detected: {', '.join(tool_names)}")
+
                     tool_calls_data = []
                     for tc in tool_calls:
                         tool_calls_data.append({
@@ -631,18 +638,26 @@ NEVER:
                     max_allowed_calls = 5
                     calls_to_process = tool_calls[:max_allowed_calls]
                     overflow_count = len(tool_calls) - max_allowed_calls
+                    pending_confirmation = False
 
                     for tc in calls_to_process:
                         name = tc["name"]
                         args = tc["arguments"]
 
-                        print(f"[TOOL Turn {current_turn}] >>> {name}({args})")
+                        print(f"[AGENT] Executing tool")
                         try:
                             result = await tool_executor(name, args)
+                            print(f"[AGENT] Tool completed successfully")
                         except Exception as te:
                             result = f"Tool Execution Error: {str(te)}"
+                            print(f"[AGENT] Tool failed: {te}")
 
-                        print(f"[TOOL Turn {current_turn}] <<< {repr(result)[:200]}")
+                        execution_trace.append({
+                            "id": tc["id"],
+                            "name": name,
+                            "args": args,
+                            "result": str(result)
+                        })
                         tool_results.append(result)
 
                         messages.append({
@@ -653,16 +668,23 @@ NEVER:
 
                         if "PENDING_CONFIRMATION" in str(result) or "CONFIRMATION REQUIRED" in str(result):
                             print(f"[PIPELINE] Risky tool '{name}' requires confirmation. Halting loop.")
+                            pending_confirmation = True
+                            final_response_text = str(result)
                             break
+
+                    if pending_confirmation:
+                        break
 
                     if overflow_count > 0 and not any("PENDING_CONFIRMATION" in str(r) or "CONFIRMATION REQUIRED" in str(r) for r in tool_results):
                         cap_notice = f"\n\n[NOTICE] Reached tool call execution cap of {max_allowed_calls} calls. {overflow_count} remaining call(s) paused requiring user approval."
                         tool_results.append(cap_notice)
-
-                    if any("PENDING_CONFIRMATION" in str(r) or "CONFIRMATION REQUIRED" in str(r) for r in tool_results) or overflow_count > 0:
                         final_response_text = "\n\n".join(str(r) for r in tool_results)
                         break
+
+                    print("[AGENT] Continuing agent loop for synthesis")
+                    continue
                 else:
+                    # Classification is FINAL
                     content_text = ""
                     if isinstance(response, str):
                         content_text = response
@@ -674,31 +696,42 @@ NEVER:
                     elif isinstance(response, dict):
                         content_text = response.get('content') or response.get('text') or ""
 
-                    sec_calls = normalize_tool_calls(content_text, registered_tools=registered)
-                    if sec_calls:
-                        response = content_text
-                        continue
+                    # FINAL RESPONSE FIREWALL CHECK
+                    if is_unresolved_tool_call(content_text, registered_tools=registered):
+                        print(f"[AGENT FIREWALL] Blocked unexecuted tool call JSON from final output. Routing back for execution.")
+                        sec_calls = normalize_tool_calls(content_text, registered_tools=registered)
+                        if sec_calls:
+                            response = content_text
+                            continue
 
-                    if content_text:
-                        final_response_text = content_text
-                        print(final_response_text)
-                        if chunk_callback:
-                            try:
-                                res = chunk_callback(final_response_text)
-                                if asyncio.iscoroutine(res):
-                                    await res
-                            except Exception:
-                                pass
-                    else:
-                        final_response_text = await self._stream_response(messages, max_tokens=2048, chunk_callback=chunk_callback)
+                    print("[AGENT] Final response generated")
+                    final_response_text = content_text
+                    if chunk_callback and final_response_text:
+                        try:
+                            res = chunk_callback(final_response_text)
+                            if asyncio.iscoroutine(res):
+                                await res
+                        except Exception:
+                            pass
                     break
 
+            if not final_response_text and execution_trace:
+                final_response_text = "I have completed the requested tool operations, sir."
 
             api_latency = time.time() - api_t0
             response_text = final_response_text or "Done, sir."
             self.add_assistant_message(response_text, session_id=session_id)
-            print(f"[PIPELINE] Response: {repr(response_text)}")
-            
+            print(f"[PIPELINE] Response: {repr(response_text[:150])}")
+
+            agent_result = AgentResult(
+                final_answer=response_text,
+                status=status,
+                tool_count=len(execution_trace),
+                iterations=current_turn,
+                execution_trace=execution_trace
+            )
+            self.last_agent_result = agent_result
+
             try:
                 from jarvis.debug_panel import debug
                 total_duration = time.time() - pipeline_t0
@@ -709,7 +742,7 @@ NEVER:
                 pass
 
             return response_text
-        
+
         try:
             return await with_retry(_do_chat)
         except Exception as e:
@@ -721,3 +754,7 @@ NEVER:
             import traceback
             traceback.print_exc()
             return f"Error: {str(e)}"
+
+
+APIClient = JarvisAPIClient
+
