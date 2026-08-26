@@ -1,9 +1,9 @@
 <div align="center">
 
-# J.A.R.V.I.S. Mk 4.5
+# J.A.R.V.I.S. Mk 5.1
 ### Just A Rather Very Intelligent System
 
-*A personal AI assistant featuring an Electron + React desktop UI, Tailscale Mobile PWA integration, live Gmail integration & Email UI panel, voice TTS engine, dual SQLite & FAISS vector memory, native GitHub & Git workflows, system diagnostics, proactive awareness, pre-commit security safeguards, and full PC control — powered by NVIDIA Nemotron & Google Gemini.*
+*An autonomous personal AI intelligence system featuring a Mark 5 Proactive Follow-Up Engine, Persistent Mission Intelligence & task tracking, unified Tool Call Normalization, Electron + React desktop UI, Tailscale Mobile PWA integration, live Gmail integration & Email UI panel, voice TTS engine, dual SQLite & FAISS vector memory, native GitHub & Git workflows, system diagnostics, and full PC control — powered by NVIDIA Nemotron & Google Gemini.*
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
 ![Electron](https://img.shields.io/badge/Electron-Desktop-47848F?style=flat-square&logo=electron)
@@ -13,7 +13,8 @@
 ![Gmail](https://img.shields.io/badge/Gmail-Google%20OAuth-EA4335?style=flat-square&logo=gmail)
 ![Memory](https://img.shields.io/badge/Memory-SQLite%20%2B%20FAISS-003B57?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Version](https://img.shields.io/badge/Release-Mk%204.5-brightgreen?style=flat-square)
+![Version](https://img.shields.io/badge/Release-Mk%205.1-brightgreen?style=flat-square)
+
 
 **Built by [Nived](https://github.com/nivedjkr)**
 
@@ -33,7 +34,24 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) direc
 
 ## Key Features
 
-### 📩 Live Gmail Integration & Real-Time `EmailPanel` UI
+### 🚀 Mark 5 Proactive Follow-Up Engine (`proactive_engine.py`)
+- **Non-Blocking Background Intelligence**: Operates independently after main response turns are delivered without blocking user interaction.
+- **Relevance & Value Gates**: Evaluates prompts against relevance rules and validates findings for novelty, actionable utility, and non-redundancy.
+- **Multi-Source Investigation**: Conducts background searches across `web_search_live`, `search_obsidian`, and project files with 15s timeout protection.
+- **Natural Proactive Messages**: Delivers separate follow-up messages starting with *"One more thing, sir..."* over WebSocket event streams.
+
+### 🎯 Mark 5 Persistent Mission Intelligence (`mission_manager.py`)
+- **Long-Term Objective Detection**: `MissionDetector` identifies ongoing goals (internships, project launches, skill mastery) while filtering out casual talk and errands.
+- **Explicit Approval Gate**: Missions are created in `PROPOSED` state and require explicit user approval (`/confirm` or `/mission approve <id>`) before activation.
+- **Controlled State Machines**: Validated status transitions for `MissionStatus` (`PROPOSED`, `ACTIVE`, `PLANNING`, `EXECUTING`, `WAITING`, `PAUSED`, `COMPLETED`, `FAILED`, `CANCELLED`) and `MissionTaskStatus` (`PENDING`, `READY`, `RUNNING`, `WAITING`, `COMPLETED`, `FAILED`, `CANCELLED`).
+- **SQLite Persistence**: Stores missions and structured tasks in SQLite database (`missions` & `mission_tasks` in `jarvis.db`), surviving application restarts.
+- **Slash Commands & REST APIs**: `/missions`, `/mission <id>`, `/mission pause|resume|cancel|approve`, and REST endpoints (`GET /missions`, `POST /missions/{id}/approve`).
+
+### 🛠️ Unified Tool Call Normalization Layer (`tool_normalizer.py`)
+- **Multi-Format Parsing**: Normalizes native OpenAI `tool_calls` and text-based JSON tool call formats (`tool`/`args`, `name`/`arguments`, `action`/`action_input`, JSON arrays, markdown-wrapped JSON).
+- **Strict Schema Validation**: Validates tool names against registered capabilities and parameter types.
+- **Final Output Filter**: Prevents raw JSON tool call strings from ever reaching the user or frontend.
+
 - **Google OAuth2 Authentication**: Secure Google OAuth authentication supporting Gmail read & send scopes.
 - **`EmailPanel.jsx` Component**: Real-time glassmorphic UI cards rendering unread inbox count, sender, subject line, 2-line snippet preview, date, and urgency tags (`URGENT`, `NORMAL`, `NOISE`).
 - **Manual Refresh Button**: Interactive `↻` header control to re-sync Gmail inbox on demand via WebSocket.

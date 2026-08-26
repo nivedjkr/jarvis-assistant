@@ -20,16 +20,16 @@ against the actual code. Before saying something works:
 
 - **`jarvis/tools.py`** — all tool logic lives here, registered via `ToolRegistry`. Tools are
   plain functions added with `self._add("tool_name", fn, schema)`, not classes.
-- **`jarvis/api_client.py`** — the conversation loop, persona/system prompt, and tool-call
-  dispatch to the LLM.
-- **`jarvis/api.py`** — FastAPI + WebSocket backend, serves the Electron desktop app.
+- **`jarvis/tool_normalizer.py`** — tool call normalization layer. Standardizes native OpenAI `tool_calls` and text-based JSON formats into a single internal format `[{"id": "...", "name": "...", "arguments": {...}}]` and prevents raw tool JSON from reaching the user.
+- **`jarvis/proactive_engine.py`** — Mark 5 Proactive Follow-Up Engine. Runs non-blocking background analysis after response turns, evaluates Relevance & Value Gates, conducts multi-source background searches, and emits WebSocket follow-ups.
+- **`jarvis/mission_manager.py`** — Persistent Mission Intelligence. SQLite persistence (`missions` & `mission_tasks`), `MissionDetector` for goal detection, explicit user approval gates, controlled state machines, slash commands (`/missions`, `/mission`), REST APIs, and event broadcasting.
+- **`jarvis/api_client.py`** — the conversation loop, persona/system prompt, tool-call normalization, and tool-call dispatch to the LLM.
+- **`jarvis/api.py`** — FastAPI + WebSocket backend, serves the Electron desktop app, slash commands, REST API endpoints, and proactive/mission WebSocket events.
 - **`jarvis-desktop/`** — Electron + React frontend. `App.jsx` handles the WebSocket connection
-  and routes `state_update` messages to panel components (`EmailPanel`, `DirectivesPanel`,
-  `SystemVitals`).
+  and routes `state_update`, `proactive_event`, `proactive_followup`, and `mission_event` messages to panel components.
 - **`jarvis-mobile/`** — Plain HTML/JS PWA mobile client (no Electron). Served directly at `/mobile` by FastAPI when `JARVIS_ALLOW_REMOTE=true` or accessible over LAN/Tailscale.
-- Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`, `BrowserService`) live in their own
-  files and are instantiated once in `ToolRegistry.__init__`, then reused — never create a second
-  competing instance of a service elsewhere.
+- Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`, `BrowserService`, `ProactiveFollowUpEngine`, `MissionManager`) live in their own
+  files and are instantiated once, then reused — never create a second competing instance of a service elsewhere.
 - Current model: `nvidia/nemotron-3-ultra-550b-a55b` (NVIDIA NIM, free endpoint, 1M context,
   verified tool-calling support). Don't swap models without testing a multi-tool-call request
   end-to-end afterward — different models format tool calls differently.
