@@ -25,6 +25,7 @@ from jarvis.api_client import JarvisAPIClient
 from jarvis.tools import ToolRegistry
 from jarvis.voice import TTSEngine
 from jarvis.diagnostics import run_diagnostics, run_diagnostics_sync
+from jarvis.proactive_engine import ProactiveFollowUpEngine
 
 from contextlib import asynccontextmanager
 
@@ -85,6 +86,8 @@ if mobile_dir.exists():
 api_client = JarvisAPIClient()
 tool_registry = ToolRegistry()
 tts_engine = TTSEngine()
+proactive_engine = ProactiveFollowUpEngine()
+
 
 def handle_tool_state_change(domain: str, action: str, payload: dict):
     from datetime import datetime
@@ -604,6 +607,36 @@ async def websocket_endpoint(ws: WebSocket):
                     })
                     
                     print(f"[WS] Sent response ({len(executed_tools)} tools executed): {response[:100]}")
+
+                    # Trigger non-blocking Mark 5 Proactive Follow-Up Engine
+                    async def broadcast_proactive(event_payload: dict):
+                        try:
+                            if event_payload.get("type") == "proactive_followup":
+                                p_text = event_payload.get("text", "")
+                                p_sid = event_payload.get("session_id", session_id)
+                                api_client.add_assistant_message(p_text, session_id=p_sid)
+                                await manager.broadcast({
+                                    "type": "response",
+                                    "text": p_text,
+                                    "proactive": True,
+                                    "status": "speaking"
+                                })
+                            else:
+                                await manager.broadcast(event_payload)
+                        except Exception as pe:
+                            print(f"[WS] Proactive broadcast error: {pe}")
+
+                    asyncio.create_task(
+                        proactive_engine.analyze_and_followup(
+                            session_id=session_id,
+                            user_prompt=user_msg,
+                            main_response=response,
+                            tool_registry=tool_registry,
+                            llm_client=api_client,
+                            event_callback=broadcast_proactive
+                        )
+                    )
+
                     
     except WebSocketDisconnect:
         manager.disconnect(ws)

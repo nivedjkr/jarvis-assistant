@@ -9,6 +9,7 @@ import inspect
 from typing import List, Dict, Any, Optional
 from jarvis.agents.base_agent import BaseAgent, AgentResponse
 from jarvis.orchestration.task_tracker import TaskTracker, TaskStatus
+from jarvis.tool_normalizer import normalize_tool_calls
 
 
 class AgenticLoop:
@@ -72,62 +73,34 @@ class AgenticLoop:
             while inspect.isawaitable(response):
                 response = await response
 
-            if isinstance(response, str):
-                final_content = response
-                if task_tracker and task:
-                    task_tracker.update_task(task.task_id, status=TaskStatus.COMPLETED, result=final_content)
-                return AgentResponse(
-                    agent_name=agent.name,
-                    content=final_content,
-                    status="COMPLETED",
-                    tool_calls=executed_tool_calls
-                )
+            registered = getattr(tool_registry, 'tools', None)
+            tool_calls = normalize_tool_calls(response, registered_tools=registered)
 
-            choices = getattr(response, 'choices', [])
-            msg = choices[0].message if choices else None
-
-            if not msg:
-                final_content = str(response)
-                if task_tracker and task:
-                    task_tracker.update_task(task.task_id, status=TaskStatus.COMPLETED, result=final_content)
-                return AgentResponse(
-                    agent_name=agent.name,
-                    content=final_content,
-                    status="COMPLETED",
-                    tool_calls=executed_tool_calls
-                )
-
-            if getattr(msg, 'tool_calls', None):
-                # Model produced tool calls
+            if tool_calls:
                 tool_calls_data = []
-                for tc in msg.tool_calls:
+                for tc in tool_calls:
                     tool_calls_data.append({
-                        "id": tc.id,
+                        "id": tc["id"],
                         "type": "function",
                         "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
+                            "name": tc["name"],
+                            "arguments": json.dumps(tc["arguments"])
                         }
                     })
 
                 messages.append({
                     "role": "assistant",
-                    "content": msg.content or "",
+                    "content": "",
                     "tool_calls": tool_calls_data
                 })
 
-                for tc in msg.tool_calls:
-                    fn_name = tc.function.name
-                    try:
-                        args = json.loads(tc.function.arguments)
-                    except Exception:
-                        args = {}
+                for tc in tool_calls:
+                    fn_name = tc["name"]
+                    args = tc["arguments"]
 
-                    # Security & Permissions check: Ensure agent only calls allowed tools
                     if agent.allowed_tools is not None and fn_name not in agent.allowed_tools:
                         result = f"Error: Tool '{fn_name}' is not permitted for role '{agent.name}'."
                     else:
-                        # Execute via existing ToolRegistry (which enforces RISKY_TOOLS confirmation gate)
                         try:
                             if hasattr(tool_registry, 'execute'):
                                 result = await tool_registry.execute(fn_name, args)
@@ -141,12 +114,11 @@ class AgenticLoop:
 
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": tc.id,
+                        "tool_call_id": tc["id"],
                         "content": str_result
                     })
 
-                    # Check for security confirmation gate trigger
-                    if "PENDING_CONFIRMATION" in str_result or "CONFIRMATION REQUIRED" in str_result:
+                    if "PENDING_CONFIRMATION" in str_result or "CONFIRMATION REQUIRED" in str(result):
                         if task_tracker and task:
                             task_tracker.update_task(
                                 task.task_id,
@@ -160,8 +132,7 @@ class AgenticLoop:
                             tool_calls=executed_tool_calls
                         )
             else:
-                # Direct text response from agent
-                final_content = msg.content or ""
+                final_content = response if isinstance(response, str) else getattr(getattr(getattr(response, 'choices', [None])[0], 'message', None), 'content', '') or str(response)
                 if task_tracker and task:
                     task_tracker.update_task(task.task_id, status=TaskStatus.COMPLETED, result=final_content)
                 return AgentResponse(

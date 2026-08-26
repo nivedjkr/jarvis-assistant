@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 from pathlib import Path
 from jarvis.config_manager import config
+from jarvis.tool_normalizer import normalize_tool_calls
 
 # Find .env relative to this file's location
 env_path = Path(__file__).parent.parent / '.env'
@@ -559,6 +560,8 @@ NEVER:
             current_turn = 0
             final_response_text = ""
 
+            registered = tool_registry.tools if tool_registry and hasattr(tool_registry, 'tools') else tool_schemas
+
             while current_turn < max_turns:
                 current_turn += 1
                 if hasattr(self.provider, 'chat'):
@@ -604,59 +607,50 @@ NEVER:
                             except Exception as fb_err:
                                 print(f"[FAILOVER] {fb_cls.__name__} failed: {fb_err}")
 
-                if isinstance(response, str):
-                    final_response_text = response
-                    break
+                tool_calls = normalize_tool_calls(response, registered_tools=registered)
+                print(f"[DEBUG Turn {current_turn}] Normalized tool calls: {tool_calls}")
 
-                choices = getattr(response, 'choices', [])
-                message = choices[0].message if choices else None
-                if not message:
-                    final_response_text = str(response)
-                    break
-
-                print(f"[DEBUG Turn {current_turn}] Has tool calls: {bool(getattr(message, 'tool_calls', None))}")
-                
-                if message.tool_calls:
+                if tool_calls:
                     tool_calls_data = []
-                    for tc in message.tool_calls:
+                    for tc in tool_calls:
                         tool_calls_data.append({
-                            "id": tc.id,
+                            "id": tc["id"],
                             "type": "function",
                             "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments
+                                "name": tc["name"],
+                                "arguments": json.dumps(tc["arguments"])
                             }
                         })
                     messages.append({
                         "role": "assistant",
-                        "content": message.content or "",
+                        "content": "",
                         "tool_calls": tool_calls_data
                     })
-                    
+
                     tool_results = []
                     max_allowed_calls = 5
-                    tool_calls_list = list(message.tool_calls)
-                    calls_to_process = tool_calls_list[:max_allowed_calls]
-                    overflow_count = len(tool_calls_list) - max_allowed_calls
-                    
+                    calls_to_process = tool_calls[:max_allowed_calls]
+                    overflow_count = len(tool_calls) - max_allowed_calls
+
                     for tc in calls_to_process:
-                        name = tc.function.name
-                        try:
-                            args = json.loads(tc.function.arguments)
-                        except Exception:
-                            args = {}
-                        
+                        name = tc["name"]
+                        args = tc["arguments"]
+
                         print(f"[TOOL Turn {current_turn}] >>> {name}({args})")
-                        result = await tool_executor(name, args)
+                        try:
+                            result = await tool_executor(name, args)
+                        except Exception as te:
+                            result = f"Tool Execution Error: {str(te)}"
+
                         print(f"[TOOL Turn {current_turn}] <<< {repr(result)[:200]}")
                         tool_results.append(result)
-                        
+
                         messages.append({
                             "role": "tool",
-                            "tool_call_id": tc.id,
+                            "tool_call_id": tc["id"],
                             "content": str(result)
                         })
-                        
+
                         if "PENDING_CONFIRMATION" in str(result) or "CONFIRMATION REQUIRED" in str(result):
                             print(f"[PIPELINE] Risky tool '{name}' requires confirmation. Halting loop.")
                             break
@@ -664,16 +658,29 @@ NEVER:
                     if overflow_count > 0 and not any("PENDING_CONFIRMATION" in str(r) or "CONFIRMATION REQUIRED" in str(r) for r in tool_results):
                         cap_notice = f"\n\n[NOTICE] Reached tool call execution cap of {max_allowed_calls} calls. {overflow_count} remaining call(s) paused requiring user approval."
                         tool_results.append(cap_notice)
-                    
-                    if any("PENDING_CONFIRMATION" in str(r) or "CONFIRMATION REQUIRED" in str(r) for r in tool_results):
-                        final_response_text = "\n\n".join(str(r) for r in tool_results)
-                        break
-                    elif overflow_count > 0:
+
+                    if any("PENDING_CONFIRMATION" in str(r) or "CONFIRMATION REQUIRED" in str(r) for r in tool_results) or overflow_count > 0:
                         final_response_text = "\n\n".join(str(r) for r in tool_results)
                         break
                 else:
-                    if message.content:
-                        final_response_text = message.content
+                    content_text = ""
+                    if isinstance(response, str):
+                        content_text = response
+                    elif hasattr(response, 'choices') and response.choices:
+                        msg = getattr(response.choices[0], 'message', None)
+                        content_text = getattr(msg, 'content', '') or ""
+                    elif hasattr(response, 'content'):
+                        content_text = getattr(response, 'content', '') or ""
+                    elif isinstance(response, dict):
+                        content_text = response.get('content') or response.get('text') or ""
+
+                    sec_calls = normalize_tool_calls(content_text, registered_tools=registered)
+                    if sec_calls:
+                        response = content_text
+                        continue
+
+                    if content_text:
+                        final_response_text = content_text
                         print(final_response_text)
                         if chunk_callback:
                             try:
@@ -685,6 +692,7 @@ NEVER:
                     else:
                         final_response_text = await self._stream_response(messages, max_tokens=2048, chunk_callback=chunk_callback)
                     break
+
 
             api_latency = time.time() - api_t0
             response_text = final_response_text or "Done, sir."
