@@ -296,11 +296,18 @@ async def websocket_endpoint(ws: WebSocket):
 
             if msg_type == "delete_session":
                 target_sid = data.get("session_id", "").strip()
+                print(f"[SESSION DELETE] Backend request received")
+                print(f"[SESSION DELETE] Requested session ID: {target_sid}")
+                
                 if target_sid:
-                    print(f"[SESSION_DEBUG] Delete requested for session_id: {target_sid} | active_session_id before: {session_id}")
+                    print(f"[SESSION DELETE] Looking up session")
+                    existing_before = api_client.get_session(target_sid)
+                    print(f"[SESSION DELETE] Session exists: {existing_before is not None}")
+                    
+                    print(f"[SESSION DELETE] Deleting persistent record & cache")
                     success = api_client.delete_session(target_sid)
+                    
                     sessions = api_client.list_sessions()
-                    print(f"[SESSION_DEBUG] Backend delete success: {success} | Remaining sessions count: {len(sessions)}")
 
                     # Active session recovery: if deleted session was currently active
                     if target_sid == session_id:
@@ -310,12 +317,13 @@ async def websocket_endpoint(ws: WebSocket):
                             new_sess = api_client.new_session()
                             session_id = new_sess.session_id
                             sessions = api_client.list_sessions()
-                        print(f"[SESSION_DEBUG] Active session updated to fallback: {session_id}")
+                        print(f"[SESSION DELETE] Active session updated to fallback: {session_id}")
 
                     sess = api_client.get_session(session_id)
                     time_str = datetime.now().strftime("%H:%M")
                     msgs = [{"role": m["role"], "content": m["content"], "timestamp": time_str} for m in sess.messages]
 
+                    print(f"[SESSION DELETE] Sending success response")
                     await ws.send_json({
                         "type": "session_deleted",
                         "status": "ok" if success else "error",

@@ -54,8 +54,15 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
     e.stopPropagation()
     if (e.preventDefault) e.preventDefault()
     
+    console.log('[SESSION DELETE] Clicked')
+    console.log('[SESSION DELETE] Target session ID:', sid)
+    console.log('[SESSION DELETE] Active session ID:', currentSessionId)
+    
     if (window.confirm('Delete this conversation permanently?')) {
-      console.log('[SESSION_DEBUG] User confirmed deletion for session_id:', sid, 'currentSessionId:', currentSessionId)
+      const payload = { type: 'delete_session', session_id: sid }
+      console.log('[SESSION DELETE] Request being sent')
+      console.log('[SESSION DELETE] Request payload:', payload)
+      
       if (onDeleteSession) {
         onDeleteSession(sid)
       } else if (window.jarvis?.deleteSession) {

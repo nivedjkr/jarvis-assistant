@@ -169,7 +169,8 @@ class ConversationSession:
 
 
 class JarvisAPIClient:
-    def __init__(self):
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path
         from jarvis.llm_provider import get_provider
         self.provider = get_provider()
         self.client = getattr(self.provider, 'client', None)
@@ -199,7 +200,7 @@ class JarvisAPIClient:
     def _load_sessions_from_db(self):
         try:
             from jarvis.memory import Memory
-            mem = Memory()
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
             db_sessions = mem.list_sessions()
             for s in db_sessions:
                 sid = s["session_id"]
@@ -207,7 +208,8 @@ class JarvisAPIClient:
                     session_id=sid,
                     title=s.get("title", "New Conversation"),
                     created_at=s.get("created_at"),
-                    last_active=s.get("last_active")
+                    last_active=s.get("last_active"),
+                    db_path=self.db_path
                 )
             print(f"[SESSION] Loaded {len(self.sessions)} sessions from database.")
         except Exception as e:
@@ -216,7 +218,7 @@ class JarvisAPIClient:
     def list_sessions(self) -> List[Dict[str, Any]]:
         try:
             from jarvis.memory import Memory
-            mem = Memory()
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
             return mem.list_sessions()
         except Exception:
             return [
@@ -232,11 +234,11 @@ class JarvisAPIClient:
 
     def new_session(self, session_id: Optional[str] = None, title: str = "New Conversation") -> ConversationSession:
         sid = session_id or f"session_{uuid.uuid4().hex[:8]}"
-        sess = ConversationSession(sid, title=title)
+        sess = ConversationSession(sid, title=title, db_path=self.db_path)
         self.sessions[sid] = sess
         try:
             from jarvis.memory import Memory
-            mem = Memory()
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
             mem.save_session(sid, title=title, created_at=sess.created_at, last_active=sess.last_active)
         except Exception as e:
             print(f"[SESSION] Error saving new session to DB: {e}")
@@ -250,19 +252,25 @@ class JarvisAPIClient:
         sess.title = title
         try:
             from jarvis.memory import Memory
-            mem = Memory()
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
             return mem.rename_session(session_id, title)
         except Exception:
             return False
 
     def delete_session(self, session_id: str) -> bool:
+        print(f"[SESSION DELETE] Deleting in-memory/cache references for: {session_id}")
         if session_id in self.sessions:
             del self.sessions[session_id]
+            print(f"[SESSION DELETE] Cache cleanup complete for: {session_id}")
         try:
             from jarvis.memory import Memory
-            mem = Memory()
-            return mem.delete_session(session_id)
-        except Exception:
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            print(f"[SESSION DELETE] Deleting persistent record in SQLite: {session_id}")
+            result = mem.delete_session(session_id)
+            print(f"[SESSION DELETE] Database result: {'success' if result else 'failure'}")
+            return result
+        except Exception as e:
+            print(f"[SESSION DELETE] Error deleting session '{session_id}': {e}")
             return False
 
     @property
