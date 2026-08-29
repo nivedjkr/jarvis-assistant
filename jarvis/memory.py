@@ -642,6 +642,41 @@ class Memory:
             conn.commit()
             return cur.rowcount > 0
 
+    # --- Obsidian-First Knowledge Graph Methods ---
+
+    def search_knowledge_graph(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search Obsidian long-term knowledge graph as primary human-readable knowledge layer.
+        Prioritizes [[NIVED]] root context and [[KTU]] academic branch notes.
+        """
+        try:
+            from jarvis.tools import _resolve_obsidian_vault_path, _grep_obsidian_vault
+            vault_path = _resolve_obsidian_vault_path()
+            if vault_path and os.path.exists(vault_path):
+                results = _grep_obsidian_vault(vault_path, query, limit=limit)
+                for r in results:
+                    r["source"] = "obsidian_knowledge_graph"
+                return results
+        except Exception as e:
+            print(f"[MEMORY] Knowledge graph search exception: {e}")
+        return []
+
+    def get_root_context(self) -> str:
+        """
+        Read the central [[NIVED]] root context note from the Obsidian vault.
+        """
+        try:
+            from jarvis.tools import _resolve_obsidian_vault_path
+            vault_path = _resolve_obsidian_vault_path()
+            if vault_path:
+                nived_file = os.path.join(vault_path, "NIVED.md")
+                if os.path.exists(nived_file):
+                    with open(nived_file, "r", encoding="utf-8", errors="ignore") as f:
+                        return f.read()
+        except Exception:
+            pass
+        return "NIVED Root Context Note (Default)"
+
     # --- Notes Methods ---
 
     def add_note(self, text: str, category: str = "general") -> Dict:

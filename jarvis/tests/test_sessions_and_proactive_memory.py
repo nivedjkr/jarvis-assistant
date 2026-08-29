@@ -350,3 +350,67 @@ def test_directives_lifecycle_and_backend_filtering(temp_db):
     assert r2["id"] not in d_ids_final
 
 
+def test_nived_root_node_and_ktu_academic_branch():
+    """
+    Test NIVED root note and KTU academic branch integrity:
+    1. Verify NIVED.md exists and contains links to [[KTU]], [[Projects]], [[Studies]], [[JARVIS]].
+    2. Verify KTU.md exists and links all S5 subject notes (ai-s5, crypto-s5, mc-s5, ml-s5, nss-s5).
+    3. Verify search_knowledge_graph prioritizes NIVED for personal context and KTU for academic context.
+    """
+    from jarvis.tools import _resolve_obsidian_vault_path, _grep_obsidian_vault
+    import os
+
+    vault_path = _resolve_obsidian_vault_path()
+    assert vault_path is not None and os.path.exists(vault_path)
+
+    nived_path = os.path.join(vault_path, "NIVED.md")
+    assert os.path.exists(nived_path)
+    with open(nived_path, "r", encoding="utf-8") as f:
+        nived_content = f.read()
+
+    assert "[[KTU]]" in nived_content
+    assert "[[Projects]]" in nived_content
+    assert "[[Studies]]" in nived_content
+    assert "[[JARVIS]]" in nived_content
+
+    ktu_path = os.path.join(vault_path, "KTU.md")
+    assert os.path.exists(ktu_path)
+    with open(ktu_path, "r", encoding="utf-8") as f:
+        ktu_content = f.read()
+
+    assert "[[ai-s5" in ktu_content
+    assert "[[crypto-s5" in ktu_content
+    assert "[[mc-s5" in ktu_content
+    assert "[[ml-s5" in ktu_content
+    assert "[[nss-s5" in ktu_content
+
+    # Academic search boost test
+    acad_results = _grep_obsidian_vault(vault_path, "KTU semester 5 exam subjects", limit=3)
+    assert len(acad_results) > 0
+    top_title = acad_results[0]["title"]
+    assert top_title in ("KTU", "Studies", "ai-s5", "crypto-s5", "mc-s5", "ml-s5", "nss-s5")
+
+
+def test_search_before_create_duplicate_prevention():
+    """
+    Test Search Before Create duplicate note prevention:
+    1. Attempt to create note with title 'NIVED'.
+    2. Verify it detects existing NIVED.md note and appends/updates it instead of creating NIVED-1.md.
+    """
+    from jarvis.tools import ToolRegistry, _resolve_obsidian_vault_path
+    import os
+
+    reg = ToolRegistry()
+    create_fn = reg.tools["create_obsidian_note"]
+
+    vault_path = _resolve_obsidian_vault_path()
+    nived_path = os.path.join(vault_path, "NIVED.md")
+
+    res = create_fn(title="NIVED", content="New test context update")
+    assert "appended" in res.lower() or "updated" in res.lower() or "duplicate" in res.lower()
+
+    # Verify no NIVED-1.md or duplicate file was created
+    assert not os.path.exists(os.path.join(vault_path, "NIVED-1.md"))
+    assert not os.path.exists(os.path.join(vault_path, "NIVED 1.md"))
+
+

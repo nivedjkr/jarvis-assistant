@@ -2589,15 +2589,23 @@ class ToolRegistry:
             if not vault_path or not os.path.exists(vault_path):
                 return f"CANNOT CREATE NOTE: Obsidian vault path not configured or directory '{vault_path}' does not exist."
 
+            from datetime import datetime
             import re
             safe_title = re.sub(r'[\\/*?:"<>|]', '-', t_clean)
-            file_name = f"{safe_title}.md" if not safe_title.lower().endswith(".md") else safe_title
+            clean_title_no_ext = safe_title[:-3] if safe_title.lower().endswith(".md") else safe_title
 
+            # Search Before Create — check for duplicate note titles (case-insensitive)
+            existing_matches = _grep_obsidian_vault(vault_path, clean_title_no_ext, limit=1)
+            if existing_matches and existing_matches[0]["title"].lower() == clean_title_no_ext.lower():
+                existing_title = existing_matches[0]["title"]
+                print(f"[OBSIDIAN] Duplicate note found for '{t_clean}' -> Appending to existing note '{existing_title}'")
+                return append_obsidian_note(title=existing_title, text=f"\n## Update [{datetime.now().strftime('%Y-%m-%d %H:%M')}]\n{c_clean}")
+
+            file_name = f"{clean_title_no_ext}.md"
             target_dir = os.path.join(vault_path, folder.strip().lstrip('/\\')) if folder and folder.strip() else vault_path
             os.makedirs(target_dir, exist_ok=True)
             file_path = os.path.join(target_dir, file_name)
 
-            from datetime import datetime
             created_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             parsed_links = []
@@ -2605,6 +2613,17 @@ class ToolRegistry:
                 parsed_links = [str(l).strip() for l in links if str(l).strip()]
             elif isinstance(links, str) and links.strip():
                 parsed_links = [l.strip() for l in links.split(",") if l.strip()]
+
+            # Semantic auto-linking rules
+            combined_text = (t_clean + " " + c_clean).lower()
+            academic_kw = ["ktu", "exam", "semester", "s5", "subject", "assignment", "syllabus", "ai-s5", "crypto-s5", "mc-s5", "ml-s5", "nss-s5"]
+            project_kw = ["jarvis", "project", "architecture", "bot", "agent"]
+
+            if any(kw in combined_text for kw in academic_kw) and "KTU" not in parsed_links:
+                parsed_links.append("KTU")
+                parsed_links.append("Studies")
+            if any(kw in combined_text for kw in project_kw) and "Projects" not in parsed_links:
+                parsed_links.append("Projects")
 
             link_lines = []
             for l in parsed_links:
@@ -3724,6 +3743,17 @@ def _grep_obsidian_vault(vault_path: str, query: str, limit: int = 3) -> List[Di
             kw_matches = sum(1 for kw in keywords if kw in content_lower or kw in file_lower or kw in rel_path_lower)
             if kw_matches > 0:
                 score += kw_matches * 1.0
+
+            # Academic & Root Graph Branch Scoring Boosts
+            academic_terms = {"ktu", "exam", "subject", "semester", "assignment", "syllabus", "ai-s5", "crypto-s5", "mc-s5", "ml-s5", "nss-s5", "college", "university", "study", "studies"}
+            if any(term in query_lower for term in academic_terms):
+                if file_lower in ("ktu.md", "studies.md") or any(sub in file_lower for sub in ["-s5", "s5", "ktu"]):
+                    score += 10.0
+
+            personal_terms = {"nived", "who am i", "user", "context", "goals", "preferences"}
+            if any(term in query_lower for term in personal_terms):
+                if file_lower == "nived.md":
+                    score += 15.0
 
             if score > 0:
                 title = file[:-3] if file.endswith('.md') else file

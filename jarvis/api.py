@@ -1018,6 +1018,17 @@ async def delete_directive_endpoint(directive_id: str):
     except ValueError:
         return {"status": "error", "message": "Invalid directive ID"}
 
+@app.get("/knowledge/search")
+@app.get("/api/knowledge/search")
+async def search_knowledge_endpoint(q: str = "", limit: int = 5):
+    return api_client.search_knowledge_graph(q, limit=limit)
+
+@app.get("/knowledge/root")
+@app.get("/api/knowledge/root")
+async def get_knowledge_root_endpoint():
+    content = api_client.get_root_context()
+    return {"status": "ok", "root_note": "NIVED.md", "content": content}
+
 @app.get("/vitals")
 async def vitals_endpoint():
     try:

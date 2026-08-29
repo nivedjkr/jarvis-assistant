@@ -337,6 +337,22 @@ class JarvisAPIClient:
         except Exception:
             return False
 
+    def search_knowledge_graph(self, query: str, limit: int = 5) -> list:
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            return mem.search_knowledge_graph(query, limit=limit)
+        except Exception:
+            return []
+
+    def get_root_context(self) -> str:
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            return mem.get_root_context()
+        except Exception:
+            return ""
+
     @property
     def messages(self) -> list:
         return self.get_session().messages
