@@ -350,6 +350,20 @@ class MissionManager:
     def cancel_mission(self, mission_id: str) -> Mission:
         return self.update_mission_status(mission_id, MissionStatus.CANCELLED)
 
+    def delete_mission(self, mission_id: str) -> bool:
+        """Deletes a mission and all associated tasks from SQLite storage."""
+        mission = self.get_mission(mission_id)
+        if not mission:
+            return False
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM mission_tasks WHERE mission_id = ?", (mission_id,))
+            cursor.execute("DELETE FROM missions WHERE id = ?", (mission_id,))
+            conn.commit()
+
+        return True
+
     def create_task(
         self,
         mission_id: str,

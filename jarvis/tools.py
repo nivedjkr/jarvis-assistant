@@ -593,7 +593,7 @@ class ToolRegistry:
                 "gh_delete_repo", "gh_merge_pr", "gh_close_issue", "gh_create_repo",
                 "gh_rerun_failed", "gh_mark_notifications_read", "run_command",
                 "git_add_commit_push", "send_email", "delete_sent_email", "delete_calendar_event",
-                "browse_click"
+                "browse_click", "delete_mission", "cancel_mission"
             }
             if name in RISKY_TOOLS and not is_human_confirmed:
                 require_exact = None
@@ -624,6 +624,10 @@ class ToolRegistry:
                     preview = f"Delete calendar event '{normalized_args.get('event_id', '')}'"
                 elif name == "browse_click":
                     preview = f"Click web element '{normalized_args.get('selector_description', '')}' on active web page"
+                elif name == "delete_mission":
+                    preview = f"Delete persistent mission '{normalized_args.get('mission_id', '')}' and all associated tasks"
+                elif name == "cancel_mission":
+                    preview = f"Cancel persistent mission '{normalized_args.get('mission_id', '')}'"
                 else:
                     preview = f"Execute {name} with arguments {normalized_args}"
 
@@ -2992,6 +2996,103 @@ class ToolRegistry:
             except Exception as e:
                 return f"ERROR: Failed to retrieve mission: {str(e)}"
 
+        def delete_mission(mission_id: str = "") -> str:
+            m_id = (mission_id or "").strip()
+            if not m_id:
+                return "ERROR: mission_id parameter is required."
+
+            mm = getattr(self, "mission_manager", None)
+            if not mm:
+                try:
+                    from jarvis.mission_manager import MissionManager
+                    mm = MissionManager()
+                except Exception as e:
+                    return f"ERROR: Failed to initialize MissionManager: {str(e)}"
+
+            try:
+                success = mm.delete_mission(m_id)
+                if success:
+                    return f"Successfully deleted mission '{m_id}' and all associated tasks."
+                return f"ERROR: Mission '{m_id}' not found."
+            except Exception as e:
+                return f"ERROR: Failed to delete mission '{m_id}': {str(e)}"
+
+        def cancel_mission(mission_id: str = "") -> str:
+            m_id = (mission_id or "").strip()
+            if not m_id:
+                return "ERROR: mission_id parameter is required."
+
+            mm = getattr(self, "mission_manager", None)
+            if not mm:
+                try:
+                    from jarvis.mission_manager import MissionManager
+                    mm = MissionManager()
+                except Exception as e:
+                    return f"ERROR: Failed to initialize MissionManager: {str(e)}"
+
+            try:
+                m = mm.cancel_mission(m_id)
+                return f"Successfully cancelled mission '{m_id}' (Status: {m.status.value})."
+            except Exception as e:
+                return f"ERROR: Failed to cancel mission '{m_id}': {str(e)}"
+
+        def approve_mission(mission_id: str = "") -> str:
+            m_id = (mission_id or "").strip()
+            if not m_id:
+                return "ERROR: mission_id parameter is required."
+
+            mm = getattr(self, "mission_manager", None)
+            if not mm:
+                try:
+                    from jarvis.mission_manager import MissionManager
+                    mm = MissionManager()
+                except Exception as e:
+                    return f"ERROR: Failed to initialize MissionManager: {str(e)}"
+
+            try:
+                m = mm.approve_mission(m_id)
+                return f"Successfully approved and activated mission '{m_id}' (Status: {m.status.value}, Tasks: {len(m.tasks)})."
+            except Exception as e:
+                return f"ERROR: Failed to approve mission '{m_id}': {str(e)}"
+
+        def pause_mission(mission_id: str = "") -> str:
+            m_id = (mission_id or "").strip()
+            if not m_id:
+                return "ERROR: mission_id parameter is required."
+
+            mm = getattr(self, "mission_manager", None)
+            if not mm:
+                try:
+                    from jarvis.mission_manager import MissionManager
+                    mm = MissionManager()
+                except Exception as e:
+                    return f"ERROR: Failed to initialize MissionManager: {str(e)}"
+
+            try:
+                m = mm.pause_mission(m_id)
+                return f"Successfully paused mission '{m_id}'."
+            except Exception as e:
+                return f"ERROR: Failed to pause mission '{m_id}': {str(e)}"
+
+        def resume_mission(mission_id: str = "") -> str:
+            m_id = (mission_id or "").strip()
+            if not m_id:
+                return "ERROR: mission_id parameter is required."
+
+            mm = getattr(self, "mission_manager", None)
+            if not mm:
+                try:
+                    from jarvis.mission_manager import MissionManager
+                    mm = MissionManager()
+                except Exception as e:
+                    return f"ERROR: Failed to initialize MissionManager: {str(e)}"
+
+            try:
+                m = mm.resume_mission(m_id)
+                return f"Successfully resumed mission '{m_id}' (Status: {m.status.value})."
+            except Exception as e:
+                return f"ERROR: Failed to resume mission '{m_id}': {str(e)}"
+
         self._add(
             "get_next_actionable_task",
             get_next_actionable_task,
@@ -3026,6 +3127,71 @@ class ToolRegistry:
                 "mission_id": {
                     "type": "string",
                     "description": "The unique ID of the target mission (e.g. 'mission_12345678')."
+                }
+            },
+            ["mission_id"]
+        )
+
+        self._add(
+            "delete_mission",
+            delete_mission,
+            "Deletes a persistent mission and all associated tasks from SQLite database.",
+            {
+                "mission_id": {
+                    "type": "string",
+                    "description": "The unique ID of the mission to delete (e.g. 'mission_12345678')."
+                }
+            },
+            ["mission_id"]
+        )
+
+        self._add(
+            "cancel_mission",
+            cancel_mission,
+            "Cancels an active or proposed persistent mission.",
+            {
+                "mission_id": {
+                    "type": "string",
+                    "description": "The unique ID of the mission to cancel (e.g. 'mission_12345678')."
+                }
+            },
+            ["mission_id"]
+        )
+
+        self._add(
+            "approve_mission",
+            approve_mission,
+            "Approves a proposed mission, generates initial milestone plan, and sets mission to ACTIVE.",
+            {
+                "mission_id": {
+                    "type": "string",
+                    "description": "The unique ID of the mission to approve (e.g. 'mission_12345678')."
+                }
+            },
+            ["mission_id"]
+        )
+
+        self._add(
+            "pause_mission",
+            pause_mission,
+            "Pauses an active persistent mission.",
+            {
+                "mission_id": {
+                    "type": "string",
+                    "description": "The unique ID of the mission to pause (e.g. 'mission_12345678')."
+                }
+            },
+            ["mission_id"]
+        )
+
+        self._add(
+            "resume_mission",
+            resume_mission,
+            "Resumes a paused persistent mission back to ACTIVE.",
+            {
+                "mission_id": {
+                    "type": "string",
+                    "description": "The unique ID of the mission to resume (e.g. 'mission_12345678')."
                 }
             },
             ["mission_id"]

@@ -219,3 +219,27 @@ def test_next_action_tool_registry_integration(temp_db_path):
     assert data["task_id"] == task.id
     assert data["task_title"] == "Tool Task"
     assert data["reason"] == "NEXT_TASK_SELECTED"
+
+
+# --- TEST 11: DELETE MISSION TOOL CONFIRMATION FLOW ---
+@pytest.mark.asyncio
+async def test_delete_mission_tool_confirmation_flow(temp_db_path):
+    import re
+    from jarvis.tools import ToolRegistry
+    manager = MissionManager(db_path=temp_db_path)
+    registry = ToolRegistry(mission_manager=manager)
+
+    m = manager.propose_mission("Delete Goal", "Test delete mission tool confirmation.")
+    assert manager.get_mission(m.id) is not None
+
+    # Trigger risky tool execution -> creates pending action
+    pend_res = await registry.execute("delete_mission", {"mission_id": m.id})
+    assert "PENDING_CONFIRMATION" in pend_res
+    act_match = re.search(r'act_[a-f0-9]+', pend_res)
+    assert act_match is not None
+    act_id = act_match.group(0)
+
+    # Confirm action in-process
+    conf_res = registry.confirm_action(act_id)
+    assert "Successfully deleted mission" in conf_res
+    assert manager.get_mission(m.id) is None
