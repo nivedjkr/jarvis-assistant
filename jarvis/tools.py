@@ -1,5 +1,6 @@
 import os
 import subprocess
+import shlex
 import time
 import psutil
 import webbrowser
