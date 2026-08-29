@@ -1,21 +1,15 @@
 import React, { useState, useEffect } from 'react'
 import './Sidebar.css'
 
-export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSession, onNewSession, onDeleteSession }) {
+export default function Sidebar({ isOpen, onClose, currentSessionId, sessions: sessionsProp = [], deletingSessionIds = new Set(), sessionToast = null, onSwitchSession, onNewSession, onDeleteSession }) {
   const [projects, setProjects] = useState([])
   const [reminders, setReminders] = useState([])
   const [watchlist, setWatchlist] = useState([])
-  const [sessions, setSessions] = useState([])
+  const [fallbackSessions, setFallbackSessions] = useState([])
+
+  const sessions = sessionsProp && sessionsProp.length > 0 ? sessionsProp : fallbackSessions
 
   const fetchLiveData = async () => {
-    if (window.jarvis?.getSessions) {
-      try {
-        const s = await window.jarvis.getSessions()
-        setSessions(Array.isArray(s) ? s : [])
-      } catch (e) {
-        console.log('Error fetching sessions:', e)
-      }
-    }
     if (window.jarvis?.getProjects) {
       try {
         const p = await window.jarvis.getProjects()
@@ -40,13 +34,20 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
         console.log('Error fetching watchlist:', e)
       }
     }
+    // One-time fallback for sessions if WS payload has not arrived yet
+    if ((!sessionsProp || sessionsProp.length === 0) && window.jarvis?.getSessions) {
+      try {
+        const s = await window.jarvis.getSessions()
+        if (Array.isArray(s)) setFallbackSessions(s)
+      } catch (e) {
+        console.log('Error initial getSessions fallback:', e)
+      }
+    }
   }
 
   useEffect(() => {
     if (isOpen) {
       fetchLiveData()
-      const interval = setInterval(fetchLiveData, 15000)
-      return () => clearInterval(interval)
     }
   }, [isOpen, currentSessionId])
 
@@ -54,20 +55,15 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
     e.stopPropagation()
     if (e.preventDefault) e.preventDefault()
     
-    console.log('[SESSION DELETE] Clicked')
-    console.log('[SESSION DELETE] Target session ID:', sid)
-    console.log('[SESSION DELETE] Active session ID:', currentSessionId)
-    
-    const payload = { type: 'delete_session', session_id: sid }
-    console.log('[SESSION DELETE] Request being sent')
-    console.log('[SESSION DELETE] Request payload:', payload)
+    console.log('[SESSION DELETE] Clicked target session ID:', sid)
     
     if (onDeleteSession) {
       onDeleteSession(sid)
     } else if (window.jarvis?.deleteSession) {
       window.jarvis.deleteSession(sid)
     }
-    setSessions(prev => prev.filter(s => s.session_id !== sid))
+    // Pessimistic deletion: do NOT alter local sessions state manually here.
+    // App.jsx will update deletingSessionIds and clear the item upon WS confirmation.
   }
 
   const handleCreateProject = () => {
@@ -108,6 +104,20 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
         <button className="sidebar-close-btn" onClick={onClose}>✕</button>
       </div>
 
+      {sessionToast && (
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.2)',
+          border: '1px solid #ef4444',
+          color: '#f87171',
+          padding: '8px 12px',
+          margin: '8px 16px 0 16px',
+          borderRadius: '4px',
+          fontSize: '0.8rem'
+        }}>
+          {sessionToast}
+        </div>
+      )}
+
       {/* SESSIONS SECTION */}
       <div className="sidebar-section">
         <div className="sidebar-section-title">
@@ -118,28 +128,37 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
           {sessions.length === 0 ? (
             <div className="sidebar-empty">No past sessions</div>
           ) : (
-            sessions.map((s, i) => (
-              <div 
-                key={s.session_id || i} 
-                className={`sidebar-item ${s.session_id === currentSessionId ? 'active' : ''}`}
-                onClick={() => onSwitchSession && onSwitchSession(s.session_id)}
-                style={{ cursor: 'pointer' }}
-              >
-                <div className="sidebar-item-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div className="sidebar-item-name">{s.title || 'Untitled Session'}</div>
-                  <button 
-                    className="sidebar-delete-btn"
-                    title="Delete session"
-                    onClick={(e) => handleDeleteSession(e, s.session_id)}
-                  >
-                    🗑️
-                  </button>
+            sessions.map((s, i) => {
+              const sid = s.session_id || i
+              const isDeleting = deletingSessionIds && deletingSessionIds.has(s.session_id)
+              return (
+                <div 
+                  key={sid} 
+                  className={`sidebar-item ${s.session_id === currentSessionId ? 'active' : ''} ${isDeleting ? 'deleting' : ''}`}
+                  onClick={() => !isDeleting && onSwitchSession && onSwitchSession(s.session_id)}
+                  style={{
+                    cursor: isDeleting ? 'not-allowed' : 'pointer',
+                    opacity: isDeleting ? 0.5 : 1,
+                    pointerEvents: isDeleting ? 'none' : 'auto'
+                  }}
+                >
+                  <div className="sidebar-item-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="sidebar-item-name">{s.title || 'Untitled Session'}</div>
+                    <button 
+                      className="sidebar-delete-btn"
+                      title={isDeleting ? 'Deleting session...' : 'Delete session'}
+                      disabled={isDeleting}
+                      onClick={(e) => handleDeleteSession(e, s.session_id)}
+                    >
+                      {isDeleting ? '⏳' : '🗑️'}
+                    </button>
+                  </div>
+                  <div className="sidebar-item-sub">
+                    {isDeleting ? 'Deleting session...' : `${formatTimestamp(s.last_active)} · ${s.message_count || 0} msgs`}
+                  </div>
                 </div>
-                <div className="sidebar-item-sub">
-                  {formatTimestamp(s.last_active)} · {s.message_count || 0} msgs
-                </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
       </div>

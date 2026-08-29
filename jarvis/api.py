@@ -183,17 +183,21 @@ async def websocket_endpoint(ws: WebSocket):
             session_id = f"electron_{uuid.uuid4().hex[:8]}"
 
     active_sess = api_client.get_session(session_id)
+    if active_sess is None:
+        active_sess = api_client.new_session(session_id=session_id)
     
     try:
         # Run startup health check and send report to desktop/mobile client
         report = await run_diagnostics(check_nvidia=True)
         initial_msgs = [{"role": m["role"], "content": m["content"]} for m in active_sess.messages]
+        sessions_list = api_client.list_sessions()
         await ws.send_json({
             "type": "status",
             "status": "connected",
             "message": "JARVIS online, sir.",
             "session_id": session_id,
             "session_title": active_sess.title,
+            "sessions": sessions_list,
             "messages": initial_msgs,
             "health_check": report.to_dict()
         })
@@ -214,25 +218,40 @@ async def websocket_endpoint(ws: WebSocket):
             if msg_type == "switch_session":
                 target_sid = data.get("session_id", "").strip()
                 if target_sid:
-                    session_id = target_sid
-                    sess = api_client.get_session(session_id)
-                    msgs = [{"role": m["role"], "content": m["content"]} for m in sess.messages]
-                    await ws.send_json({
-                        "type": "session_switched",
-                        "session_id": session_id,
-                        "title": sess.title,
-                        "messages": msgs
-                    })
+                    sess = api_client.get_session(target_sid)
+                    sessions = api_client.list_sessions()
+                    if sess is not None:
+                        session_id = target_sid
+                        msgs = [{"role": m["role"], "content": m["content"]} for m in sess.messages]
+                        await ws.send_json({
+                            "type": "session_switched",
+                            "status": "ok",
+                            "session_id": session_id,
+                            "title": sess.title,
+                            "sessions": sessions,
+                            "messages": msgs
+                        })
+                    else:
+                        await ws.send_json({
+                            "type": "session_switched",
+                            "status": "error",
+                            "message": f"Session '{target_sid}' does not exist",
+                            "session_id": session_id,
+                            "sessions": sessions
+                        })
                 continue
 
             if msg_type == "new_session":
                 title = data.get("title", "New Conversation")
                 new_sess = api_client.new_session(title=title)
                 session_id = new_sess.session_id
+                sessions = api_client.list_sessions()
                 await ws.send_json({
                     "type": "session_created",
+                    "status": "ok",
                     "session_id": session_id,
                     "title": new_sess.title,
+                    "sessions": sessions,
                     "messages": []
                 })
                 continue
@@ -240,7 +259,7 @@ async def websocket_endpoint(ws: WebSocket):
             if msg_type == "rename_session":
                 target_sid = data.get("session_id", session_id)
                 new_title = data.get("title", "").strip()
-                if target_sid and new_title:
+                if target_sid and new_title and api_client.get_session(target_sid) is not None:
                     api_client.rename_session(target_sid, new_title)
                     sessions = api_client.list_sessions()
                     await ws.send_json({
@@ -296,17 +315,23 @@ async def websocket_endpoint(ws: WebSocket):
 
             if msg_type == "delete_session":
                 target_sid = data.get("session_id", "").strip()
-                print(f"[SESSION DELETE] Backend request received")
-                print(f"[SESSION DELETE] Requested session ID: {target_sid}")
+                print(f"[SESSION DELETE] Backend request received for ID: {target_sid}")
                 
                 if target_sid:
-                    print(f"[SESSION DELETE] Looking up session")
                     existing_before = api_client.get_session(target_sid)
-                    print(f"[SESSION DELETE] Session exists: {existing_before is not None}")
+                    if existing_before is None:
+                        sessions = api_client.list_sessions()
+                        await ws.send_json({
+                            "type": "session_deleted",
+                            "status": "error",
+                            "message": f"Session '{target_sid}' not found",
+                            "deleted_session_id": target_sid,
+                            "session_id": session_id,
+                            "sessions": sessions
+                        })
+                        continue
                     
-                    print(f"[SESSION DELETE] Deleting persistent record & cache")
                     success = api_client.delete_session(target_sid)
-                    
                     sessions = api_client.list_sessions()
 
                     # Active session recovery: if deleted session was currently active
@@ -317,13 +342,15 @@ async def websocket_endpoint(ws: WebSocket):
                             new_sess = api_client.new_session()
                             session_id = new_sess.session_id
                             sessions = api_client.list_sessions()
-                        print(f"[SESSION DELETE] Active session updated to fallback: {session_id}")
 
                     sess = api_client.get_session(session_id)
+                    if sess is None:
+                        sess = api_client.new_session(session_id=session_id)
+                        sessions = api_client.list_sessions()
+
                     time_str = datetime.now().strftime("%H:%M")
                     msgs = [{"role": m["role"], "content": m["content"], "timestamp": time_str} for m in sess.messages]
 
-                    print(f"[SESSION DELETE] Sending success response")
                     await ws.send_json({
                         "type": "session_deleted",
                         "status": "ok" if success else "error",

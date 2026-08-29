@@ -1086,6 +1086,14 @@ class Memory:
             res["message_count"] = cnt
             return res
 
+    def session_exists(self, session_id: str) -> bool:
+        """Check if a session ID exists in persistent SQLite storage."""
+        if not session_id:
+            return False
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT 1 FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+            return row is not None
+
     def rename_session(self, session_id: str, title: str) -> bool:
         """Rename a session's title."""
         with self._get_connection() as conn:

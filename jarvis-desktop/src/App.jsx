@@ -18,6 +18,9 @@ export default function App() {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [isDirectivesOpen, setIsDirectivesOpen] = useState(true)
   const [currentSessionId, setCurrentSessionId] = useState(null)
+  const [sessions, setSessions] = useState([])
+  const [deletingSessionIds, setDeletingSessionIds] = useState(new Set())
+  const [sessionToast, setSessionToast] = useState(null)
 
   const activeAudioRef = useRef(null)
   const timeoutRef = useRef(null)
@@ -336,6 +339,9 @@ export default function App() {
             if (data.session_id) {
               setCurrentSessionId(data.session_id)
             }
+            if (Array.isArray(data.sessions)) {
+              setSessions(data.sessions)
+            }
             if (Array.isArray(data.messages) && data.messages.length > 0) {
               const formatted = data.messages.map(m => ({
                 role: m.role === 'assistant' ? 'jarvis' : m.role,
@@ -364,6 +370,24 @@ export default function App() {
           console.log('[SESSION_DEBUG] WebSocket session event received:', data.type, 'active_session_id:', data.session_id)
           if (data.session_id) {
             setCurrentSessionId(data.session_id)
+          }
+          if (Array.isArray(data.sessions)) {
+            setSessions(data.sessions)
+          }
+          if (data.type === 'session_deleted') {
+            const targetId = data.deleted_session_id
+            if (data.status === 'error') {
+              console.error('[SESSION] Session delete failed on backend for:', targetId)
+              setSessionToast(`Failed to delete session ${targetId ? `'${targetId}'` : ''}, sir.`)
+              setTimeout(() => setSessionToast(null), 5000)
+            }
+            if (targetId) {
+              setDeletingSessionIds(prev => {
+                const next = new Set(prev)
+                next.delete(targetId)
+                return next
+              })
+            }
           }
           if (Array.isArray(data.messages) && data.messages.length > 0) {
             const formatted = data.messages.map(m => ({
@@ -458,6 +482,9 @@ export default function App() {
 
   const handleDeleteSession = (sessionId) => {
     stopSpeech()
+    if (sessionId) {
+      setDeletingSessionIds(prev => new Set(prev).add(sessionId))
+    }
     if (window.jarvis?.deleteSession) {
       window.jarvis.deleteSession(sessionId)
     }
@@ -494,6 +521,9 @@ export default function App() {
           isOpen={isSidebarOpen} 
           onClose={() => setIsSidebarOpen(false)} 
           currentSessionId={currentSessionId}
+          sessions={sessions}
+          deletingSessionIds={deletingSessionIds}
+          sessionToast={sessionToast}
           onSwitchSession={handleSwitchSession}
           onNewSession={handleNewSession}
           onDeleteSession={handleDeleteSession}

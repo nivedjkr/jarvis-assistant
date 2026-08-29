@@ -8,5 +8,8 @@ def test_api_client_init():
 
 def test_api_client_session():
     client = JarvisAPIClient()
-    session = client.get_session("test_session")
+    session = client.new_session(session_id="test_session")
     assert session.session_id == "test_session"
+    fetched = client.get_session("test_session")
+    assert fetched is not None
+    assert fetched.session_id == "test_session"

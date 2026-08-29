@@ -355,18 +355,55 @@ class JarvisAPIClient:
 
     @property
     def messages(self) -> list:
-        return self.get_session().messages
+        sess = self.get_session()
+        return sess.messages if sess else []
 
     @messages.setter
     def messages(self, val: list):
-        self.get_session().messages = val
+        sess = self.get_session()
+        if sess:
+            sess.messages = val
 
-    def get_session(self, session_id: str = None) -> ConversationSession:
-        sid = session_id or self.default_session
-        if sid not in self.sessions:
-            self.sessions[sid] = ConversationSession(sid)
-            print(f"[SESSION] New session: {sid}")
-        return self.sessions[sid]
+    def session_exists(self, session_id: str) -> bool:
+        if not session_id:
+            return False
+        if session_id in self.sessions:
+            return True
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            return mem.session_exists(session_id)
+        except Exception:
+            return False
+
+    def get_session(self, session_id: Optional[str] = None) -> Optional[ConversationSession]:
+        if not session_id or not str(session_id).strip():
+            sid = self.default_session
+            if sid not in self.sessions:
+                if self.session_exists(sid):
+                    self.sessions[sid] = ConversationSession(sid, db_path=self.db_path)
+                else:
+                    sess = ConversationSession(sid, db_path=self.db_path)
+                    self.sessions[sid] = sess
+                    try:
+                        from jarvis.memory import Memory
+                        mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+                        mem.save_session(sid, title=sess.title)
+                    except Exception:
+                        pass
+            return self.sessions[sid]
+
+        sid = str(session_id).strip()
+        if sid in self.sessions:
+            return self.sessions[sid]
+
+        if self.session_exists(sid):
+            sess = ConversationSession(sid, db_path=self.db_path)
+            self.sessions[sid] = sess
+            return sess
+
+        # Explicit non-existent session_id requested — return None without auto-creating
+        return None
 
     def _load_system_prompt(self) -> str:
         from datetime import datetime
@@ -515,13 +552,23 @@ NEVER:
 
     
     def add_user_message(self, content: str, session_id: str = None):
-        self.get_session(session_id).add_message("user", content)
+        sess = self.get_session(session_id)
+        if sess is None:
+            sess = self.new_session(session_id=session_id) if session_id else self.get_session()
+        if sess:
+            sess.add_message("user", content)
     
     def add_assistant_message(self, content: str, session_id: str = None):
-        self.get_session(session_id).add_message("assistant", content)
+        sess = self.get_session(session_id)
+        if sess is None:
+            sess = self.new_session(session_id=session_id) if session_id else self.get_session()
+        if sess:
+            sess.add_message("assistant", content)
 
     def _trim_history(self, session_id: str = None):
-        self.get_session(session_id)._trim_history()
+        sess = self.get_session(session_id)
+        if sess:
+            sess._trim_history()
 
     def _summarize_old_context(self, messages: list) -> str:
         user_msgs = [
@@ -531,10 +578,11 @@ NEVER:
         return "User previously discussed: " + "; ".join(user_msgs[:200])
 
     def get_messages(self, session_id: str = None) -> list:
-        session = self.get_session(session_id)
+        session = self.get_session(session_id) or self.get_session()
+        msgs = session.messages[-20:] if session else []
         return [
             {"role": "system", "content": self.system_prompt}
-        ] + session.messages[-20:]
+        ] + msgs
 
     def get_messages_with_memory(self, user_message: str, session_id: str = None) -> list:
         if hasattr(self, 'semantic_memory') and self.semantic_memory:
@@ -545,20 +593,24 @@ NEVER:
                         "role": "system",
                         "content": context
                     }
-                    session = self.get_session(session_id)
+                    session = self.get_session(session_id) or self.get_session()
+                    msgs = session.messages[-18:] if session else []
                     return [
                         {"role": "system", "content": self.system_prompt},
                         memory_msg
-                    ] + session.messages[-18:]
+                    ] + msgs
             except Exception as e:
                 print(f"[SEMANTIC] Context fetch error: {e}")
         return self.get_messages(session_id)
 
     def get_token_estimate(self, session_id: str = None) -> int:
-        return self.get_session(session_id).get_token_estimate()
+        session = self.get_session(session_id)
+        return session.get_token_estimate() if session else 0
 
     def clear_history(self, session_id: str = None):
-        self.get_session(session_id).clear_history()
+        session = self.get_session(session_id)
+        if session:
+            session.clear_history()
 
     async def _stream_response(self, messages: list, max_tokens: int = 2048, chunk_callback=None) -> str:
         async def _do_stream():
