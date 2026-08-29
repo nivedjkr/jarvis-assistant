@@ -182,7 +182,8 @@ class JarvisAssistant:
         elif cmd == '/diagnose':
             return await self._diagnose()
         elif cmd == '/context':
-            count = len(self.api.get_session("cli").messages)
+            sess = self.api.get_session("cli") or self.api.get_session()
+            count = len(sess.messages) if sess else 0
             tokens = self.api.get_token_estimate("cli")
             return (f"Context: {count} messages, "
                     f"~{tokens} tokens estimated")

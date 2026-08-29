@@ -430,25 +430,33 @@ ipcMain.handle('switch-session', (event, sid) => {
   if (sid) updateSavedSessionId(sid)
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'switch_session', session_id: sid }))
+    return { status: 'sent' }
   }
+  return { status: 'offline', message: 'Backend WebSocket connection is not open' }
 })
 
 ipcMain.handle('new-session', () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'new_session' }))
+    return { status: 'sent' }
   }
+  return { status: 'offline', message: 'Backend WebSocket connection is not open' }
 })
 
 ipcMain.handle('rename-session', (event, payload) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'rename_session', session_id: payload?.session_id, title: payload?.title }))
+    return { status: 'sent' }
   }
+  return { status: 'offline', message: 'Backend WebSocket connection is not open' }
 })
 
 ipcMain.handle('delete-session', (event, sid) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'delete_session', session_id: sid }))
+    return { status: 'sent' }
   }
+  return { status: 'offline', message: 'Backend WebSocket connection is not open' }
 })
 
 ipcMain.handle('synthesize-speech', (event, text) => {

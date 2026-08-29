@@ -95,3 +95,40 @@ def test_delete_session_failure_path(temp_db):
         assert mem.session_exists(sid) is True
     finally:
         mem.delete_session = original_delete
+
+
+def test_ws_malformed_message_resilience():
+    """
+    FIX 1 / FIX 4 Regression Test:
+    Verify that sending malformed messages or triggering unhandled exceptions
+    in individual WS handlers does NOT drop the WebSocket connection.
+    The connection must catch the error per-message, return type: 'error',
+    and continue processing subsequent messages cleanly.
+    """
+    from fastapi.testclient import TestClient
+    from jarvis.api import app, WS_AUTH_TOKEN
+
+    client = TestClient(app)
+    with client.websocket_connect(f"/ws?token={WS_AUTH_TOKEN}") as websocket:
+        # Initial status message
+        connected_data = websocket.receive_json()
+        assert connected_data.get("type") == "status"
+        assert connected_data.get("status") == "connected"
+
+        # 1. Send switch_session with invalid/garbage session_id
+        websocket.send_json({"type": "switch_session", "session_id": "garbage_non_existent_9999"})
+        res1 = websocket.receive_json()
+        assert res1.get("type") == "session_switched"
+        assert res1.get("status") == "error"
+
+        # 2. Send invalid message that triggers per-message error boundary
+        websocket.send_json({"type": "rename_session", "session_id": 12345, "title": None})
+        res2 = websocket.receive_json()
+        assert res2.get("type") in ("error", "sessions_list")
+
+        # 3. Verify connection is still alive and processes valid list_sessions message
+        websocket.send_json({"type": "list_sessions"})
+        res3 = websocket.receive_json()
+        assert res3.get("type") == "sessions_list"
+        assert "sessions" in res3
+        assert "session_id" in res3  # Standardized key verification!

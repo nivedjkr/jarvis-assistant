@@ -206,532 +206,571 @@ async def websocket_endpoint(ws: WebSocket):
             data = await ws.receive_json()
             msg_type = data.get("type", "message")
 
-            if msg_type == "get_sessions" or msg_type == "list_sessions":
-                sessions = api_client.list_sessions()
-                await ws.send_json({
-                    "type": "sessions_list",
-                    "sessions": sessions,
-                    "current_session_id": session_id
-                })
-                continue
-
-            if msg_type == "switch_session":
-                target_sid = data.get("session_id", "").strip()
-                if target_sid:
-                    sess = api_client.get_session(target_sid)
-                    sessions = api_client.list_sessions()
-                    if sess is not None:
-                        session_id = target_sid
-                        msgs = [{"role": m["role"], "content": m["content"]} for m in sess.messages]
-                        await ws.send_json({
-                            "type": "session_switched",
-                            "status": "ok",
-                            "session_id": session_id,
-                            "title": sess.title,
-                            "sessions": sessions,
-                            "messages": msgs
-                        })
-                    else:
-                        await ws.send_json({
-                            "type": "session_switched",
-                            "status": "error",
-                            "message": f"Session '{target_sid}' does not exist",
-                            "session_id": session_id,
-                            "sessions": sessions
-                        })
-                continue
-
-            if msg_type == "new_session":
-                title = data.get("title", "New Conversation")
-                new_sess = api_client.new_session(title=title)
-                session_id = new_sess.session_id
-                sessions = api_client.list_sessions()
-                await ws.send_json({
-                    "type": "session_created",
-                    "status": "ok",
-                    "session_id": session_id,
-                    "title": new_sess.title,
-                    "sessions": sessions,
-                    "messages": []
-                })
-                continue
-
-            if msg_type == "rename_session":
-                target_sid = data.get("session_id", session_id)
-                new_title = data.get("title", "").strip()
-                if target_sid and new_title and api_client.get_session(target_sid) is not None:
-                    api_client.rename_session(target_sid, new_title)
+            try:
+                if msg_type == "get_sessions" or msg_type == "list_sessions":
                     sessions = api_client.list_sessions()
                     await ws.send_json({
                         "type": "sessions_list",
                         "sessions": sessions,
-                        "current_session_id": session_id
+                        "session_id": session_id
                     })
-                continue
+                    continue
 
-            if msg_type == "get_missions" or msg_type == "list_missions":
-                missions = proactive_engine.mission_manager.list_missions()
-                await ws.send_json({
-                    "type": "missions_list",
-                    "missions": [m.to_dict() for m in missions]
-                })
-                continue
+                if msg_type == "switch_session":
+                    target_sid = data.get("session_id", "").strip()
+                    if target_sid:
+                        sess = api_client.get_session(target_sid)
+                        sessions = api_client.list_sessions()
+                        if sess is not None:
+                            session_id = target_sid
+                            msgs = [{"role": m["role"], "content": m["content"]} for m in sess.messages]
+                            await ws.send_json({
+                                "type": "session_switched",
+                                "status": "ok",
+                                "session_id": session_id,
+                                "title": sess.title,
+                                "sessions": sessions,
+                                "messages": msgs
+                            })
+                        else:
+                            await ws.send_json({
+                                "type": "session_switched",
+                                "status": "error",
+                                "message": f"Session '{target_sid}' does not exist",
+                                "session_id": session_id,
+                                "sessions": sessions
+                            })
+                    continue
 
-            if msg_type == "get_mission":
-                mid = data.get("mission_id", "").strip()
-                m = proactive_engine.mission_manager.get_mission(mid)
-                await ws.send_json({
-                    "type": "mission_details",
-                    "mission": m.to_dict() if m else None
-                })
-                continue
+                if msg_type == "new_session":
+                    title = data.get("title", "New Conversation")
+                    new_sess = api_client.new_session(title=title)
+                    session_id = new_sess.session_id
+                    sessions = api_client.list_sessions()
+                    await ws.send_json({
+                        "type": "session_created",
+                        "status": "ok",
+                        "session_id": session_id,
+                        "title": new_sess.title,
+                        "sessions": sessions,
+                        "messages": []
+                    })
+                    continue
 
-            if msg_type == "mission_action":
-                action = data.get("action", "").lower().strip()
-                mid = data.get("mission_id", "").strip()
-                res_text = "Mission action completed."
-                try:
-                    if action == "pause":
-                        m = proactive_engine.mission_manager.pause_mission(mid)
-                        res_text = f"Paused mission '{m.title}', sir."
-                    elif action == "resume":
-                        m = proactive_engine.mission_manager.resume_mission(mid)
-                        res_text = f"Resumed mission '{m.title}', sir."
-                    elif action == "cancel":
-                        m = proactive_engine.mission_manager.cancel_mission(mid)
-                        res_text = f"Cancelled mission '{m.title}', sir."
-                    elif action == "approve":
-                        m = proactive_engine.mission_manager.approve_mission(mid)
-                        res_text = f"Approved and activated mission '{m.title}', sir."
-                except Exception as me:
-                    res_text = f"Mission error: {me}"
-
-                await ws.send_json({
-                    "type": "response",
-                    "text": res_text,
-                    "status": "speaking"
-                })
-                continue
-
-            if msg_type == "delete_session":
-                target_sid = data.get("session_id", "").strip()
-                print(f"[SESSION DELETE] Backend request received for ID: {target_sid}")
-                
-                if target_sid:
-                    existing_before = api_client.get_session(target_sid)
-                    if existing_before is None:
+                if msg_type == "rename_session":
+                    target_sid = data.get("session_id", session_id)
+                    new_title = data.get("title", "").strip()
+                    if target_sid and new_title and api_client.get_session(target_sid) is not None:
+                        api_client.rename_session(target_sid, new_title)
                         sessions = api_client.list_sessions()
                         await ws.send_json({
-                            "type": "session_deleted",
-                            "status": "error",
-                            "message": f"Session '{target_sid}' not found",
-                            "deleted_session_id": target_sid,
-                            "session_id": session_id,
-                            "sessions": sessions
+                            "type": "sessions_list",
+                            "sessions": sessions,
+                            "session_id": session_id
                         })
-                        continue
-                    
-                    success = api_client.delete_session(target_sid)
-                    sessions = api_client.list_sessions()
+                    continue
 
-                    # Active session recovery: if deleted session was currently active
-                    if target_sid == session_id:
-                        if sessions:
-                            session_id = sessions[0]["session_id"]
-                        else:
-                            new_sess = api_client.new_session()
-                            session_id = new_sess.session_id
+                if msg_type == "get_missions" or msg_type == "list_missions":
+                    missions = proactive_engine.mission_manager.list_missions()
+                    await ws.send_json({
+                        "type": "missions_list",
+                        "missions": [m.to_dict() for m in missions]
+                    })
+                    continue
+
+                if msg_type == "get_mission":
+                    mid = data.get("mission_id", "").strip()
+                    m = proactive_engine.mission_manager.get_mission(mid)
+                    await ws.send_json({
+                        "type": "mission_details",
+                        "mission": m.to_dict() if m else None
+                    })
+                    continue
+
+                if msg_type == "mission_action":
+                    action = data.get("action", "").lower().strip()
+                    mid = data.get("mission_id", "").strip()
+                    res_text = "Mission action completed."
+                    try:
+                        if action == "pause":
+                            m = proactive_engine.mission_manager.pause_mission(mid)
+                            res_text = f"Paused mission '{m.title}', sir."
+                        elif action == "resume":
+                            m = proactive_engine.mission_manager.resume_mission(mid)
+                            res_text = f"Resumed mission '{m.title}', sir."
+                        elif action == "cancel":
+                            m = proactive_engine.mission_manager.cancel_mission(mid)
+                            res_text = f"Cancelled mission '{m.title}', sir."
+                        elif action == "approve":
+                            m = proactive_engine.mission_manager.approve_mission(mid)
+                            res_text = f"Approved and activated mission '{m.title}', sir."
+                    except Exception as me:
+                        res_text = f"Mission error: {me}"
+
+                    await ws.send_json({
+                        "type": "response",
+                        "text": res_text,
+                        "status": "speaking"
+                    })
+                    continue
+
+                if msg_type == "delete_session":
+                    target_sid = data.get("session_id", "").strip()
+                    print(f"[SESSION DELETE] Backend request received for ID: {target_sid}")
+                    
+                    if target_sid:
+                        existing_before = api_client.get_session(target_sid)
+                        if existing_before is None:
+                            sessions = api_client.list_sessions()
+                            await ws.send_json({
+                                "type": "session_deleted",
+                                "status": "error",
+                                "message": f"Session '{target_sid}' not found",
+                                "deleted_session_id": target_sid,
+                                "session_id": session_id,
+                                "sessions": sessions
+                            })
+                            continue
+                        
+                        success = api_client.delete_session(target_sid)
+                        sessions = api_client.list_sessions()
+
+                        # Active session recovery: if deleted session was currently active
+                        if target_sid == session_id:
+                            if sessions:
+                                session_id = sessions[0]["session_id"]
+                            else:
+                                new_sess = api_client.new_session()
+                                session_id = new_sess.session_id
+                                sessions = api_client.list_sessions()
+
+                        sess = api_client.get_session(session_id)
+                        if sess is None:
+                            sess = api_client.new_session(session_id=session_id)
                             sessions = api_client.list_sessions()
 
-                    sess = api_client.get_session(session_id)
-                    if sess is None:
-                        sess = api_client.new_session(session_id=session_id)
-                        sessions = api_client.list_sessions()
+                        from datetime import datetime
+                        time_str = datetime.now().strftime("%H:%M")
+                        msgs = [{"role": m["role"], "content": m["content"], "timestamp": time_str} for m in sess.messages]
 
-                    time_str = datetime.now().strftime("%H:%M")
-                    msgs = [{"role": m["role"], "content": m["content"], "timestamp": time_str} for m in sess.messages]
+                        await ws.send_json({
+                            "type": "session_deleted",
+                            "status": "ok" if success else "error",
+                            "deleted_session_id": target_sid,
+                            "session_id": session_id,
+                            "session_title": sess.title,
+                            "sessions": sessions,
+                            "messages": msgs
+                        })
+                    continue
 
-                    await ws.send_json({
-                        "type": "session_deleted",
-                        "status": "ok" if success else "error",
-                        "deleted_session_id": target_sid,
-                        "session_id": session_id,
-                        "session_title": sess.title,
-                        "sessions": sessions,
-                        "messages": msgs
-                    })
-                continue
-
-            if msg_type == "create_project":
-                name = data.get("name", "New Project")
-                path = data.get("path", "")
-                status = data.get("status", "Active")
-                proj = api_client.create_project(name=name, path=path, status=status)
-                projects = api_client.list_projects()
-                await ws.send_json({
-                    "type": "project_created",
-                    "project": proj,
-                    "projects": projects
-                })
-                continue
-
-            if msg_type == "delete_project":
-                pid = data.get("project_id", "").strip()
-                if pid:
-                    success = api_client.delete_project(pid)
+                if msg_type == "create_project":
+                    name = data.get("name", "New Project")
+                    path = data.get("path", "")
+                    status = data.get("status", "Active")
+                    proj = api_client.create_project(name=name, path=path, status=status)
                     projects = api_client.list_projects()
                     await ws.send_json({
-                        "type": "project_deleted",
-                        "status": "ok" if success else "error",
-                        "deleted_project_id": pid,
+                        "type": "project_created",
+                        "project": proj,
                         "projects": projects
                     })
-                continue
-
-            if msg_type == "complete_directive":
-                did = data.get("directive_id")
-                if did:
-                    try:
-                        int_id = int(did)
-                        api_client.complete_directive(int_id)
-                    except (ValueError, TypeError):
-                        pass
-                    directives = api_client.list_directives()
-                    await ws.send_json({
-                        "type": "directive_completed",
-                        "directive_id": did,
-                        "directives": directives
-                    })
-                continue
-
-            if msg_type == "delete_directive":
-                did = data.get("directive_id")
-                if did:
-                    try:
-                        int_id = int(did)
-                        api_client.delete_directive(int_id)
-                    except (ValueError, TypeError):
-                        pass
-                    directives = api_client.list_directives()
-                    await ws.send_json({
-                        "type": "directive_deleted",
-                        "directive_id": did,
-                        "directives": directives
-                    })
-                continue
-            
-            if msg_type == "confirm_action":
-                act_id = data.get("action_id", "")
-                extra = data.get("input", "") or data.get("extra_input", "")
-                res = tool_registry.confirm_action(act_id, extra)
-                await ws.send_json({
-                    "type": "response",
-                    "text": res,
-                    "status": "speaking"
-                })
-                continue
-            
-            if msg_type == "message" or msg_type == "slash_command":
-                user_msg = data.get("message") or data.get("command") or ""
-                user_msg = user_msg.strip()
-                print(f"[WS] Received ({msg_type}): {user_msg}")
-                
-                if not user_msg:
                     continue
+
+                if msg_type == "complete_directive":
+                    did = data.get("directive_id")
+                    if did:
+                        try:
+                            int_id = int(did)
+                            api_client.complete_directive(int_id)
+                        except (ValueError, TypeError):
+                            pass
+                        directives = api_client.list_directives()
+                        await ws.send_json({
+                            "type": "directive_completed",
+                            "directive_id": did,
+                            "directives": directives
+                        })
+                    continue
+
+                if msg_type == "delete_directive":
+                    did = data.get("directive_id")
+                    if did:
+                        try:
+                            int_id = int(did)
+                            api_client.delete_directive(int_id)
+                        except (ValueError, TypeError):
+                            pass
+                        directives = api_client.list_directives()
+                        await ws.send_json({
+                            "type": "directive_deleted",
+                            "directive_id": did,
+                            "directives": directives
+                        })
+                    continue
+            
+                if msg_type == "confirm_action":
+                    act_id = data.get("action_id", "")
+                    extra = data.get("input", "") or data.get("extra_input", "")
+                    res = tool_registry.confirm_action(act_id, extra)
+                    await ws.send_json({
+                        "type": "response",
+                        "text": res,
+                        "status": "speaking"
+                    })
+                    continue
+            
+                if msg_type == "message" or msg_type == "slash_command":
+                    user_msg = data.get("message") or data.get("command") or ""
+                    user_msg = user_msg.strip()
+                    print(f"[WS] Received ({msg_type}): {user_msg}")
                 
-                # Send thinking status
-                await ws.send_json({
-                    "type": "status",
-                    "status": "thinking"
-                })
+                    if not user_msg:
+                        continue
                 
-                # Check slash command handling
-                if user_msg.startswith("/"):
-                    cmd = user_msg.lower()
-                    if user_msg.lower().startswith("/confirm"):
-                        parts = user_msg.strip().split(maxsplit=2)
-                        act_id = parts[1] if len(parts) > 1 else ""
-                        extra = parts[2] if len(parts) > 2 else ""
-                        res = tool_registry.confirm_action(act_id, extra)
-                        await ws.send_json({
-                            "type": "response",
-                            "text": res,
-                            "status": "speaking"
-                        })
-                    elif cmd == "/diagnose":
-                        from jarvis.health import HealthChecker
-                        checker = HealthChecker()
-                        await checker.run_all()
-                        res_text = checker.render_results()
-                        await ws.send_json({
-                            "type": "response",
-                            "text": res_text,
-                            "status": "idle"
-                        })
-                    elif cmd.startswith("/debug"):
-                        from jarvis.debug_panel import debug
-                        parts = user_msg.strip().split()
-                        sub = parts[1].lower() if len(parts) > 1 else ""
-                        if sub == "on":
-                            debug.enabled = True
-                            res = "Debug panel enabled, sir."
-                        elif sub == "off":
-                            debug.enabled = False
-                            res = "Debug panel disabled, sir."
-                        else:
-                            res = debug.render()
-                        await ws.send_json({
-                            "type": "response",
-                            "text": res,
-                            "status": "speaking"
-                        })
-                    elif cmd.startswith("/missions") or cmd.startswith("/mission"):
-                        parts = user_msg.strip().split(maxsplit=2)
-                        subcmd = parts[0].lower()
-                        arg1 = parts[1].lower() if len(parts) > 1 else ""
-                        arg2 = parts[2] if len(parts) > 2 else ""
+                    # Send thinking status
+                    await ws.send_json({
+                        "type": "status",
+                        "status": "thinking"
+                    })
+                
+                    # Check slash command handling
+                    if user_msg.startswith("/"):
+                        cmd = user_msg.lower()
+                        if user_msg.lower().startswith("/confirm"):
+                            parts = user_msg.strip().split(maxsplit=2)
+                            act_id = parts[1] if len(parts) > 1 else ""
+                            extra = parts[2] if len(parts) > 2 else ""
+                            res = tool_registry.confirm_action(act_id, extra)
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking"
+                            })
+                        elif cmd == "/diagnose":
+                            from jarvis.health import HealthChecker
+                            checker = HealthChecker()
+                            await checker.run_all()
+                            res_text = checker.render_results()
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res_text,
+                                "status": "idle"
+                            })
+                        elif cmd.startswith("/debug"):
+                            from jarvis.debug_panel import debug
+                            parts = user_msg.strip().split()
+                            sub = parts[1].lower() if len(parts) > 1 else ""
+                            if sub == "on":
+                                debug.enabled = True
+                                res = "Debug panel enabled, sir."
+                            elif sub == "off":
+                                debug.enabled = False
+                                res = "Debug panel disabled, sir."
+                            else:
+                                res = debug.render()
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking"
+                            })
+                        elif cmd.startswith("/missions") or cmd.startswith("/mission"):
+                            parts = user_msg.strip().split(maxsplit=2)
+                            subcmd = parts[0].lower()
+                            arg1 = parts[1].lower() if len(parts) > 1 else ""
+                            arg2 = parts[2] if len(parts) > 2 else ""
 
-                        if subcmd == "/missions" or not arg1:
-                            missions = proactive_engine.mission_manager.list_missions()
-                            if not missions:
-                                res = "No active or proposed missions found, sir."
+                            if subcmd == "/missions" or not arg1:
+                                missions = proactive_engine.mission_manager.list_missions()
+                                if not missions:
+                                    res = "No active or proposed missions found, sir."
+                                else:
+                                    lines = [f"• [{m.id}] {m.title} ({m.status.value}) - Progress: {m.progress_percentage}% ({m.completed_task_count}/{m.task_count} tasks)" for m in missions]
+                                    res = "=== ACTIVE & PROPOSED MISSIONS ===\n" + "\n".join(lines)
+                            elif arg1 == "pause" and arg2:
+                                try:
+                                    m = proactive_engine.mission_manager.pause_mission(arg2)
+                                    res = f"Paused mission '{m.title}' [{m.id}], sir."
+                                except Exception as me:
+                                    res = f"Error pausing mission: {me}"
+                            elif arg1 == "resume" and arg2:
+                                try:
+                                    m = proactive_engine.mission_manager.resume_mission(arg2)
+                                    res = f"Resumed mission '{m.title}' [{m.id}], sir."
+                                except Exception as me:
+                                    res = f"Error resuming mission: {me}"
+                            elif arg1 == "cancel" and arg2:
+                                try:
+                                    m = proactive_engine.mission_manager.cancel_mission(arg2)
+                                    res = f"Cancelled mission '{m.title}' [{m.id}], sir."
+                                except Exception as me:
+                                    res = f"Error cancelling mission: {me}"
+                            elif arg1 in ("approve", "confirm") and arg2:
+                                try:
+                                    m = proactive_engine.mission_manager.approve_mission(arg2)
+                                    res = f"Approved and activated mission '{m.title}' [{m.id}], sir. Created {m.task_count} initial tasks."
+                                except Exception as me:
+                                    res = f"Error approving mission: {me}"
                             else:
-                                lines = [f"• [{m.id}] {m.title} ({m.status.value}) - Progress: {m.progress_percentage}% ({m.completed_task_count}/{m.task_count} tasks)" for m in missions]
-                                res = "=== ACTIVE & PROPOSED MISSIONS ===\n" + "\n".join(lines)
-                        elif arg1 == "pause" and arg2:
-                            try:
-                                m = proactive_engine.mission_manager.pause_mission(arg2)
-                                res = f"Paused mission '{m.title}' [{m.id}], sir."
-                            except Exception as me:
-                                res = f"Error pausing mission: {me}"
-                        elif arg1 == "resume" and arg2:
-                            try:
-                                m = proactive_engine.mission_manager.resume_mission(arg2)
-                                res = f"Resumed mission '{m.title}' [{m.id}], sir."
-                            except Exception as me:
-                                res = f"Error resuming mission: {me}"
-                        elif arg1 == "cancel" and arg2:
-                            try:
-                                m = proactive_engine.mission_manager.cancel_mission(arg2)
-                                res = f"Cancelled mission '{m.title}' [{m.id}], sir."
-                            except Exception as me:
-                                res = f"Error cancelling mission: {me}"
-                        elif arg1 in ("approve", "confirm") and arg2:
-                            try:
-                                m = proactive_engine.mission_manager.approve_mission(arg2)
-                                res = f"Approved and activated mission '{m.title}' [{m.id}], sir. Created {m.task_count} initial tasks."
-                            except Exception as me:
-                                res = f"Error approving mission: {me}"
-                        else:
-                            # Assume arg1 is mission ID
-                            m = proactive_engine.mission_manager.get_mission(arg1)
-                            if not m:
-                                res = f"Mission '{arg1}' not found, sir."
-                            else:
-                                task_lines = [f"  [{t.id}] {t.title} ({t.status.value})" for t in m.tasks]
-                                res = (
-                                    f"Mission: {m.title} [{m.id}]\n"
-                                    f"Status: {m.status.value} | Progress: {m.progress_percentage}%\n"
-                                    f"Objective: {m.objective}\n"
-                                    f"Tasks ({len(m.tasks)}):\n" + ("\n".join(task_lines) if task_lines else "  No tasks created yet.")
-                                )
+                                # Assume arg1 is mission ID
+                                m = proactive_engine.mission_manager.get_mission(arg1)
+                                if not m:
+                                    res = f"Mission '{arg1}' not found, sir."
+                                else:
+                                    task_lines = [f"  [{t.id}] {t.title} ({t.status.value})" for t in m.tasks]
+                                    res = (
+                                        f"Mission: {m.title} [{m.id}]\n"
+                                        f"Status: {m.status.value} | Progress: {m.progress_percentage}%\n"
+                                        f"Objective: {m.objective}\n"
+                                        f"Tasks ({len(m.tasks)}):\n" + ("\n".join(task_lines) if task_lines else "  No tasks created yet.")
+                                    )
 
-                        await ws.send_json({
-                            "type": "response",
-                            "text": res,
-                            "status": "speaking"
-                        })
-                    elif cmd.startswith("/provider"):
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking"
+                            })
+                        elif cmd.startswith("/provider"):
 
-                        from jarvis.llm_provider import get_provider
-                        from jarvis.error_recovery import recovery
-                        parts = user_msg.strip().split(maxsplit=1)
-                        prov_name = parts[1].strip() if len(parts) > 1 else ""
-                        if prov_name.lower() == "reset":
-                            recovery.reset_circuit()
-                            api_client.provider = get_provider()
-                            api_client.model = getattr(api_client.provider, 'model', 'default')
-                            res = f"Reset all LLM circuit breakers. Active provider: {api_client.provider.name}"
-                        elif prov_name:
-                            api_client.provider = get_provider(prov_name)
-                            api_client.model = getattr(api_client.provider, 'model', 'default')
-                            res = f"LLM Provider switched to: {api_client.provider.name}"
-                        else:
-                            cb_status = recovery.circuit_breakers
-                            open_cbs = [k for k, v in cb_status.items() if v.get('open')]
-                            open_msg = f" (Circuit open: {', '.join(open_cbs)})" if open_cbs else " (Circuits operational)"
-                            res = f"Active Provider: {getattr(api_client.provider, 'name', 'NVIDIA NIM')}{open_msg}. Use '/provider reset' to clear circuit breakers."
-                        await ws.send_json({
-                            "type": "response",
-                            "text": res,
-                            "status": "speaking"
-                        })
-                    elif cmd.startswith("/config"):
-                        from jarvis.config_manager import config
-                        parts = user_msg.strip().split(maxsplit=2)
-                        sub = parts[1].lower() if len(parts) > 1 else "show"
-                        if sub == "show":
-                            import yaml
-                            res = "=== JARVIS CONFIGURATION ===\n" + yaml.dump(config.get_all(), default_flow_style=False)
-                        elif sub == "set" and len(parts) > 2:
-                            kv = parts[2].split(maxsplit=1)
-                            if len(kv) == 2:
-                                config.set(kv[0], kv[1])
-                                res = f"Set config path '{kv[0]}' to '{kv[1]}'."
+                            from jarvis.llm_provider import get_provider
+                            from jarvis.error_recovery import recovery
+                            parts = user_msg.strip().split(maxsplit=1)
+                            prov_name = parts[1].strip() if len(parts) > 1 else ""
+                            if prov_name.lower() == "reset":
+                                recovery.reset_circuit()
+                                api_client.provider = get_provider()
+                                api_client.model = getattr(api_client.provider, 'model', 'default')
+                                res = f"Reset all LLM circuit breakers. Active provider: {api_client.provider.name}"
+                            elif prov_name:
+                                api_client.provider = get_provider(prov_name)
+                                api_client.model = getattr(api_client.provider, 'model', 'default')
+                                res = f"LLM Provider switched to: {api_client.provider.name}"
                             else:
-                                res = "Usage: /config set <path> <value>"
-                        elif sub == "save":
-                            config.save()
-                            res = "Configuration saved to config.yaml."
-                        elif sub == "reset":
-                            config.reload()
-                            res = "Configuration reloaded from config.yaml."
-                        else:
-                            res = "Usage: /config [show|set <path> <val>|save|reset]"
-                        await ws.send_json({
-                            "type": "response",
-                            "text": res,
-                            "status": "speaking"
-                        })
-                    elif cmd.startswith("/memory"):
-                        from jarvis.memory import list_all_facts, delete_fact, edit_fact, clear_facts_by_category, get_memory_stats, search_facts, export_memory
-                        parts = user_msg.strip().split(maxsplit=2)
-                        sub = parts[1].lower() if len(parts) > 1 else "stats"
-                        if sub == "stats":
-                            st = get_memory_stats()
-                            res = f"Total Facts: {st['total_facts']}\nBy Category: {st['by_category']}"
-                        elif sub == "list":
-                            cat = parts[2] if len(parts) > 2 else None
-                            facts = list_all_facts(category=cat, limit=20)
-                            if not facts:
-                                res = "No facts found."
+                                cb_status = recovery.circuit_breakers
+                                open_cbs = [k for k, v in cb_status.items() if v.get('open')]
+                                open_msg = f" (Circuit open: {', '.join(open_cbs)})" if open_cbs else " (Circuits operational)"
+                                res = f"Active Provider: {getattr(api_client.provider, 'name', 'NVIDIA NIM')}{open_msg}. Use '/provider reset' to clear circuit breakers."
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking"
+                            })
+                        elif cmd.startswith("/config"):
+                            from jarvis.config_manager import config
+                            parts = user_msg.strip().split(maxsplit=2)
+                            sub = parts[1].lower() if len(parts) > 1 else "show"
+                            if sub == "show":
+                                import yaml
+                                res = "=== JARVIS CONFIGURATION ===\n" + yaml.dump(config.get_all(), default_flow_style=False)
+                            elif sub == "set" and len(parts) > 2:
+                                kv = parts[2].split(maxsplit=1)
+                                if len(kv) == 2:
+                                    config.set(kv[0], kv[1])
+                                    res = f"Set config path '{kv[0]}' to '{kv[1]}'."
+                                else:
+                                    res = "Usage: /config set <path> <value>"
+                            elif sub == "save":
+                                config.save()
+                                res = "Configuration saved to config.yaml."
+                            elif sub == "reset":
+                                config.reload()
+                                res = "Configuration reloaded from config.yaml."
                             else:
+                                res = "Usage: /config [show|set <path> <val>|save|reset]"
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking"
+                            })
+                        elif cmd.startswith("/memory"):
+                            from jarvis.memory import list_all_facts, delete_fact, edit_fact, clear_facts_by_category, get_memory_stats, search_facts, export_memory
+                            parts = user_msg.strip().split(maxsplit=2)
+                            sub = parts[1].lower() if len(parts) > 1 else "stats"
+                            if sub == "stats":
+                                st = get_memory_stats()
+                                res = f"Total Facts: {st['total_facts']}\nBy Category: {st['by_category']}"
+                            elif sub == "list":
+                                cat = parts[2] if len(parts) > 2 else None
+                                facts = list_all_facts(category=cat, limit=20)
+                                if not facts:
+                                    res = "No facts found."
+                                else:
+                                    lines = [f"#{f['id']} [{f.get('category','gen')}] {f.get('content','')[:60]}" for f in facts]
+                                    res = "Memory Facts:\n" + "\n".join(lines)
+                            elif sub == "delete" and len(parts) > 2:
+                                try:
+                                    fid = int(parts[2])
+                                    res = delete_fact(fid)
+                                except ValueError:
+                                    res = "Invalid fact ID."
+                            elif sub == "edit" and len(parts) > 2:
+                                try:
+                                    edit_parts = parts[2].split(maxsplit=1)
+                                    fid = int(edit_parts[0])
+                                    n_content = edit_parts[1] if len(edit_parts) > 1 else ""
+                                    res = edit_fact(fid, n_content)
+                                except ValueError:
+                                    res = "Usage: /memory edit <id> <new content>"
+                            elif sub == "clear" and len(parts) > 2:
+                                res = clear_facts_by_category(parts[2])
+                            elif sub == "search" and len(parts) > 2:
+                                facts = search_facts(parts[2])
                                 lines = [f"#{f['id']} [{f.get('category','gen')}] {f.get('content','')[:60]}" for f in facts]
-                                res = "Memory Facts:\n" + "\n".join(lines)
-                        elif sub == "delete" and len(parts) > 2:
-                            try:
-                                fid = int(parts[2])
-                                res = delete_fact(fid)
-                            except ValueError:
-                                res = "Invalid fact ID."
-                        elif sub == "edit" and len(parts) > 2:
-                            try:
-                                edit_parts = parts[2].split(maxsplit=1)
-                                fid = int(edit_parts[0])
-                                n_content = edit_parts[1] if len(edit_parts) > 1 else ""
-                                res = edit_fact(fid, n_content)
-                            except ValueError:
-                                res = "Usage: /memory edit <id> <new content>"
-                        elif sub == "clear" and len(parts) > 2:
-                            res = clear_facts_by_category(parts[2])
-                        elif sub == "search" and len(parts) > 2:
-                            facts = search_facts(parts[2])
-                            lines = [f"#{f['id']} [{f.get('category','gen')}] {f.get('content','')[:60]}" for f in facts]
-                            res = f"Search Results ({len(facts)}):\n" + "\n".join(lines) if lines else "No matching facts."
-                        elif sub == "export":
-                            res = export_memory()
+                                res = f"Search Results ({len(facts)}):\n" + "\n".join(lines) if lines else "No matching facts."
+                            elif sub == "export":
+                                res = export_memory()
+                            else:
+                                res = "Usage: /memory [stats|list|delete <id>|edit <id> <content>|clear <cat>|search <kw>|export]"
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking"
+                            })
+                        elif cmd in ["/google auth", "/google login", "/email auth", "/calendar auth", "/google_auth", "/auth google"]:
+                            await ws.send_json({
+                                "type": "response",
+                                "text": "Opening Google OAuth authorization in your web browser, sir. Please complete the login prompt.",
+                                "status": "speaking"
+                            })
+                            res = await tool_registry.execute("authenticate_google", {})
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "tool_calls": [{"name": "authenticate_google"}],
+                                "status": "speaking"
+                            })
+                        elif cmd in ["/email", "/check_email", "/checkemail"]:
+                            res = await tool_registry.execute("check_email", {"limit": 5})
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "tool_calls": [{"name": "check_email"}],
+                                "status": "speaking"
+                            })
+                        elif cmd in ["/email summary", "/email_summary", "/email-summary"]:
+                            res = await tool_registry.execute("email_summary", {})
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "tool_calls": [{"name": "email_summary"}],
+                                "status": "speaking"
+                            })
+                        elif cmd == "/tools":
+                            tools_list = list(tool_registry.tools.keys())
+                            await ws.send_json({
+                                "type": "response",
+                                "text": f"Registered Tools ({len(tools_list)}):\n" + ", ".join(tools_list),
+                                "status": "speaking"
+                            })
+                        elif cmd == "/help":
+                            help_text = (
+                                "=====================================================\n"
+                                "            J.A.R.V.I.S. SYSTEM COMMAND REFERENCE    \n"
+                                "=====================================================\n\n"
+                                "--- SLASH COMMANDS ---\n"
+                                "  /help          Show this command reference\n"
+                                "  /tools         List all 59 registered tool schemas\n"
+                                "  /email         Check recent unread emails in Gmail\n"
+                                "  /email summary Get executive email briefing\n"
+                                "  /diagnose      Run system diagnostics & health check\n"
+                                "  /context       View active session token usage\n"
+                                "  /context clear Reset session context memory\n"
+                                "  /exit          Disconnect active session\n\n"
+                                "--- GMAIL & EMAIL COMMANDS ---\n"
+                                "  • 'check my email' / '/email'\n"
+                                "  • 'email summary' / '/email summary'\n"
+                                "  • 'read email 1' (reads body of email #1)\n"
+                                "  • 'send email to name@domain.com subject Title body Message'\n"
+                                "  • 'confirm' / 'yes' (confirms draft send)\n\n"
+                                "--- SYSTEM & UTILITIES ---\n"
+                                "  • 'what is my cpu usage?'\n"
+                                "  • 'get disk usage'\n"
+                                "  • 'open spotify' / 'close notepad'\n"
+                                "  • 'copy hello world to clipboard'\n\n"
+                                "--- DEVELOPER & GITHUB ---\n"
+                                "  • 'git status' / 'git log'\n"
+                                "  • 'show my github repos'\n"
+                                "  • 'list open pull requests'\n\n"
+                                "====================================================="
+                            )
+                            await ws.send_json({
+                                "type": "response",
+                                "text": help_text,
+                                "status": "speaking"
+                            })
+                        elif cmd == "/context":
+                            msgs = api_client.get_session(session_id).messages
+                            tokens = api_client.get_token_estimate(session_id)
+                            await ws.send_json({
+                                "type": "response",
+                                "text": f"Session Context: {len(msgs)} messages, ~{tokens} estimated tokens.",
+                                "status": "speaking"
+                            })
+                        elif cmd == "/context clear":
+                            api_client.clear_history(session_id)
+                            await ws.send_json({
+                                "type": "response",
+                                "text": "Context history cleared, sir.",
+                                "status": "speaking"
+                            })
+                        elif cmd == "/exit":
+                            await ws.send_json({
+                                "type": "response",
+                                "text": "Goodbye, sir.",
+                                "status": "idle"
+                            })
                         else:
-                            res = "Usage: /memory [stats|list|delete <id>|edit <id> <content>|clear <cat>|search <kw>|export]"
-                        await ws.send_json({
-                            "type": "response",
-                            "text": res,
-                            "status": "speaking"
-                        })
-                    elif cmd in ["/google auth", "/google login", "/email auth", "/calendar auth", "/google_auth", "/auth google"]:
-                        await ws.send_json({
-                            "type": "response",
-                            "text": "Opening Google OAuth authorization in your web browser, sir. Please complete the login prompt.",
-                            "status": "speaking"
-                        })
-                        res = await tool_registry.execute("authenticate_google", {})
-                        await ws.send_json({
-                            "type": "response",
-                            "text": res,
-                            "tool_calls": [{"name": "authenticate_google"}],
-                            "status": "speaking"
-                        })
-                    elif cmd in ["/email", "/check_email", "/checkemail"]:
-                        res = await tool_registry.execute("check_email", {"limit": 5})
-                        await ws.send_json({
-                            "type": "response",
-                            "text": res,
-                            "tool_calls": [{"name": "check_email"}],
-                            "status": "speaking"
-                        })
-                    elif cmd in ["/email summary", "/email_summary", "/email-summary"]:
-                        res = await tool_registry.execute("email_summary", {})
-                        await ws.send_json({
-                            "type": "response",
-                            "text": res,
-                            "tool_calls": [{"name": "email_summary"}],
-                            "status": "speaking"
-                        })
-                    elif cmd == "/tools":
-                        tools_list = list(tool_registry.tools.keys())
-                        await ws.send_json({
-                            "type": "response",
-                            "text": f"Registered Tools ({len(tools_list)}):\n" + ", ".join(tools_list),
-                            "status": "speaking"
-                        })
-                    elif cmd == "/help":
-                        help_text = (
-                            "=====================================================\n"
-                            "            J.A.R.V.I.S. SYSTEM COMMAND REFERENCE    \n"
-                            "=====================================================\n\n"
-                            "--- SLASH COMMANDS ---\n"
-                            "  /help          Show this command reference\n"
-                            "  /tools         List all 59 registered tool schemas\n"
-                            "  /email         Check recent unread emails in Gmail\n"
-                            "  /email summary Get executive email briefing\n"
-                            "  /diagnose      Run system diagnostics & health check\n"
-                            "  /context       View active session token usage\n"
-                            "  /context clear Reset session context memory\n"
-                            "  /exit          Disconnect active session\n\n"
-                            "--- GMAIL & EMAIL COMMANDS ---\n"
-                            "  • 'check my email' / '/email'\n"
-                            "  • 'email summary' / '/email summary'\n"
-                            "  • 'read email 1' (reads body of email #1)\n"
-                            "  • 'send email to name@domain.com subject Title body Message'\n"
-                            "  • 'confirm' / 'yes' (confirms draft send)\n\n"
-                            "--- SYSTEM & UTILITIES ---\n"
-                            "  • 'what is my cpu usage?'\n"
-                            "  • 'get disk usage'\n"
-                            "  • 'open spotify' / 'close notepad'\n"
-                            "  • 'copy hello world to clipboard'\n\n"
-                            "--- DEVELOPER & GITHUB ---\n"
-                            "  • 'git status' / 'git log'\n"
-                            "  • 'show my github repos'\n"
-                            "  • 'list open pull requests'\n\n"
-                            "====================================================="
-                        )
-                        await ws.send_json({
-                            "type": "response",
-                            "text": help_text,
-                            "status": "speaking"
-                        })
-                    elif cmd == "/context":
-                        msgs = api_client.get_session(session_id).messages
-                        tokens = api_client.get_token_estimate(session_id)
-                        await ws.send_json({
-                            "type": "response",
-                            "text": f"Session Context: {len(msgs)} messages, ~{tokens} estimated tokens.",
-                            "status": "speaking"
-                        })
-                    elif cmd == "/context clear":
-                        api_client.clear_history(session_id)
-                        await ws.send_json({
-                            "type": "response",
-                            "text": "Context history cleared, sir.",
-                            "status": "speaking"
-                        })
-                    elif cmd == "/exit":
-                        await ws.send_json({
-                            "type": "response",
-                            "text": "Goodbye, sir.",
-                            "status": "idle"
-                        })
+                            # Fallback slash command or natural query starting with /
+                            executed_tools = []
+                            async def tracking_executor(name: str, args: dict) -> str:
+                                executed_tools.append({"name": name, "args": args})
+                                return await tool_registry.execute(name, args)
+
+                            async def send_chunk(chunk_text: str):
+                                try:
+                                    await ws.send_json({"type": "chunk", "text": chunk_text})
+                                except Exception:
+                                    pass
+
+                            try:
+                                api_client.add_user_message(user_msg, session_id=session_id)
+                                response = await api_client.chat_with_tools(
+                                    tool_schemas=tool_registry.schemas,
+                                    tool_executor=tracking_executor,
+                                    session_id=session_id,
+                                    tool_registry=tool_registry,
+                                    chunk_callback=send_chunk
+                                )
+                            except Exception as err:
+                                print(f"[API ERROR] Error processing slash command/query: {err}")
+                                response = f"I encountered an error processing your request, sir: {err}"
+
+                            await ws.send_json({
+                                "type": "response",
+                                "text": response,
+                                "tool_calls": executed_tools,
+                                "status": "speaking"
+                            })
                     else:
-                        # Fallback slash command or natural query starting with /
+                        # Check if there are pending actions awaiting confirmation and user typed an affirmative / confirmation response
+                        if tool_registry.pending_actions:
+                            import re
+                            lower_m = user_msg.lower().strip()
+                            confirm_words = ["confirm", "yes", "yep", "yeah", "proceed", "approve", "do it", "send", "send it", "ok", "okay", "go ahead"]
+                            act_match = re.search(r'act_[a-f0-9]+', lower_m)
+                        
+                            if act_match or any(lower_m == w or lower_m.startswith(w + " ") or lower_m.endswith(" " + w) for w in confirm_words):
+                                act_id = act_match.group(0) if act_match else ""
+                                extra = user_msg.split(maxsplit=1)[1] if " " in user_msg and not act_match else user_msg
+                                res = tool_registry.confirm_action(act_id, extra)
+                                await ws.send_json({
+                                    "type": "response",
+                                    "text": res,
+                                    "status": "speaking"
+                                })
+                                continue
+
+                        # Natural language prompt processing with tool tracking
                         executed_tools = []
                         async def tracking_executor(name: str, args: dict) -> str:
                             executed_tools.append({"name": name, "args": args})
@@ -753,125 +792,86 @@ async def websocket_endpoint(ws: WebSocket):
                                 chunk_callback=send_chunk
                             )
                         except Exception as err:
-                            print(f"[API ERROR] Error processing slash command/query: {err}")
+                            print(f"[API ERROR] Error processing message: {err}")
                             response = f"I encountered an error processing your request, sir: {err}"
+                    
+                        # Intent fallback safety: ONLY trigger if user explicitly issued a direct command to check email and LLM produced no tool calls
+                        if not executed_tools:
+                            lower_msg = user_msg.lower().strip()
+                            negatives_or_questions = ["don't", "dont", "do not", "never", "stop", "no ", "not ", "how ", "what ", "why ", "explain ", "tell me", "can you"]
+                            if not any(neg in lower_msg for neg in negatives_or_questions):
+                                EXPLICIT_CHECK_COMMANDS = [
+                                    "check email", "check my email", "check inbox", "check my inbox",
+                                    "check gmail", "check my gmail", "read email", "read my email",
+                                    "show email", "show my email", "show unread emails", "list emails",
+                                    "list my emails", "get emails", "get unread emails"
+                                ]
+                                if any(cmd == lower_msg or lower_msg.startswith(cmd) for cmd in EXPLICIT_CHECK_COMMANDS):
+                                    res = await tool_registry.execute("check_email", {"limit": 5})
+                                    executed_tools.append({"name": "check_email", "args": {"limit": 5}})
+                                    response = res
+                                elif "email summary" in lower_msg or "summarize email" in lower_msg:
+                                    res = await tool_registry.execute("email_summary", {})
+                                    executed_tools.append({"name": "email_summary", "args": {}})
+                                    response = res
 
+                        # Final Response Firewall Check
+                        from jarvis.tool_normalizer import is_unresolved_tool_call
+                        if is_unresolved_tool_call(response, registered_tools=tool_registry.tools):
+                            print(f"[WS FIREWALL] Blocked unexecuted tool call JSON from WebSocket output!")
+                            response = "I have processed your request, sir."
+
+                        # Send response back to Electron / Web clients
                         await ws.send_json({
                             "type": "response",
                             "text": response,
                             "tool_calls": executed_tools,
                             "status": "speaking"
                         })
-                else:
-                    # Check if there are pending actions awaiting confirmation and user typed an affirmative / confirmation response
-                    if tool_registry.pending_actions:
-                        import re
-                        lower_m = user_msg.lower().strip()
-                        confirm_words = ["confirm", "yes", "yep", "yeah", "proceed", "approve", "do it", "send", "send it", "ok", "okay", "go ahead"]
-                        act_match = re.search(r'act_[a-f0-9]+', lower_m)
-                        
-                        if act_match or any(lower_m == w or lower_m.startswith(w + " ") or lower_m.endswith(" " + w) for w in confirm_words):
-                            act_id = act_match.group(0) if act_match else ""
-                            extra = user_msg.split(maxsplit=1)[1] if " " in user_msg and not act_match else user_msg
-                            res = tool_registry.confirm_action(act_id, extra)
-                            await ws.send_json({
-                                "type": "response",
-                                "text": res,
-                                "status": "speaking"
-                            })
-                            continue
-
-                    # Natural language prompt processing with tool tracking
-                    executed_tools = []
-                    async def tracking_executor(name: str, args: dict) -> str:
-                        executed_tools.append({"name": name, "args": args})
-                        return await tool_registry.execute(name, args)
-
-                    async def send_chunk(chunk_text: str):
-                        try:
-                            await ws.send_json({"type": "chunk", "text": chunk_text})
-                        except Exception:
-                            pass
-
-                    try:
-                        api_client.add_user_message(user_msg, session_id=session_id)
-                        response = await api_client.chat_with_tools(
-                            tool_schemas=tool_registry.schemas,
-                            tool_executor=tracking_executor,
-                            session_id=session_id,
-                            tool_registry=tool_registry,
-                            chunk_callback=send_chunk
-                        )
-                    except Exception as err:
-                        print(f"[API ERROR] Error processing message: {err}")
-                        response = f"I encountered an error processing your request, sir: {err}"
                     
-                    # Intent fallback safety: ONLY trigger if user explicitly issued a direct command to check email and LLM produced no tool calls
-                    if not executed_tools:
-                        lower_msg = user_msg.lower().strip()
-                        negatives_or_questions = ["don't", "dont", "do not", "never", "stop", "no ", "not ", "how ", "what ", "why ", "explain ", "tell me", "can you"]
-                        if not any(neg in lower_msg for neg in negatives_or_questions):
-                            EXPLICIT_CHECK_COMMANDS = [
-                                "check email", "check my email", "check inbox", "check my inbox",
-                                "check gmail", "check my gmail", "read email", "read my email",
-                                "show email", "show my email", "show unread emails", "list emails",
-                                "list my emails", "get emails", "get unread emails"
-                            ]
-                            if any(cmd == lower_msg or lower_msg.startswith(cmd) for cmd in EXPLICIT_CHECK_COMMANDS):
-                                res = await tool_registry.execute("check_email", {"limit": 5})
-                                executed_tools.append({"name": "check_email", "args": {"limit": 5}})
-                                response = res
-                            elif "email summary" in lower_msg or "summarize email" in lower_msg:
-                                res = await tool_registry.execute("email_summary", {})
-                                executed_tools.append({"name": "email_summary", "args": {}})
-                                response = res
+                        print(f"[WS] Sent response ({len(executed_tools)} tools executed): {response[:100]}")
 
-                    # Final Response Firewall Check
-                    from jarvis.tool_normalizer import is_unresolved_tool_call
-                    if is_unresolved_tool_call(response, registered_tools=tool_registry.tools):
-                        print(f"[WS FIREWALL] Blocked unexecuted tool call JSON from WebSocket output!")
-                        response = "I have processed your request, sir."
+                        # Trigger non-blocking Mark 5 Proactive Follow-Up Engine
+                        async def broadcast_proactive(event_payload: dict):
+                            try:
+                                if event_payload.get("type") == "proactive_followup":
+                                    p_text = event_payload.get("text", "")
+                                    p_sid = event_payload.get("session_id", session_id)
+                                    api_client.add_assistant_message(p_text, session_id=p_sid)
+                                    await manager.broadcast({
+                                        "type": "response",
+                                        "text": p_text,
+                                        "proactive": True,
+                                        "status": "speaking"
+                                    })
+                                else:
+                                    await manager.broadcast(event_payload)
+                            except Exception as pe:
+                                print(f"[WS] Proactive broadcast error: {pe}")
 
-                    # Send response back to Electron / Web clients
+                        asyncio.create_task(
+                            proactive_engine.analyze_and_followup(
+                                session_id=session_id,
+                                user_prompt=user_msg,
+                                main_response=response,
+                                tool_registry=tool_registry,
+                                llm_client=api_client,
+                                event_callback=broadcast_proactive
+                            )
+                        )
+
+                    
+            except Exception as msg_err:
+                print(f"[WS ERROR] Exception processing '{msg_type}' message: {msg_err}")
+                try:
                     await ws.send_json({
-                        "type": "response",
-                        "text": response,
-                        "tool_calls": executed_tools,
-                        "status": "speaking"
+                        "type": "error",
+                        "message": str(msg_err),
+                        "context": msg_type
                     })
-                    
-                    print(f"[WS] Sent response ({len(executed_tools)} tools executed): {response[:100]}")
-
-                    # Trigger non-blocking Mark 5 Proactive Follow-Up Engine
-                    async def broadcast_proactive(event_payload: dict):
-                        try:
-                            if event_payload.get("type") == "proactive_followup":
-                                p_text = event_payload.get("text", "")
-                                p_sid = event_payload.get("session_id", session_id)
-                                api_client.add_assistant_message(p_text, session_id=p_sid)
-                                await manager.broadcast({
-                                    "type": "response",
-                                    "text": p_text,
-                                    "proactive": True,
-                                    "status": "speaking"
-                                })
-                            else:
-                                await manager.broadcast(event_payload)
-                        except Exception as pe:
-                            print(f"[WS] Proactive broadcast error: {pe}")
-
-                    asyncio.create_task(
-                        proactive_engine.analyze_and_followup(
-                            session_id=session_id,
-                            user_prompt=user_msg,
-                            main_response=response,
-                            tool_registry=tool_registry,
-                            llm_client=api_client,
-                            event_callback=broadcast_proactive
-                        )
-                    )
-
-                    
+                except Exception:
+                    pass
+                continue
     except WebSocketDisconnect:
         manager.disconnect(ws)
     except Exception as e:
@@ -1110,6 +1110,8 @@ async def new_session_endpoint(request: dict = None):
 @app.get("/api/sessions/{session_id}/messages")
 async def session_messages_endpoint(session_id: str):
     sess = api_client.get_session(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
     return {
         "session_id": session_id,
         "title": sess.title,

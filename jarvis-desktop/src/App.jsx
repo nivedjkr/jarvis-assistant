@@ -466,27 +466,46 @@ export default function App() {
     }
   }
 
-  const handleSwitchSession = (sessionId) => {
+  const handleSwitchSession = async (sessionId) => {
     stopSpeech()
     if (window.jarvis?.switchSession) {
-      window.jarvis.switchSession(sessionId)
+      const res = await window.jarvis.switchSession(sessionId)
+      if (res && res.status === 'offline') {
+        setSessionToast('JARVIS backend disconnected, sir. Retrying connection...')
+        setTimeout(() => setSessionToast(null), 5000)
+      }
     }
   }
 
-  const handleNewSession = () => {
+  const handleNewSession = async () => {
     stopSpeech()
     if (window.jarvis?.newSession) {
-      window.jarvis.newSession()
+      const res = await window.jarvis.newSession()
+      if (res && res.status === 'offline') {
+        setSessionToast('JARVIS backend disconnected, sir. Retrying connection...')
+        setTimeout(() => setSessionToast(null), 5000)
+      }
     }
   }
 
-  const handleDeleteSession = (sessionId) => {
+  const handleDeleteSession = async (sessionId) => {
     stopSpeech()
     if (sessionId) {
       setDeletingSessionIds(prev => new Set(prev).add(sessionId))
     }
     if (window.jarvis?.deleteSession) {
-      window.jarvis.deleteSession(sessionId)
+      const res = await window.jarvis.deleteSession(sessionId)
+      if (res && res.status === 'offline') {
+        if (sessionId) {
+          setDeletingSessionIds(prev => {
+            const next = new Set(prev)
+            next.delete(sessionId)
+            return next
+          })
+        }
+        setSessionToast('JARVIS backend disconnected, sir. Retrying connection...')
+        setTimeout(() => setSessionToast(null), 5000)
+      }
     }
   }
 

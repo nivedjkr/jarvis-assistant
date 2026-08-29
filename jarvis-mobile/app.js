@@ -533,7 +533,12 @@
         }
       }
     } else if (data.type === 'sessions_list') {
-      renderSessionsList(data.sessions || [], data.current_session_id);
+      const activeSid = data.session_id || data.current_session_id || currentSessionId;
+      if (activeSid) {
+        currentSessionId = activeSid;
+        localStorage.setItem('jarvis_session_id', currentSessionId);
+      }
+      renderSessionsList(data.sessions || [], currentSessionId);
     } else if (data.type === 'session_switched' || data.type === 'session_created' || data.type === 'session_deleted') {
       if (data.session_id) {
         currentSessionId = data.session_id;
