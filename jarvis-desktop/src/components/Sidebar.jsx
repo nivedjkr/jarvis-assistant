@@ -70,6 +70,25 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
     setSessions(prev => prev.filter(s => s.session_id !== sid))
   }
 
+  const handleCreateProject = () => {
+    const name = window.prompt('Enter new project name:')
+    if (name && name.trim()) {
+      if (window.jarvis?.createProject) {
+        window.jarvis.createProject(name.trim())
+      }
+      setProjects(prev => [{ project_id: `proj_${Date.now()}`, name: name.trim(), status: 'Active' }, ...prev])
+    }
+  }
+
+  const handleDeleteProject = (e, projectId) => {
+    e.stopPropagation()
+    if (e.preventDefault) e.preventDefault()
+    if (window.jarvis?.deleteProject) {
+      window.jarvis.deleteProject(projectId)
+    }
+    setProjects(prev => prev.filter(p => (p.project_id || p.id) !== projectId))
+  }
+
   const formatTimestamp = (ts) => {
     if (!ts) return 'Recent'
     try {
@@ -129,20 +148,32 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
       <div className="sidebar-section">
         <div className="sidebar-section-title">
           <span>Projects</span>
-          <span>{projects.length}</span>
+          <button className="sidebar-action-btn" onClick={handleCreateProject}>+ New Project</button>
         </div>
         <div className="sidebar-list">
           {projects.length === 0 ? (
             <div className="sidebar-empty">No active projects</div>
           ) : (
-            projects.map((p, i) => (
-              <div key={i} className="sidebar-item">
-                <div className="sidebar-item-name">{p.name || p.title || 'Project'}</div>
-                <div className="sidebar-item-sub">
-                  {p.category ? `${p.category.toUpperCase()} · ` : ''}{p.status || 'Active'}
+            projects.map((p, i) => {
+              const pid = p.project_id || p.id || `proj_${i}`
+              return (
+                <div key={pid} className="sidebar-item">
+                  <div className="sidebar-item-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="sidebar-item-name">{p.name || p.title || 'Untitled Project'}</div>
+                    <button 
+                      className="sidebar-delete-btn"
+                      title="Delete project"
+                      onClick={(e) => handleDeleteProject(e, pid)}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                  <div className="sidebar-item-sub">
+                    {p.path ? `${p.path} · ` : ''}{p.status || 'Active'}
+                  </div>
                 </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
       </div>

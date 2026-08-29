@@ -334,6 +334,64 @@ async def websocket_endpoint(ws: WebSocket):
                         "messages": msgs
                     })
                 continue
+
+            if msg_type == "create_project":
+                name = data.get("name", "New Project")
+                path = data.get("path", "")
+                status = data.get("status", "Active")
+                proj = api_client.create_project(name=name, path=path, status=status)
+                projects = api_client.list_projects()
+                await ws.send_json({
+                    "type": "project_created",
+                    "project": proj,
+                    "projects": projects
+                })
+                continue
+
+            if msg_type == "delete_project":
+                pid = data.get("project_id", "").strip()
+                if pid:
+                    success = api_client.delete_project(pid)
+                    projects = api_client.list_projects()
+                    await ws.send_json({
+                        "type": "project_deleted",
+                        "status": "ok" if success else "error",
+                        "deleted_project_id": pid,
+                        "projects": projects
+                    })
+                continue
+
+            if msg_type == "complete_directive":
+                did = data.get("directive_id")
+                if did:
+                    try:
+                        int_id = int(did)
+                        api_client.complete_directive(int_id)
+                    except (ValueError, TypeError):
+                        pass
+                    directives = api_client.list_directives()
+                    await ws.send_json({
+                        "type": "directive_completed",
+                        "directive_id": did,
+                        "directives": directives
+                    })
+                continue
+
+            if msg_type == "delete_directive":
+                did = data.get("directive_id")
+                if did:
+                    try:
+                        int_id = int(did)
+                        api_client.delete_directive(int_id)
+                    except (ValueError, TypeError):
+                        pass
+                    directives = api_client.list_directives()
+                    await ws.send_json({
+                        "type": "directive_deleted",
+                        "directive_id": did,
+                        "directives": directives
+                    })
+                continue
             
             if msg_type == "confirm_action":
                 act_id = data.get("action_id", "")
@@ -858,41 +916,28 @@ async def tts_sentence_endpoint(request: dict):
         return {"audio": ""}
 
 @app.get("/projects")
-async def projects_endpoint():
-    """Returns active upcoming projects from Obsidian areas and local repositories."""
-    try:
-        from jarvis.projects import get_projects_summary
-        projects = get_projects_summary()
-        if projects:
-            return projects
-    except Exception:
-        pass
-    
-    projects_list = []
-    try:
-        vault_path = tool_registry.obsidian_client.vault_path if tool_registry.obsidian_client else None
-        if vault_path:
-            areas_dir = Path(vault_path) / "Memory" / "areas"
-            if areas_dir.exists():
-                for p in areas_dir.glob("*.md"):
-                    projects_list.append({
-                        "id": p.stem,
-                        "name": p.stem.replace("_", " ").title(),
-                        "path": str(p),
-                        "status": "Active"
-                    })
-    except Exception:
-        pass
+@app.get("/api/projects")
+async def list_projects_endpoint():
+    """List persistent projects from SQLite store."""
+    return api_client.list_projects()
 
-    if not projects_list:
-        projects_list = [
-            {"id": "jarvis-core", "name": "JARVIS Assistant Mk 4.8", "status": "Active"},
-            {"id": "obsidian-vault", "name": "Obsidian Memory System", "status": "Synced"}
-        ]
-    return projects_list
+@app.post("/projects")
+@app.post("/api/projects")
+async def create_project_endpoint(request: dict = None):
+    req = request or {}
+    name = req.get("name", "New Project")
+    path = req.get("path", "")
+    status = req.get("status", "Active")
+    project_id = req.get("project_id")
+    return api_client.create_project(name=name, path=path, status=status, project_id=project_id)
+
+@app.delete("/projects/{project_id}")
+@app.delete("/api/projects/{project_id}")
+async def delete_project_endpoint(project_id: str):
+    success = api_client.delete_project(project_id)
+    return {"status": "ok" if success else "error", "project_id": project_id}
 
 @app.get("/calendar/events")
-@app.get("/reminders")
 async def get_calendar_events_endpoint():
     """Fetch real Google Calendar events via CalendarService."""
     events_data = []
@@ -914,20 +959,97 @@ async def get_calendar_events_endpoint():
 
     return events_data
 
+@app.get("/directives")
+@app.get("/api/directives")
+@app.get("/reminders")
+async def get_directives_endpoint(status: Optional[str] = None):
+    """Fetch real user directives and active mission tasks from backend."""
+    directives = api_client.list_directives(status=status)
+    try:
+        if proactive_engine and proactive_engine.mission_manager:
+            active_missions = proactive_engine.mission_manager.list_missions(status="active")
+            for m in active_missions:
+                for t in m.tasks:
+                    if t.status.value in ("pending", "in_progress", "waiting_for_user"):
+                        directives.append({
+                            "id": f"task_{t.id}",
+                            "title": f"[{m.title}] {t.title}",
+                            "text": f"[{m.title}] {t.title}",
+                            "status": "waiting_for_user" if t.status.value == "waiting_for_user" else "active",
+                            "completed": False,
+                            "created_at": t.created_at
+                        })
+    except Exception:
+        pass
+    return directives
+
+@app.post("/directives")
+@app.post("/api/directives")
+async def create_directive_endpoint(request: dict = None):
+    req = request or {}
+    text = req.get("text") or req.get("title") or "New Directive"
+    due_date = req.get("due_date", "")
+    from jarvis.memory import Memory
+    mem = Memory()
+    res = mem.add_reminder(text, due_date=due_date)
+    return {"status": "ok", "directive": res}
+
+@app.post("/directives/{directive_id}/complete")
+@app.post("/api/directives/{directive_id}/complete")
+async def complete_directive_endpoint(directive_id: str):
+    if directive_id.startswith("task_"):
+        return {"status": "ok", "directive_id": directive_id}
+    try:
+        did = int(directive_id)
+        success = api_client.complete_directive(did)
+        return {"status": "ok" if success else "error", "directive_id": did}
+    except ValueError:
+        return {"status": "error", "message": "Invalid directive ID"}
+
+@app.delete("/directives/{directive_id}")
+@app.delete("/api/directives/{directive_id}")
+async def delete_directive_endpoint(directive_id: str):
+    if directive_id.startswith("task_"):
+        return {"status": "ok", "directive_id": directive_id}
+    try:
+        did = int(directive_id)
+        success = api_client.delete_directive(did)
+        return {"status": "ok" if success else "error", "directive_id": did}
+    except ValueError:
+        return {"status": "error", "message": "Invalid directive ID"}
+
 @app.get("/vitals")
 async def vitals_endpoint():
     try:
         import psutil
         cpu = psutil.cpu_percent(interval=0.1)
         ram = psutil.virtual_memory()
+        uptime_sec = int(time.time() - START_TIME)
+        
+        commands_count = 0
+        try:
+            from jarvis.memory import Memory
+            mem = Memory()
+            with mem._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM conversation_log")
+                commands_count = cur.fetchone()[0]
+        except Exception:
+            pass
+
         return {
             "cpu_usage": cpu,
             "ram_usage": ram.percent,
-            "ram_used_mb": ram.used // (1024 * 1024),
-            "ram_total_mb": ram.total // (1024 * 1024)
+            "cpu_pct": cpu,
+            "ram_pct": ram.percent,
+            "ram_used_gb": round(ram.used / (1024**3), 1),
+            "ram_total_gb": round(ram.total / (1024**3), 1),
+            "uptime_seconds": uptime_sec,
+            "commands_today": commands_count,
+            "tool_calls_today": 0
         }
     except Exception:
-        return {}
+        return {"cpu_usage": 0, "ram_usage": 0, "cpu_pct": 0, "ram_pct": 0, "uptime_seconds": 0, "commands_today": 0, "tool_calls_today": 0}
 
 @app.get("/sessions")
 @app.get("/api/sessions")

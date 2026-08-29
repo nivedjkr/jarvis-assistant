@@ -273,6 +273,70 @@ class JarvisAPIClient:
             print(f"[SESSION DELETE] Error deleting session '{session_id}': {e}")
             return False
 
+    # --- Project & Directive Helpers ---
+
+    def list_projects(self) -> List[Dict[str, Any]]:
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            return mem.list_projects()
+        except Exception:
+            return []
+
+    def create_project(self, name: str, path: str = "", status: str = "Active", project_id: Optional[str] = None) -> Dict[str, Any]:
+        pid = project_id or f"proj_{uuid.uuid4().hex[:8]}"
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            return mem.create_project(pid, name, path=path, status=status)
+        except Exception as e:
+            print(f"[PROJECT] Error creating project: {e}")
+            return {"project_id": pid, "name": name, "path": path, "status": status}
+
+    def delete_project(self, project_id: str) -> bool:
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            return mem.delete_project(project_id)
+        except Exception as e:
+            print(f"[PROJECT] Error deleting project '{project_id}': {e}")
+            return False
+
+    def list_directives(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            reminders = mem.get_reminders(status=status)
+            res = []
+            for r in reminders:
+                res.append({
+                    "id": r["id"],
+                    "title": r.get("text") or r.get("title") or "Untitled Directive",
+                    "text": r.get("text") or r.get("title") or "Untitled Directive",
+                    "status": "completed" if r.get("completed") else "active",
+                    "completed": bool(r.get("completed")),
+                    "created_at": r.get("created_at")
+                })
+            return res
+        except Exception:
+            return []
+
+    def complete_directive(self, directive_id: int) -> bool:
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            return mem.complete_reminder(directive_id)
+        except Exception:
+            return False
+
+    def delete_directive(self, directive_id: int) -> bool:
+        try:
+            from jarvis.memory import Memory
+            mem = Memory(db_path=self.db_path) if self.db_path else Memory()
+            return mem.delete_reminder(directive_id)
+        except Exception:
+            return False
+
     @property
     def messages(self) -> list:
         return self.get_session().messages

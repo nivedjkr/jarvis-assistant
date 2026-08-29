@@ -126,6 +126,19 @@ class Memory:
                 )
             """)
             
+            # Projects table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT UNIQUE,
+                    name TEXT,
+                    path TEXT,
+                    status TEXT DEFAULT 'Active',
+                    created_at TIMESTAMP,
+                    last_active TIMESTAMP
+                )
+            """)
+            
             # Conversation log: rolling conversation history
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS conversation_log (
@@ -563,6 +576,71 @@ class Memory:
             """, (now,))
             conn.commit()
             return cursor.rowcount
+
+    def delete_reminder(self, reminder_id: int) -> bool:
+        """Delete a reminder/directive by ID."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # --- Projects Persistence Methods ---
+
+    def create_project(self, project_id: str, name: str, path: str = "", status: str = "Active") -> Dict[str, Any]:
+        """Create or update a persistent project entry."""
+        now = time.time()
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO projects (project_id, name, path, status, created_at, last_active)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id) DO UPDATE SET
+                    name = excluded.name,
+                    path = excluded.path,
+                    status = excluded.status,
+                    last_active = excluded.last_active
+            """, (project_id, name, path, status, now, now))
+            conn.commit()
+        return {
+            "project_id": project_id,
+            "name": name,
+            "path": path,
+            "status": status,
+            "created_at": now,
+            "last_active": now
+        }
+
+    def list_projects(self) -> List[Dict[str, Any]]:
+        """List all active projects sorted by last_active DESC."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT project_id, name, path, status, created_at, last_active FROM projects ORDER BY last_active DESC").fetchall()
+            res = [dict(r) for r in rows]
+            if not res:
+                default_projects = [
+                    {"project_id": "jarvis-core", "name": "JARVIS Core Engine", "path": "D:\\JARVIS", "status": "Active", "created_at": time.time(), "last_active": time.time()},
+                    {"project_id": "obsidian-vault", "name": "Obsidian Memory System", "path": "D:\\Obsidian", "status": "Synced", "created_at": time.time(), "last_active": time.time()}
+                ]
+                for dp in default_projects:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO projects (project_id, name, path, status, created_at, last_active)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (dp["project_id"], dp["name"], dp["path"], dp["status"], dp["created_at"], dp["last_active"]))
+                conn.commit()
+                rows = conn.execute("SELECT project_id, name, path, status, created_at, last_active FROM projects ORDER BY last_active DESC").fetchall()
+                res = [dict(r) for r in rows]
+            return res
+
+    def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Get project by project_id."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT project_id, name, path, status, created_at, last_active FROM projects WHERE project_id=?", (project_id,)).fetchone()
+            return dict(row) if row else None
+
+    def delete_project(self, project_id: str) -> bool:
+        """Permanently delete a project by project_id."""
+        with self._get_connection() as conn:
+            cur = conn.execute("DELETE FROM projects WHERE project_id=?", (project_id,))
+            conn.commit()
+            return cur.rowcount > 0
 
     # --- Notes Methods ---
 

@@ -266,3 +266,87 @@ def test_true_reconnect_session_synchronization(temp_db):
     assert id_b in restarted_ids
 
 
+def test_projects_crud_and_persistent_deletion(temp_db):
+    """
+    Test Project creation, listing, persistent deletion, and reconnect sync:
+    1. Create Project Alpha & Project Beta.
+    2. Verify both exist in list_projects().
+    3. Delete Project Alpha.
+    4. Verify Project Alpha is absent from SQLite database.
+    5. Re-instantiate Memory(temp_db) to simulate backend restart.
+    6. Assert Project Alpha remains deleted and Project Beta survives.
+    """
+    from jarvis.memory import Memory
+    from jarvis.api_client import JarvisAPIClient
+
+    mem = Memory(db_path=temp_db)
+    api_client = JarvisAPIClient(db_path=temp_db)
+
+    p1 = api_client.create_project(name="Project Alpha", path="D:\\Alpha", project_id="proj_alpha")
+    p2 = api_client.create_project(name="Project Beta", path="D:\\Beta", project_id="proj_beta")
+
+    projects = api_client.list_projects()
+    p_ids = [p["project_id"] for p in projects]
+    assert "proj_alpha" in p_ids
+    assert "proj_beta" in p_ids
+
+    # Delete Project Alpha
+    del_ok = api_client.delete_project("proj_alpha")
+    assert del_ok is True
+
+    # Check remaining
+    projects_after = api_client.list_projects()
+    p_ids_after = [p["project_id"] for p in projects_after]
+    assert "proj_alpha" not in p_ids_after
+    assert "proj_beta" in p_ids_after
+
+    # Backend restart simulation
+    mem_restart = Memory(db_path=temp_db)
+    projects_restart = mem_restart.list_projects()
+    p_ids_restart = [p["project_id"] for p in projects_restart]
+    assert "proj_alpha" not in p_ids_restart
+    assert "proj_beta" in p_ids_restart
+
+
+def test_directives_lifecycle_and_backend_filtering(temp_db):
+    """
+    Test Directives/Reminders creation, completion, deletion, and status filtering:
+    1. Add Directive 1 ("Review AAPL target") & Directive 2 ("Check server logs").
+    2. Verify both appear in list_directives().
+    3. Mark Directive 1 completed via complete_directive.
+    4. Assert Directive 1 has status == "completed" and completed == True.
+    5. Delete Directive 2 via delete_directive.
+    6. Assert Directive 2 is purged from SQLite storage.
+    """
+    from jarvis.memory import Memory
+    from jarvis.api_client import JarvisAPIClient
+
+    mem = Memory(db_path=temp_db)
+    api_client = JarvisAPIClient(db_path=temp_db)
+
+    r1 = mem.add_reminder("Review AAPL target")
+    r2 = mem.add_reminder("Check server logs")
+
+    directives = api_client.list_directives()
+    d_ids = [d["id"] for d in directives]
+    assert r1["id"] in d_ids
+    assert r2["id"] in d_ids
+
+    # Mark r1 completed
+    comp_ok = api_client.complete_directive(r1["id"])
+    assert comp_ok is True
+
+    directives_after = api_client.list_directives()
+    d1_after = next(d for d in directives_after if d["id"] == r1["id"])
+    assert d1_after["completed"] is True
+    assert d1_after["status"] == "completed"
+
+    # Delete r2
+    del_ok = api_client.delete_directive(r2["id"])
+    assert del_ok is True
+
+    directives_final = api_client.list_directives()
+    d_ids_final = [d["id"] for d in directives_final]
+    assert r2["id"] not in d_ids_final
+
+

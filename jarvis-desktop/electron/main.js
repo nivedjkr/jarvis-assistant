@@ -527,7 +527,33 @@ ipcMain.handle('jarvis:synthesizeSentence', handleSynthesizeSentence)
 ipcMain.handle('synthesize-sentence', handleSynthesizeSentence)
 
 ipcMain.handle('get-projects', () => fetchJson('http://127.0.0.1:8765/projects'))
-ipcMain.handle('get-reminders', () => fetchJson('http://127.0.0.1:8765/reminders'))
+ipcMain.handle('create-project', (event, payload) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'create_project', name: payload?.name, path: payload?.path }))
+  }
+})
+
+ipcMain.handle('delete-project', (event, pid) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'delete_project', project_id: pid }))
+  }
+})
+
+ipcMain.handle('get-reminders', () => fetchJson('http://127.0.0.1:8765/directives'))
+ipcMain.handle('get-directives', () => fetchJson('http://127.0.0.1:8765/directives'))
+
+ipcMain.handle('complete-directive', (event, did) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'complete_directive', directive_id: did }))
+  }
+})
+
+ipcMain.handle('delete-directive', (event, did) => {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'delete_directive', directive_id: did }))
+  }
+})
+
 ipcMain.handle('get-watchlist', () => fetchJson('http://127.0.0.1:8765/watchlist'))
 ipcMain.handle('get-vitals', () => fetchJson('http://127.0.0.1:8765/vitals'))
 ipcMain.handle('check-email', () => {

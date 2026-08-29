@@ -14,7 +14,12 @@ contextBridge.exposeInMainWorld('jarvis', {
     ipcRenderer.on('connection-status', (_, status) => cb(status))
   },
   getProjects: () => ipcRenderer.invoke('get-projects'),
-  getReminders: () => ipcRenderer.invoke('get-reminders'),
+  createProject: (name, path = '') => ipcRenderer.invoke('create-project', { name, path }),
+  deleteProject: (projectId) => ipcRenderer.invoke('delete-project', projectId),
+  getReminders: () => ipcRenderer.invoke('get-directives'),
+  getDirectives: () => ipcRenderer.invoke('get-directives'),
+  completeDirective: (directiveId) => ipcRenderer.invoke('complete-directive', directiveId),
+  deleteDirective: (directiveId) => ipcRenderer.invoke('delete-directive', directiveId),
   getWatchlist: () => ipcRenderer.invoke('get-watchlist'),
   getVitals: () => ipcRenderer.invoke('get-vitals'),
   getSessions: () => ipcRenderer.invoke('get-sessions'),
