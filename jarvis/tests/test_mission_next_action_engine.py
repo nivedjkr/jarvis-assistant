@@ -195,3 +195,27 @@ def test_deterministic_selection(temp_db_path):
         assert subsequent_result.actionable is True
         assert subsequent_result.task_id == first_result.task_id
         assert subsequent_result.task_title == first_result.task_title
+
+
+# --- TEST 10: TOOL REGISTRY FIRST-CLASS IN-PROCESS TOOL ---
+def test_next_action_tool_registry_integration(temp_db_path):
+    import json
+    from jarvis.tools import ToolRegistry
+    manager = MissionManager(db_path=temp_db_path)
+    registry = ToolRegistry(mission_manager=manager)
+
+    assert "get_next_actionable_task" in registry.tools
+
+    mission = manager.propose_mission("Tool Goal", "Test direct tool invocation.")
+    manager.update_mission_status(mission.id, MissionStatus.ACTIVE)
+    task = manager.create_task(mission.id, "Tool Task", priority="HIGH")
+    manager.update_task_status(task.id, MissionTaskStatus.READY)
+
+    output_str = registry.execute_tool("get_next_actionable_task", {"mission_id": mission.id})
+    data = json.loads(output_str)
+
+    assert data["actionable"] is True
+    assert data["mission_id"] == mission.id
+    assert data["task_id"] == task.id
+    assert data["task_title"] == "Tool Task"
+    assert data["reason"] == "NEXT_TASK_SELECTED"

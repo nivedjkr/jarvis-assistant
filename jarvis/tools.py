@@ -255,7 +255,7 @@ class WebsiteOpenTool:
         return f"Opening {target_url} in Google Chrome, sir."
 
 class ToolRegistry:
-    def __init__(self, email_service: Optional[Any] = None, calendar_service: Optional[Any] = None, obsidian_client: Optional[Any] = None):
+    def __init__(self, email_service: Optional[Any] = None, calendar_service: Optional[Any] = None, obsidian_client: Optional[Any] = None, mission_manager: Optional[Any] = None):
         self.tools = {}   # name -> async callable
         self.schemas = [] # OpenAI tool schemas
         self.pending_actions: Dict[str, dict] = {}
@@ -301,6 +301,15 @@ class ToolRegistry:
                     self.obsidian_client = None
             except Exception as e:
                 self.obsidian_client = None
+
+        if mission_manager is not None:
+            self.mission_manager = mission_manager
+        else:
+            try:
+                from jarvis.mission_manager import MissionManager
+                self.mission_manager = MissionManager()
+            except Exception:
+                self.mission_manager = None
 
         self._register_all()
         # Validate schemas on startup
@@ -397,6 +406,7 @@ class ToolRegistry:
         self._register_obsidian_tools()
         self._register_coding_agent_tools()
         self._register_session_tools()
+        self._register_mission_tools()
         print(f"[TOOLS] Registered {len(self.tools)} tools: "
               f"{list(self.tools.keys())}")
     
@@ -2916,6 +2926,110 @@ class ToolRegistry:
                 "session_id": {"type": "string", "description": "Session ID to delete."}
             },
             required=["session_id"])
+
+    def _register_mission_tools(self):
+        def get_next_actionable_task(mission_id: str = "") -> str:
+            m_id = (mission_id or "").strip()
+            if not m_id:
+                return "ERROR: mission_id parameter is required."
+
+            mm = getattr(self, "mission_manager", None)
+            if not mm:
+                try:
+                    from jarvis.mission_manager import MissionManager
+                    mm = MissionManager()
+                except Exception as e:
+                    return f"ERROR: Failed to initialize MissionManager: {str(e)}"
+
+            try:
+                result = mm.get_next_actionable_task(m_id)
+                return json.dumps(result.to_dict(), indent=2)
+            except Exception as e:
+                return f"ERROR: Failed to evaluate next actionable task: {str(e)}"
+
+        def list_missions(status: Optional[str] = None) -> str:
+            mm = getattr(self, "mission_manager", None)
+            if not mm:
+                try:
+                    from jarvis.mission_manager import MissionManager
+                    mm = MissionManager()
+                except Exception as e:
+                    return f"ERROR: Failed to initialize MissionManager: {str(e)}"
+
+            try:
+                m_status = None
+                if status:
+                    from jarvis.mission_manager import MissionStatus
+                    try:
+                        m_status = MissionStatus(status.strip().upper())
+                    except ValueError:
+                        pass
+                missions = mm.list_missions(status=m_status)
+                if not missions:
+                    return "No missions found."
+                return json.dumps([m.to_dict() for m in missions], indent=2)
+            except Exception as e:
+                return f"ERROR: Failed to list missions: {str(e)}"
+
+        def get_mission(mission_id: str = "") -> str:
+            m_id = (mission_id or "").strip()
+            if not m_id:
+                return "ERROR: mission_id parameter is required."
+
+            mm = getattr(self, "mission_manager", None)
+            if not mm:
+                try:
+                    from jarvis.mission_manager import MissionManager
+                    mm = MissionManager()
+                except Exception as e:
+                    return f"ERROR: Failed to initialize MissionManager: {str(e)}"
+
+            try:
+                mission = mm.get_mission(m_id)
+                if not mission:
+                    return f"Mission '{m_id}' not found."
+                return json.dumps(mission.to_dict(), indent=2)
+            except Exception as e:
+                return f"ERROR: Failed to retrieve mission: {str(e)}"
+
+        self._add(
+            "get_next_actionable_task",
+            get_next_actionable_task,
+            "Deterministically evaluates persisted SQLite mission state, verifies task dependencies and priorities, and returns the single next actionable task (or explicit no-action reason) without executing any actions.",
+            {
+                "mission_id": {
+                    "type": "string",
+                    "description": "The unique ID of the target mission (e.g. 'mission_12345678')."
+                }
+            },
+            ["mission_id"]
+        )
+
+        self._add(
+            "list_missions",
+            list_missions,
+            "Lists all persistent goals and missions tracked in the SQLite database, optionally filtered by status.",
+            {
+                "status": {
+                    "type": "string",
+                    "description": "Optional status filter (e.g., 'ACTIVE', 'PAUSED', 'COMPLETED', 'PROPOSED')."
+                }
+            },
+            required=[]
+        )
+
+        self._add(
+            "get_mission",
+            get_mission,
+            "Retrieves full details, objectives, task graph, and progress metrics for a specific persistent mission.",
+            {
+                "mission_id": {
+                    "type": "string",
+                    "description": "The unique ID of the target mission (e.g. 'mission_12345678')."
+                }
+            },
+            ["mission_id"]
+        )
 
     def _register_coding_agent_tools(self):
         def inspect_project(path: str = ".") -> str:
