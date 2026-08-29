@@ -656,8 +656,11 @@ NEVER:
         chunk_callback=None) -> str:
         """Full tool-calling pipeline with session isolation and canonical AgentRuntime loop"""
         session = self.get_session(session_id)
+        if session is None:
+            session = self.new_session(session_id=session_id) if session_id else self.get_session()
+
         user_last = ""
-        if session.messages:
+        if session and session.messages:
             for m in reversed(session.messages):
                 if m.get('role') == 'user':
                     user_last = m.get('content', '')
