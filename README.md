@@ -1,9 +1,9 @@
 <div align="center">
 
-# J.A.R.V.I.S. Mk 5.1
+# J.A.R.V.I.S. Mk 5.2.0
 ### Just A Rather Very Intelligent System
 
-*An autonomous personal AI intelligence system featuring a Mark 5 Proactive Follow-Up Engine, Persistent Mission Intelligence & task tracking, unified Tool Call Normalization, Electron + React desktop UI, Tailscale Mobile PWA integration, live Gmail integration & Email UI panel, voice TTS engine, dual SQLite & FAISS vector memory, native GitHub & Git workflows, system diagnostics, and full PC control — powered by NVIDIA Nemotron & Google Gemini.*
+*An autonomous personal AI intelligence system featuring a Mark 5.2 Persistent Mission Next Action Engine, Mark 5 Proactive Follow-Up Engine, Persistent Mission Intelligence & task tracking, unified Tool Call Normalization, Electron + React desktop UI, Tailscale Mobile PWA integration, live Gmail integration & Email UI panel, voice TTS engine, dual SQLite & FAISS vector memory, native GitHub & Git workflows, system diagnostics, and full PC control — powered by NVIDIA Nemotron & Google Gemini.*
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
 ![Electron](https://img.shields.io/badge/Electron-Desktop-47848F?style=flat-square&logo=electron)
@@ -13,7 +13,7 @@
 ![Gmail](https://img.shields.io/badge/Gmail-Google%20OAuth-EA4335?style=flat-square&logo=gmail)
 ![Memory](https://img.shields.io/badge/Memory-SQLite%20%2B%20FAISS-003B57?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Version](https://img.shields.io/badge/Release-Mk%205.1-brightgreen?style=flat-square)
+![Version](https://img.shields.io/badge/Release-Mk%205.2.0-brightgreen?style=flat-square)
 
 
 **Built by [Nived](https://github.com/nivedjkr)**
@@ -34,18 +34,22 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) direc
 
 ## Key Features
 
-### 🚀 Mark 5 Proactive Follow-Up Engine (`proactive_engine.py`)
-- **Non-Blocking Background Intelligence**: Operates independently after main response turns are delivered without blocking user interaction.
-- **Relevance & Value Gates**: Evaluates prompts against relevance rules and validates findings for novelty, actionable utility, and non-redundancy.
-- **Multi-Source Investigation**: Conducts background searches across `web_search_live`, `search_obsidian`, and project files with 15s timeout protection.
-- **Natural Proactive Messages**: Delivers separate follow-up messages starting with *"One more thing, sir..."* over WebSocket event streams.
-
-### 🎯 Mark 5 Persistent Mission Intelligence (`mission_manager.py`)
+### 🎯 Mark 5.2 Persistent Mission Next Action Engine (`mission_manager.py`)
+- **Deterministic Task Selection**: `get_next_actionable_task(mission_id)` evaluates real SQLite-persisted mission state and deterministically selects the single next actionable task without executing actions.
+- **Dependency Graph Resolution**: Resolves multi-tier prerequisite task relationships (`depends_on`), selecting dependent tasks only after all prerequisites are marked `COMPLETED`.
+- **Blocker & Inactive State Defense**: Safely ignores inactive/paused/proposed missions and excludes blocked tasks (`WAITING`, incomplete dependencies), returning structured `NextActionResult` reason codes (`MISSION_NOT_ACTIVE`, `ALL_TASKS_COMPLETED`, `WAITING_ON_DEPENDENCIES`, `ALL_TASKS_BLOCKED`).
+- **Priority & Tie-Breaker Ranking**: Deterministically ranks candidate tasks by priority weight (`CRITICAL` $\rightarrow$ `HIGH` $\rightarrow$ `MEDIUM` $\rightarrow$ `LOW` / numeric), unlock impact (count of downstream dependent tasks), creation order, and task ID string tie-breakers.
 - **Long-Term Objective Detection**: `MissionDetector` identifies ongoing goals (internships, project launches, skill mastery) while filtering out casual talk and errands.
 - **Explicit Approval Gate**: Missions are created in `PROPOSED` state and require explicit user approval (`/confirm` or `/mission approve <id>`) before activation.
 - **Controlled State Machines**: Validated status transitions for `MissionStatus` (`PROPOSED`, `ACTIVE`, `PLANNING`, `EXECUTING`, `WAITING`, `PAUSED`, `COMPLETED`, `FAILED`, `CANCELLED`) and `MissionTaskStatus` (`PENDING`, `READY`, `RUNNING`, `WAITING`, `COMPLETED`, `FAILED`, `CANCELLED`).
 - **SQLite Persistence**: Stores missions and structured tasks in SQLite database (`missions` & `mission_tasks` in `jarvis.db`), surviving application restarts.
 - **Slash Commands & REST APIs**: `/missions`, `/mission <id>`, `/mission pause|resume|cancel|approve`, and REST endpoints (`GET /missions`, `POST /missions/{id}/approve`).
+
+### 🚀 Mark 5 Proactive Follow-Up Engine (`proactive_engine.py`)
+- **Non-Blocking Background Intelligence**: Operates independently after main response turns are delivered without blocking user interaction.
+- **Relevance & Value Gates**: Evaluates prompts against relevance rules and validates findings for novelty, actionable utility, and non-redundancy.
+- **Multi-Source Investigation**: Conducts background searches across `web_search_live`, `search_obsidian`, and project files with 15s timeout protection.
+- **Natural Proactive Messages**: Delivers separate follow-up messages starting with *"One more thing, sir..."* over WebSocket event streams.
 
 ### 🛠️ Unified Tool Call Normalization Layer (`tool_normalizer.py`)
 - **Multi-Format Parsing**: Normalizes native OpenAI `tool_calls` and text-based JSON tool call formats (`tool`/`args`, `name`/`arguments`, `action`/`action_input`, JSON arrays, markdown-wrapped JSON).
