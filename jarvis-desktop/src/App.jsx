@@ -360,7 +360,8 @@ export default function App() {
             setOrbState('idle')
           }
         }
-        else if (data.type === 'session_switched' || data.type === 'session_created') {
+        else if (data.type === 'session_switched' || data.type === 'session_created' || data.type === 'session_deleted' || data.type === 'sessions_list') {
+          console.log('[SESSION_DEBUG] WebSocket session event received:', data.type, 'active_session_id:', data.session_id)
           if (data.session_id) {
             setCurrentSessionId(data.session_id)
           }
@@ -537,7 +538,7 @@ export default function App() {
         <EmailPanel isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
       </div>
 
-      <InputBar onSend={handleSendMessage} />
+      <InputBar onSend={handleSendMessage} currentSessionId={currentSessionId} />
     </div>
   )
 }

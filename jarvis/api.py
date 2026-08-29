@@ -282,15 +282,35 @@ async def websocket_endpoint(ws: WebSocket):
                 continue
 
             if msg_type == "delete_session":
-
                 target_sid = data.get("session_id", "").strip()
                 if target_sid:
-                    api_client.delete_session(target_sid)
+                    print(f"[SESSION_DEBUG] Delete requested for session_id: {target_sid} | active_session_id before: {session_id}")
+                    success = api_client.delete_session(target_sid)
                     sessions = api_client.list_sessions()
+                    print(f"[SESSION_DEBUG] Backend delete success: {success} | Remaining sessions count: {len(sessions)}")
+
+                    # Active session recovery: if deleted session was currently active
+                    if target_sid == session_id:
+                        if sessions:
+                            session_id = sessions[0]["session_id"]
+                        else:
+                            new_sess = api_client.new_session()
+                            session_id = new_sess.session_id
+                            sessions = api_client.list_sessions()
+                        print(f"[SESSION_DEBUG] Active session updated to fallback: {session_id}")
+
+                    sess = api_client.get_session(session_id)
+                    time_str = datetime.now().strftime("%H:%M")
+                    msgs = [{"role": m["role"], "content": m["content"], "timestamp": time_str} for m in sess.messages]
+
                     await ws.send_json({
-                        "type": "sessions_list",
+                        "type": "session_deleted",
+                        "status": "ok" if success else "error",
+                        "deleted_session_id": target_sid,
+                        "session_id": session_id,
+                        "session_title": sess.title,
                         "sessions": sessions,
-                        "current_session_id": session_id
+                        "messages": msgs
                     })
                 continue
             

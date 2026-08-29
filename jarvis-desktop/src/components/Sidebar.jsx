@@ -48,21 +48,20 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
       const interval = setInterval(fetchLiveData, 15000)
       return () => clearInterval(interval)
     }
-  }, [isOpen])
+  }, [isOpen, currentSessionId])
 
   const handleDeleteSession = (e, sid) => {
     e.stopPropagation()
+    if (e.preventDefault) e.preventDefault()
+    
     if (window.confirm('Delete this conversation permanently?')) {
+      console.log('[SESSION_DEBUG] User confirmed deletion for session_id:', sid, 'currentSessionId:', currentSessionId)
       if (onDeleteSession) {
         onDeleteSession(sid)
       } else if (window.jarvis?.deleteSession) {
         window.jarvis.deleteSession(sid)
       }
       setSessions(prev => prev.filter(s => s.session_id !== sid))
-      if (sid === currentSessionId) {
-        if (onNewSession) onNewSession()
-        else if (window.jarvis?.newSession) window.jarvis.newSession()
-      }
     }
   }
 

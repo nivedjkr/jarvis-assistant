@@ -1,13 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react'
 import './InputBar.css'
 
-export default function InputBar({ onSend }) {
+export default function InputBar({ onSend, currentSessionId }) {
   const [text, setText] = useState('')
   const inputRef = useRef(null)
 
+  const focusInput = () => {
+    if (inputRef.current) {
+      inputRef.current.focus()
+    }
+  }
+
   useEffect(() => {
     // Focus input field immediately when mounted
-    inputRef.current?.focus()
+    focusInput()
 
     // Global listener to re-focus input box whenever user starts typing outside any form control
     const handleGlobalKeyDown = (e) => {
@@ -25,8 +31,19 @@ export default function InputBar({ onSend }) {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown)
   }, [])
 
+  // Auto-focus input whenever session switches or active session changes
+  useEffect(() => {
+    focusInput()
+    const timer = setTimeout(focusInput, 50)
+    const raf = requestAnimationFrame(focusInput)
+    return () => {
+      clearTimeout(timer)
+      cancelAnimationFrame(raf)
+    }
+  }, [currentSessionId])
+
   const handleContainerClick = () => {
-    inputRef.current?.focus()
+    focusInput()
   }
 
   const handleKeyDown = (e) => {

@@ -534,10 +534,13 @@
       }
     } else if (data.type === 'sessions_list') {
       renderSessionsList(data.sessions || [], data.current_session_id);
-    } else if (data.type === 'session_switched' || data.type === 'session_created') {
+    } else if (data.type === 'session_switched' || data.type === 'session_created' || data.type === 'session_deleted') {
       if (data.session_id) {
         currentSessionId = data.session_id;
         localStorage.setItem('jarvis_session_id', currentSessionId);
+      }
+      if (Array.isArray(data.sessions)) {
+        renderSessionsList(data.sessions, currentSessionId);
       }
       messagesList.innerHTML = '';
       if (Array.isArray(data.messages) && data.messages.length > 0) {
@@ -545,9 +548,12 @@
           appendMessage(m.role === 'assistant' ? 'jarvis' : m.role, m.content);
         });
       } else {
-        appendMessage('jarvis', 'New conversation started, sir. How can I assist you?');
+        appendMessage('jarvis', 'JARVIS online and standing by, sir.');
       }
-      if (sessionsDrawer) sessionsDrawer.classList.add('hidden');
+      if (userInput) {
+        userInput.focus();
+      }
+      if (sessionsDrawer && data.type !== 'session_deleted') sessionsDrawer.classList.add('hidden');
     } else if (data.type === 'chunk') {
       clearThinkingTimeout();
       setOrbState('thinking');

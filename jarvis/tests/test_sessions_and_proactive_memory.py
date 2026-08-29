@@ -145,3 +145,49 @@ def test_delete_session(temp_db):
     assert mem.get_session(sid) is None
     assert len(mem.get_session_messages(sid)) == 0
 
+
+def test_delete_inactive_session_and_persistence_after_restart(temp_db):
+    mem1 = Memory(db_path=temp_db)
+    s1 = "sess_keep"
+    s2 = "sess_delete"
+    mem1.save_session(s1, title="Keep Me")
+    mem1.save_session(s2, title="Delete Me")
+    mem1.add_session_message(s1, "user", "Keep message")
+    mem1.add_session_message(s2, "user", "Delete message")
+
+    assert len(mem1.list_sessions()) == 2
+    assert mem1.delete_session(s2) is True
+    assert len(mem1.list_sessions()) == 1
+
+    # Simulate backend restart with a new Memory instance
+    mem2 = Memory(db_path=temp_db)
+    remaining = mem2.list_sessions()
+    assert len(remaining) == 1
+    assert remaining[0]["session_id"] == s1
+    assert mem2.get_session(s2) is None
+    assert len(mem2.get_session_messages(s2)) == 0
+
+
+def test_delete_active_session_recovery_and_persistence(temp_db):
+    from jarvis.api_client import JarvisAPIClient
+    api_client = JarvisAPIClient()
+    
+    # Create two sessions
+    s1 = api_client.new_session(title="Active Session")
+    s2 = api_client.new_session(title="Backup Session")
+    
+    # Delete active session s1
+    deleted_sid = s1.session_id
+    success = api_client.delete_session(deleted_sid)
+    assert success is True
+    
+    # List remaining sessions
+    sessions = api_client.list_sessions()
+    remaining_ids = [s["session_id"] for s in sessions]
+    assert deleted_sid not in remaining_ids
+    
+    # Active recovery check
+    fallback_sid = sessions[0]["session_id"] if sessions else api_client.new_session().session_id
+    assert fallback_sid != deleted_sid
+
+
