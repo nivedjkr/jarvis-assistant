@@ -164,11 +164,24 @@ async def websocket_endpoint(ws: WebSocket):
         await manager.connect(ws)
 
     req_session_id = ws.query_params.get("session_id")
+    existing_sessions = api_client.list_sessions()
+    existing_ids = {s["session_id"] for s in existing_sessions}
+
     if req_session_id and req_session_id.strip():
-        session_id = req_session_id.strip()
+        target_sid = req_session_id.strip()
+        # If requested session exists in DB or DB has no sessions yet, accept it
+        if target_sid in existing_ids or not existing_sessions:
+            session_id = target_sid
+        else:
+            # Requested session was deleted from DB! Fall back to most recent valid session
+            session_id = existing_sessions[0]["session_id"]
+            print(f"[SESSION_DEBUG] Requested session '{target_sid}' was deleted from DB. Falling back to active session '{session_id}'")
     else:
-        session_id = f"electron_{uuid.uuid4().hex[:8]}"
-    
+        if existing_sessions:
+            session_id = existing_sessions[0]["session_id"]
+        else:
+            session_id = f"electron_{uuid.uuid4().hex[:8]}"
+
     active_sess = api_client.get_session(session_id)
     
     try:

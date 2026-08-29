@@ -297,6 +297,17 @@ async function startJarvisBackend() {
   }, 5000)
 }
 
+function updateSavedSessionId(newSid) {
+  if (!newSid || typeof newSid !== 'string') return
+  try {
+    const sessionFile = path.join(app.getPath('userData'), 'session_config.json')
+    fs.writeFileSync(sessionFile, JSON.stringify({ session_id: newSid }))
+    console.log('[SESSION] Updated session_config.json with active session:', newSid)
+  } catch (e) {
+    console.error('[SESSION] Error writing session_config.json:', e)
+  }
+}
+
 function getOrCreateSessionId() {
   try {
     const sessionFile = path.join(app.getPath('userData'), 'session_config.json')
@@ -336,6 +347,9 @@ function connectWebSocket() {
     ws.on('message', (data) => {
       try {
         const parsed = JSON.parse(data)
+        if (parsed.session_id) {
+          updateSavedSessionId(parsed.session_id)
+        }
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('jarvis-response', parsed)
         }
@@ -413,6 +427,7 @@ ipcMain.handle('send-slash-command', (event, command) => {
 ipcMain.handle('get-sessions', () => fetchJson('http://127.0.0.1:8765/sessions'))
 
 ipcMain.handle('switch-session', (event, sid) => {
+  if (sid) updateSavedSessionId(sid)
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'switch_session', session_id: sid }))
   }

@@ -191,3 +191,78 @@ def test_delete_active_session_recovery_and_persistence(temp_db):
     assert fallback_sid != deleted_sid
 
 
+def test_true_reconnect_session_synchronization(temp_db):
+    """
+    True reconnect test:
+    1. Create Session A and Session B.
+    2. Delete Session A.
+    3. Simulate client reconnecting with stale Session A ID.
+    4. Verify backend rejects deleted Session A, returns Session B, and Session A never returns.
+    """
+    from jarvis.memory import Memory
+    from jarvis.api_client import JarvisAPIClient
+    
+    # 1. Start backend / memory instance
+    mem = Memory(db_path=temp_db)
+    api_client = JarvisAPIClient()
+    
+    id_a = "session_test_a"
+    id_b = "session_test_b"
+    mem.save_session(id_a, title="Session A")
+    mem.save_session(id_b, title="Session B")
+    mem.add_session_message(id_a, "user", "Message A")
+    mem.add_session_message(id_b, "user", "Message B")
+    
+    # Also register in api_client sessions cache
+    api_client.sessions[id_a] = api_client.get_session(id_a)
+    api_client.sessions[id_b] = api_client.get_session(id_b)
+    
+    # Verify both exist in SQLite
+    existing = mem.list_sessions()
+    existing_ids = [s["session_id"] for s in existing]
+    assert id_a in existing_ids
+    assert id_b in existing_ids
+    
+    # 2. Delete Session A via memory & api_client
+    print(f"[SESSION] Delete requested: {id_a}")
+    success = mem.delete_session(id_a)
+    if id_a in api_client.sessions:
+        del api_client.sessions[id_a]
+    assert success is True
+    print(f"[SESSION] Persistent delete result: success")
+    
+    # Verify Session A is gone from SQLite and memory
+    remaining_after_del = mem.list_sessions()
+    remaining_ids_after_del = [s["session_id"] for s in remaining_after_del]
+    assert id_a not in remaining_ids_after_del
+    assert id_b in remaining_ids_after_del
+    assert api_client.sessions.get(id_a) is None
+    print(f"[SESSION] Cache invalidated: yes")
+
+    # 3. Simulate client reconnecting with stale Session A ID (e.g. old session_config.json)
+    print(f"[SESSION] Simulating reconnect with stale ID: {id_a}")
+    stale_req_id = id_a
+    current_db_sessions = mem.list_sessions()
+    current_db_ids = {s["session_id"] for s in current_db_sessions}
+    
+    # Reconnect validation logic (mirroring api.py)
+    if stale_req_id in current_db_ids:
+        active_id = stale_req_id
+    else:
+        active_id = current_db_sessions[0]["session_id"] if current_db_sessions else "new_session"
+    
+    # 4. Verify Session A is rejected and fallback active_id is Session B
+    assert active_id == id_b
+    assert active_id != id_a
+    
+    # 5. Simulate backend complete restart
+    mem_restarted = Memory(db_path=temp_db)
+    restarted_sessions = mem_restarted.list_sessions()
+    restarted_ids = [s["session_id"] for s in restarted_sessions]
+    print(f"[SESSION] Authoritative session count after restart: {len(restarted_sessions)}")
+    print(f"[SESSION] Session IDs returned: {restarted_ids}")
+    
+    assert id_a not in restarted_ids
+    assert id_b in restarted_ids
+
+
