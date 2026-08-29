@@ -13,7 +13,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import Set
+from typing import Set, Optional, List, Dict, Any
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
