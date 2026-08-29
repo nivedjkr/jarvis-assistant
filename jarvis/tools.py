@@ -1237,8 +1237,13 @@ class ToolRegistry:
         
         def run_command(command: str) -> str:
             try:
-                import shlex
-                cmd_args = shlex.split(command, posix=False) if isinstance(command, str) else [command]
+                if isinstance(command, str):
+                    try:
+                        cmd_args = shlex.split(command, posix=False)
+                    except Exception:
+                        cmd_args = [command]
+                else:
+                    cmd_args = [command]
                 result = subprocess.run(
                     cmd_args, shell=False,
                     capture_output=True, text=True,

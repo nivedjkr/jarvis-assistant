@@ -366,6 +366,15 @@ HEADLESS BROWSING INSTRUCTIONS:
 - Use browse_extract_links to harvest page hyperlinks and navigation structure.
 - Call browse_close to explicitly release browser resources after completing multi-step web interaction.
 
+PERSISTENT MISSION INSTRUCTIONS:
+- To list persistent missions: call list_missions tool.
+- To view full details and tasks of a mission: call get_mission tool with mission_id.
+- To deterministically evaluate the next actionable task for a mission: call get_next_actionable_task tool with mission_id.
+- To delete a persistent mission: call delete_mission tool with mission_id (NEVER use run_command or shell scripts to manage missions).
+- To cancel a persistent mission: call cancel_mission tool with mission_id.
+- To approve a proposed mission: call approve_mission tool with mission_id.
+- To pause or resume a mission: call pause_mission or resume_mission tool with mission_id.
+
 PROACTIVE OBSIDIAN MEMORY FILING INSTRUCTIONS:
 - Evaluate whether the user's message contains a durable fact worth remembering — a stated preference, a decision, a recurring topic, or a fact about a person or project — as distinct from small talk or a throwaway question (e.g. "what's 2+2" or "hello").
 - If a durable fact is present:
