@@ -358,37 +358,53 @@ def test_nived_root_node_and_ktu_academic_branch():
     3. Verify search_knowledge_graph prioritizes NIVED for personal context and KTU for academic context.
     """
     from jarvis.tools import _resolve_obsidian_vault_path, _grep_obsidian_vault
+    import jarvis.tools as tools_mod
     import os
+    import tempfile
 
-    vault_path = _resolve_obsidian_vault_path()
-    assert vault_path is not None and os.path.exists(vault_path)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        nived_p = os.path.join(tmp_dir, "NIVED.md")
+        with open(nived_p, "w", encoding="utf-8") as f:
+            f.write("# NIVED\nLinks: [[KTU]], [[Projects]], [[Studies]], [[JARVIS]]\n")
 
-    nived_path = os.path.join(vault_path, "NIVED.md")
-    assert os.path.exists(nived_path)
-    with open(nived_path, "r", encoding="utf-8") as f:
-        nived_content = f.read()
+        ktu_p = os.path.join(tmp_dir, "KTU.md")
+        with open(ktu_p, "w", encoding="utf-8") as f:
+            f.write("# KTU\nKTU semester 5 exam subjects\nCourses: [[ai-s5]], [[crypto-s5]], [[mc-s5]], [[ml-s5]], [[nss-s5]]\n")
 
-    assert "[[KTU]]" in nived_content
-    assert "[[Projects]]" in nived_content
-    assert "[[Studies]]" in nived_content
-    assert "[[JARVIS]]" in nived_content
+        orig_load_config = tools_mod._load_config
+        tools_mod._load_config = lambda: {"obsidian": {"enabled": True, "vault_path": tmp_dir}}
+        try:
+            vault_path = _resolve_obsidian_vault_path()
+            assert vault_path is not None and os.path.exists(vault_path)
 
-    ktu_path = os.path.join(vault_path, "KTU.md")
-    assert os.path.exists(ktu_path)
-    with open(ktu_path, "r", encoding="utf-8") as f:
-        ktu_content = f.read()
+            nived_path = os.path.join(vault_path, "NIVED.md")
+            assert os.path.exists(nived_path)
+            with open(nived_path, "r", encoding="utf-8") as f:
+                nived_content = f.read()
 
-    assert "[[ai-s5" in ktu_content
-    assert "[[crypto-s5" in ktu_content
-    assert "[[mc-s5" in ktu_content
-    assert "[[ml-s5" in ktu_content
-    assert "[[nss-s5" in ktu_content
+            assert "[[KTU]]" in nived_content
+            assert "[[Projects]]" in nived_content
+            assert "[[Studies]]" in nived_content
+            assert "[[JARVIS]]" in nived_content
 
-    # Academic search boost test
-    acad_results = _grep_obsidian_vault(vault_path, "KTU semester 5 exam subjects", limit=3)
-    assert len(acad_results) > 0
-    top_title = acad_results[0]["title"]
-    assert top_title in ("KTU", "Studies", "ai-s5", "crypto-s5", "mc-s5", "ml-s5", "nss-s5")
+            ktu_path = os.path.join(vault_path, "KTU.md")
+            assert os.path.exists(ktu_path)
+            with open(ktu_path, "r", encoding="utf-8") as f:
+                ktu_content = f.read()
+
+            assert "[[ai-s5" in ktu_content
+            assert "[[crypto-s5" in ktu_content
+            assert "[[mc-s5" in ktu_content
+            assert "[[ml-s5" in ktu_content
+            assert "[[nss-s5" in ktu_content
+
+            # Academic search boost test
+            acad_results = _grep_obsidian_vault(vault_path, "KTU semester 5 exam subjects", limit=3)
+            assert len(acad_results) > 0
+            top_title = acad_results[0]["title"]
+            assert top_title in ("KTU", "Studies", "ai-s5", "crypto-s5", "mc-s5", "ml-s5", "nss-s5")
+        finally:
+            tools_mod._load_config = orig_load_config
 
 
 def test_search_before_create_duplicate_prevention():
@@ -398,19 +414,32 @@ def test_search_before_create_duplicate_prevention():
     2. Verify it detects existing NIVED.md note and appends/updates it instead of creating NIVED-1.md.
     """
     from jarvis.tools import ToolRegistry, _resolve_obsidian_vault_path
+    import jarvis.tools as tools_mod
     import os
+    import tempfile
 
-    reg = ToolRegistry()
-    create_fn = reg.tools["create_obsidian_note"]
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        nived_p = os.path.join(tmp_dir, "NIVED.md")
+        with open(nived_p, "w", encoding="utf-8") as f:
+            f.write("# NIVED\nExisting content\n")
 
-    vault_path = _resolve_obsidian_vault_path()
-    nived_path = os.path.join(vault_path, "NIVED.md")
+        orig_load_config = tools_mod._load_config
+        tools_mod._load_config = lambda: {"obsidian": {"enabled": True, "vault_path": tmp_dir}}
+        try:
+            reg = ToolRegistry()
+            create_fn = reg.tools["create_obsidian_note"]
 
-    res = create_fn(title="NIVED", content="New test context update")
-    assert "appended" in res.lower() or "updated" in res.lower() or "duplicate" in res.lower()
+            vault_path = _resolve_obsidian_vault_path()
+            nived_path = os.path.join(vault_path, "NIVED.md")
+            assert os.path.exists(nived_path)
 
-    # Verify no NIVED-1.md or duplicate file was created
-    assert not os.path.exists(os.path.join(vault_path, "NIVED-1.md"))
-    assert not os.path.exists(os.path.join(vault_path, "NIVED 1.md"))
+            res = create_fn(title="NIVED", content="New test context update")
+            assert "appended" in res.lower() or "updated" in res.lower() or "duplicate" in res.lower()
+
+            # Verify no NIVED-1.md or duplicate file was created
+            assert not os.path.exists(os.path.join(vault_path, "NIVED-1.md"))
+            assert not os.path.exists(os.path.join(vault_path, "NIVED 1.md"))
+        finally:
+            tools_mod._load_config = orig_load_config
 
 
