@@ -13,20 +13,31 @@ export default function EmailPanel({ isConnected = true, lastStateUpdate = null 
     if (isConnected) {
       if (activeTab === 'inbox' && window.jarvis?.checkEmail) {
         window.jarvis.checkEmail()
-      } else if (activeTab === 'sent' && window.jarvis?.listSentEmails) {
-        window.jarvis.listSentEmails()
+      } else if (activeTab === 'sent') {
+        if (window.jarvis?.getSentEmails) {
+          window.jarvis.getSentEmails().then(res => {
+            if (res && Array.isArray(res.sent_emails)) {
+              setSentEmails(res.sent_emails)
+            }
+          }).catch(err => console.log('[EMAIL] Error fetching sent emails:', err))
+        } else if (window.jarvis?.listSentEmails) {
+          window.jarvis.listSentEmails()
+        }
       }
     }
   }, [isConnected, activeTab])
 
-  // Listen for real-time WebSocket state_update events for domain "email"
+  // Listen for real-time WebSocket state_update events for domain "email" / "sent_email"
   useEffect(() => {
     if (!lastStateUpdate) return
     const { domain, payload } = lastStateUpdate
-    if (domain === 'email') {
+    if (domain === 'email' || domain === 'sent_email') {
       if (payload && Array.isArray(payload.emails)) {
         setEmails(payload.emails)
         setUnreadCount(payload.unread_count ?? payload.emails.length)
+      }
+      if (payload && Array.isArray(payload.sent_emails)) {
+        setSentEmails(payload.sent_emails)
       }
       setFlashing(true)
       const timer = setTimeout(() => setFlashing(false), 1600)
@@ -37,8 +48,16 @@ export default function EmailPanel({ isConnected = true, lastStateUpdate = null 
   const handleManualRefresh = () => {
     if (activeTab === 'inbox' && window.jarvis?.checkEmail) {
       window.jarvis.checkEmail()
-    } else if (activeTab === 'sent' && window.jarvis?.listSentEmails) {
-      window.jarvis.listSentEmails()
+    } else if (activeTab === 'sent') {
+      if (window.jarvis?.getSentEmails) {
+        window.jarvis.getSentEmails().then(res => {
+          if (res && Array.isArray(res.sent_emails)) {
+            setSentEmails(res.sent_emails)
+          }
+        }).catch(err => console.log('[EMAIL] Error fetching sent emails:', err))
+      } else if (window.jarvis?.listSentEmails) {
+        window.jarvis.listSentEmails()
+      }
     }
   }
 

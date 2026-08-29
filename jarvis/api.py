@@ -11,6 +11,19 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 import asyncio
 import json
+import time
+START_TIME = time.time()
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+    _init_cpu = psutil.cpu_percent(interval=None)
+    _init_ram = psutil.virtual_memory().percent
+    print(f"[VITALS] psutil initialized successfully. Initial CPU: {_init_cpu}%, RAM: {_init_ram}%")
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("[WARNING] psutil not installed — system vitals will show as unavailable")
+
 import sys
 from pathlib import Path
 from typing import Set, Optional, List, Dict, Any
@@ -1058,9 +1071,11 @@ async def get_knowledge_root_endpoint():
 
 @app.get("/vitals")
 async def vitals_endpoint():
+    if not PSUTIL_AVAILABLE:
+        return {"cpu_usage": 0, "ram_usage": 0, "cpu_pct": 0, "ram_pct": 0, "uptime_seconds": 0, "commands_today": 0, "tool_calls_today": 0}
     try:
         import psutil
-        cpu = psutil.cpu_percent(interval=0.1)
+        cpu = psutil.cpu_percent(interval=None)
         ram = psutil.virtual_memory()
         uptime_sec = int(time.time() - START_TIME)
         
@@ -1086,8 +1101,25 @@ async def vitals_endpoint():
             "commands_today": commands_count,
             "tool_calls_today": 0
         }
-    except Exception:
+    except Exception as ve:
+        print(f"[VITALS ERROR] Error fetching system vitals: {ve}")
         return {"cpu_usage": 0, "ram_usage": 0, "cpu_pct": 0, "ram_pct": 0, "uptime_seconds": 0, "commands_today": 0, "tool_calls_today": 0}
+
+@app.get("/email/sent")
+@app.get("/api/email/sent")
+async def get_sent_emails_endpoint(limit: int = 15):
+    try:
+        email_svc = getattr(tool_registry, 'email_service', None)
+        if not email_svc:
+            from jarvis.email_service import EmailService
+            from jarvis.google_auth import GoogleAuthManager
+            auth_mgr = GoogleAuthManager()
+            email_svc = EmailService(auth_manager=auth_mgr)
+        sent_list = await asyncio.to_thread(email_svc.fetch_sent_messages, limit)
+        return {"status": "ok", "sent_emails": sent_list}
+    except Exception as e:
+        print(f"[EMAIL API ERROR] Error fetching sent emails: {e}")
+        return {"status": "error", "message": str(e), "sent_emails": []}
 
 @app.get("/sessions")
 @app.get("/api/sessions")

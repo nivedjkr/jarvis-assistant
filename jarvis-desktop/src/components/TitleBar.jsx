@@ -3,6 +3,7 @@ import './TitleBar.css'
 
 export default function TitleBar({ 
   isConnected = true, 
+  currentSessionId = null,
   onToggleSessions, 
   onToggleCalendar, 
   isCalendarOpen = false,
@@ -92,7 +93,9 @@ export default function TitleBar({
       </div>
 
       <div className="title-right">
-        <span className="session-id">SESSION: #JVS-887B</span>
+        <span className="session-id">
+          {currentSessionId ? `SESSION: #${currentSessionId.length > 8 ? currentSessionId.slice(-8).toUpperCase() : currentSessionId.toUpperCase()}` : 'NO SESSION'}
+        </span>
         <span className="live-clock">{timeStr || '00:00:00'}</span>
         <div className="title-controls">
           <button className="control-btn help" onClick={handleHelp} title="Show System Help">?</button>

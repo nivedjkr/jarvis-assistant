@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   deleteSession: (sessionId) => ipcRenderer.invoke('delete-session', sessionId),
   checkEmail: () => ipcRenderer.invoke('check-email'),
   listSentEmails: () => ipcRenderer.invoke('send-slash-command', '/email sent'),
+  getSentEmails: () => ipcRenderer.invoke('get-sent-emails'),
   deleteSentEmail: (index = 1) => ipcRenderer.invoke('send-slash-command', `/email delete ${index}`),
 
   getCalendarEvents: () => ipcRenderer.invoke('get-calendar-events'),

@@ -559,9 +559,12 @@ ipcMain.handle('complete-directive', (event, did) => {
 ipcMain.handle('delete-directive', (event, did) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'delete_directive', directive_id: did }))
+    return { status: 'sent' }
   }
+  return { status: 'offline', message: 'Backend WebSocket connection is not open' }
 })
 
+ipcMain.handle('get-sent-emails', () => fetchJson('http://127.0.0.1:8765/email/sent'))
 ipcMain.handle('get-watchlist', () => fetchJson('http://127.0.0.1:8765/watchlist'))
 ipcMain.handle('get-vitals', () => fetchJson('http://127.0.0.1:8765/vitals'))
 ipcMain.handle('check-email', () => {
