@@ -58,18 +58,16 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, onSwitchSes
     console.log('[SESSION DELETE] Target session ID:', sid)
     console.log('[SESSION DELETE] Active session ID:', currentSessionId)
     
-    if (window.confirm('Delete this conversation permanently?')) {
-      const payload = { type: 'delete_session', session_id: sid }
-      console.log('[SESSION DELETE] Request being sent')
-      console.log('[SESSION DELETE] Request payload:', payload)
-      
-      if (onDeleteSession) {
-        onDeleteSession(sid)
-      } else if (window.jarvis?.deleteSession) {
-        window.jarvis.deleteSession(sid)
-      }
-      setSessions(prev => prev.filter(s => s.session_id !== sid))
+    const payload = { type: 'delete_session', session_id: sid }
+    console.log('[SESSION DELETE] Request being sent')
+    console.log('[SESSION DELETE] Request payload:', payload)
+    
+    if (onDeleteSession) {
+      onDeleteSession(sid)
+    } else if (window.jarvis?.deleteSession) {
+      window.jarvis.deleteSession(sid)
     }
+    setSessions(prev => prev.filter(s => s.session_id !== sid))
   }
 
   const formatTimestamp = (ts) => {
