@@ -55,20 +55,12 @@ class JarvisAssistant:
         
         # Run startup health check
         console.print("[dim cyan]Running startup health check...[/]")
-        from jarvis.health import HealthChecker
-        checker = HealthChecker()
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                results = loop.run_until_complete(checker.run_all())
-            else:
-                results = asyncio.run(checker.run_all())
-        except Exception:
-            results = asyncio.run(checker.run_all())
-        console.print(checker.render_results())
-        if checker.critical_failures:
-            console.print(f"[bold red][WARNING] Critical failures: {checker.critical_failures}[/bold red]")
-            console.print("[yellow]JARVIS may not function correctly.[/yellow]")
+        from jarvis.diagnostics import run_diagnostics_sync
+        report = run_diagnostics_sync(check_nvidia=True)
+        if report.overall_status == "ERROR":
+            console.print("[yellow]Startup warnings detected. Run /diagnose for details.[/yellow]\n")
+        else:
+            console.print("[green]All systems operational.[/green]\n")
         
         # Initialize core systems
         console.print("[dim cyan]Initializing core engine...[/]")

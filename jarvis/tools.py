@@ -397,7 +397,6 @@ class ToolRegistry:
         self._register_browser_tools()
         self._register_system_tools()
         self._register_clipboard_tools()
-        self._register_github_tools()
         self._register_github_full_tools()
         self._register_system_file_tools()
         self._register_semantic_memory_tools()
@@ -1330,129 +1329,6 @@ class ToolRegistry:
             "Get current clipboard contents.",
             {}, required=[])
     
-    def _register_github_tools(self):
-        
-        def gh_list_repos(limit: int = 10) -> str:
-            result = subprocess.run(
-                ['gh', 'repo', 'list',
-                 '--limit', str(limit),
-                 '--json', 'name,description,isPrivate,url'],
-                capture_output=True, text=True, timeout=15
-            )
-            if result.returncode != 0:
-                return f"FAILED: {result.stderr}"
-            try:
-                repos = json.loads(result.stdout)
-                lines = [
-                    f"{'[private]' if r['isPrivate'] else '[public]'}"
-                    f" {r['name']}"
-                    for r in repos
-                ]
-                return "Your repos:\n" + "\n".join(lines)
-            except Exception:
-                return result.stdout
-        
-        def gh_list_issues(
-            repo: str = "nivedjkr/jarvis-assistant",
-            state: str = "open") -> str:
-            result = subprocess.run(
-                ['gh', 'issue', 'list',
-                 '--repo', repo,
-                 '--state', state,
-                 '--limit', '10',
-                 '--json', 'number,title,state'],
-                capture_output=True, text=True, timeout=15
-            )
-            if result.returncode != 0:
-                return f"FAILED: {result.stderr}"
-            try:
-                issues = json.loads(result.stdout)
-                if not issues:
-                    return f"No {state} issues in {repo}"
-                lines = [f"#{i['number']} {i['title']}"
-                         for i in issues]
-                return "\n".join(lines)
-            except Exception:
-                return result.stdout
-
-        def gh_ci_status(
-            repo: str = "nivedjkr/jarvis-assistant"
-        ) -> str:
-            result = subprocess.run(
-                ['gh', 'run', 'list',
-                 '--repo', repo,
-                 '--limit', '3',
-                 '--json', 'name,status,conclusion,url'],
-                capture_output=True, text=True, timeout=15
-            )
-            if result.returncode != 0:
-                return f"FAILED: {result.stderr}"
-            try:
-                runs = json.loads(result.stdout)
-                if not runs:
-                    return "No CI runs found."
-                r = runs[0]
-                c = r.get('conclusion', 'in_progress')
-                icon = '✓' if c == 'success' else '✗'
-                return (f"Latest CI: {icon} "
-                        f"{c.upper()} — {r['name']}")
-            except Exception:
-                return result.stdout
-
-        def gh_create_issue(
-            title: str, body: str = "",
-            repo: str = "nivedjkr/jarvis-assistant"
-        ) -> str:
-            cmd = ['gh', 'issue', 'create',
-                   '--repo', repo,
-                   '--title', title]
-            if body:
-                cmd += ['--body', body]
-            result = subprocess.run(
-                cmd, capture_output=True,
-                text=True, timeout=15
-            )
-            if result.returncode != 0:
-                return f"FAILED: {result.stderr}"
-            return f"Issue created: {result.stdout.strip()}"
-        
-        self._add("gh_list_repos", gh_list_repos,
-            "List your GitHub repositories.",
-            {"limit": {"type": "integer",
-                       "description": "Max repos to show",
-                       "default": 10}},
-            required=[])
-        
-        self._add("gh_list_issues", gh_list_issues,
-            "List GitHub issues for a repo.",
-            {"repo": {"type": "string",
-                      "description": "owner/repo",
-                      "default": "nivedjkr/jarvis-assistant"},
-             "state": {"type": "string",
-                       "description": "open or closed",
-                       "default": "open"}},
-            required=[])
-        
-        self._add("gh_ci_status", gh_ci_status,
-            "Check GitHub CI/Actions status.",
-            {"repo": {"type": "string",
-                      "description": "owner/repo",
-                      "default": "nivedjkr/jarvis-assistant"}},
-            required=[])
-        
-        self._add("gh_create_issue", gh_create_issue,
-            "Create a GitHub issue.",
-            {"title": {"type": "string",
-                       "description": "Issue title"},
-             "body": {"type": "string",
-                      "description": "Issue body",
-                      "default": ""},
-             "repo": {"type": "string",
-                      "description": "owner/repo",
-                      "default": 
-                      "nivedjkr/jarvis-assistant"}},
-            required=["title"])
-
     def _register_github_full_tools(self):
         import subprocess
         import json

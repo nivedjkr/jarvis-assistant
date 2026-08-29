@@ -788,11 +788,7 @@ class ProactiveMonitor:
         self.check_interval = check_interval
         self.config = config or {}
         self.api_client = api_client
-        if project_manager:
-            self.project_manager = project_manager
-        else:
-            from jarvis.projects import ProjectManager
-            self.project_manager = ProjectManager()
+        self.project_manager = project_manager
 
         self.proactive_config = self.config.get("proactive", {})
         self.proactive_enabled = self.proactive_config.get("enabled", True)
@@ -833,13 +829,6 @@ class ProactiveMonitor:
         # Rolling 10-minute price history: {ticker: [(timestamp, price)]}
         self._price_history: Dict[str, List[Tuple[float, float]]] = {}
         self._alerted_pct_windows: set = set()
-
-    @property
-    def system_monitor(self):
-        if self._system_monitor is None:
-            from jarvis.system_monitor import SystemMonitor
-            self._system_monitor = SystemMonitor()
-        return self._system_monitor
 
     @property
     def weather_manager(self):
@@ -1051,19 +1040,7 @@ class ProactiveMonitor:
         if now_ts - self._last_sys_check < 30.0:
             return
         self._last_sys_check = now_ts
-
-        try:
-            alerts = self.system_monitor.evaluate_resource_anomalies()
-            if self._boot_sys_alert_suppressed:
-                # Suppress system resource alert popups/speech during the initial boot check
-                self._boot_sys_alert_suppressed = False
-                return
-
-            for alert in alerts:
-                console.print(f"\n[bold red]💻 SYSTEM MONITOR ALERT:[/bold red] [bold white]{alert['message']}[/bold white]\n")
-                self.announcement_queue.append(alert["message"])
-        except Exception as e:
-            console.print(f"[dim yellow]System monitor evaluation warning: {e}[/dim yellow]")
+        self._boot_sys_alert_suppressed = False
 
     def _check_weather(self):
         """Check weather conditions every 30 minutes (1800s)"""

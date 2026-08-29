@@ -4,7 +4,6 @@ import './Sidebar.css'
 export default function Sidebar({ isOpen, onClose, currentSessionId, sessions: sessionsProp = [], deletingSessionIds = new Set(), sessionToast = null, onSwitchSession, onNewSession, onDeleteSession }) {
   const [projects, setProjects] = useState([])
   const [reminders, setReminders] = useState([])
-  const [watchlist, setWatchlist] = useState([])
   const [fallbackSessions, setFallbackSessions] = useState([])
 
   const sessions = sessionsProp && sessionsProp.length > 0 ? sessionsProp : fallbackSessions
@@ -26,15 +25,7 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, sessions: s
         console.log('Error fetching reminders:', e)
       }
     }
-    if (window.jarvis?.getWatchlist) {
-      try {
-        const w = await window.jarvis.getWatchlist()
-        setWatchlist(Array.isArray(w) ? w : [])
-      } catch (e) {
-        console.log('Error fetching watchlist:', e)
-      }
-    }
-    // One-time fallback for sessions if WS payload has not arrived yet
+  }  // One-time fallback for sessions if WS payload has not arrived yet
     if ((!sessionsProp || sessionsProp.length === 0) && window.jarvis?.getSessions) {
       try {
         const s = await window.jarvis.getSessions()
@@ -212,28 +203,6 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, sessions: s
                 <div className="sidebar-item-name">{r.summary || r.title || r.text || 'Calendar Event'}</div>
                 <div className="sidebar-item-sub">
                   📅 {r.start ? new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : (r.due_date || 'Upcoming')}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* WATCHLIST SECTION */}
-      <div className="sidebar-section">
-        <div className="sidebar-section-title">
-          <span>Market Watchlist</span>
-          <span>{watchlist.length}</span>
-        </div>
-        <div className="sidebar-list">
-          {watchlist.length === 0 ? (
-            <div className="sidebar-empty">No tickers watched</div>
-          ) : (
-            watchlist.map((w, i) => (
-              <div key={i} className="sidebar-item">
-                <div className="sidebar-item-name">{w.ticker || w.symbol}</div>
-                <div className="sidebar-item-sub">
-                  {w.condition ? `${w.condition.toUpperCase()} $${w.target_price}` : 'Tracked'}
                 </div>
               </div>
             ))

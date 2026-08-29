@@ -82,7 +82,7 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) direc
 - **File & Directory Management**: Create, read, write, list, copy, move, rename, and delete local files and folders.
 - **Application Controller (`apps.py`)**: Launch, monitor, and terminate local desktop applications by name.
 - **Web & URL Navigator**: Open web pages dynamically, search the web via DuckDuckGo, and scrape structured page text.
-- **System Resource Monitoring (`system_monitor.py`)**: Monitor real-time CPU, RAM, GPU, disk storage, and network interfaces.
+- **System Resource Monitoring**: Monitor real-time CPU, RAM, GPU, disk storage, and network interfaces via non-blocking `/vitals`.
 - **Terminal Shell Integration**: Execute shell commands with safety gate prompts (`tools.confirm_dangerous`) and execution logging.
 
 ### 🔒 Pre-Commit Security & Secrets Protection (`.githooks/pre-commit`)
@@ -107,10 +107,8 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) direc
 - **Automatic Fact Extraction**: Extracts facts and preferences from conversation with conflict resolution.
 
 ### ⚡ Proactive Intelligence & System Diagnostics
-- **Awareness Engine (`awareness.py`)**: Background monitoring of news topics, system status, calendar events, and stock velocity anomalies.
+- **Proactive Engine (`proactive_engine.py`)**: Background non-blocking relevance & value evaluation, follow-up emission, and multi-source web searches.
 - **System Diagnostics (`diagnostics.py`)**: Automated health checks, self-healing process inspection, and diagnostic reports (`/diagnose`).
-- **Projects & Task Engine (`projects.py`)**: Workspace manager, project switcher, task tracking, notes, and decision logging.
-- **Automation Protocols (`protocols.py`)**: Automated multi-step macro protocol execution.
 
 ### 🤖 JARVIS Mk4 Safe Agentic Layer (`jarvis/agents/` & `jarvis/orchestration/`)
 - **Modular Logical Agents**: Specialized roles (`PlanningAgent`, `ResearchAgent`, `CodingAgent`, `SystemAgent`, `CommunicationAgent`) extending a unified `BaseAgent`.
@@ -160,7 +158,6 @@ JARVIS/
 │   ├── api.py                  ← FastAPI + WebSocket bridge server (port 8765)
 │   ├── api_client.py           ← LLM API client with provider abstraction
 │   ├── apps.py                 ← Application controller & launcher
-│   ├── awareness.py            ← Proactive awareness & news surfacing engine
 │   ├── calendar_service.py     ← Google Calendar integration & event manager
 │   ├── cli.py                  ← Terminal CLI runner with rich formatting
 │   ├── config_manager.py       ← Central configuration system singleton
@@ -170,14 +167,10 @@ JARVIS/
 │   ├── error_recovery.py       ← Circuit breakers & retry mechanism
 │   ├── github_tool.py          ← GitHub CLI (`gh`) & repository workflow manager
 │   ├── google_auth.py          ← Google OAuth 2.0 authentication helper
-│   ├── health.py               ← Multi-service async startup health checker
 │   ├── llm_provider.py         ← Unified provider layer (NVIDIA, Groq, Anthropic, Ollama)
 │   ├── mcp_client.py           ← Model Context Protocol (MCP) client bridge
 │   ├── memory.py               ← SQLite persistent state, fact memory & CRUD engine
-│   ├── projects.py             ← Task manager, project switcher & decision log
-│   ├── protocols.py            ← Automated multi-step macro protocols runner
 │   ├── semantic_memory.py      ← FAISS vector index & sentence-transformer embeddings
-│   ├── system_monitor.py       ← Hardware monitor (CPU, RAM, GPU, Disk, Network)
 │   ├── tools.py                ← Unified tool registry with safety confirmation gates
 │   ├── ui.py                   ← Rich CLI UI layout & formatting helpers
 │   ├── voice.py                ← Voice TTS engine (edge-tts British Ryan profile)

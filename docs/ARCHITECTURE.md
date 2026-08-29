@@ -59,7 +59,7 @@ User (voice/text)
 | System files | 7 | tools.py |
 | Trading | 4 | trading.py |
 | Memory | 4 | memory.py |
-| Projects | 6 | projects.py |
+| Projects | 3 | memory.py |
 | Web search | 2 | tools.py |
 
 ## Data Flow: Tool Execution

@@ -461,10 +461,8 @@ async def websocket_endpoint(ws: WebSocket):
                                 "status": "speaking"
                             })
                         elif cmd == "/diagnose":
-                            from jarvis.health import HealthChecker
-                            checker = HealthChecker()
-                            await checker.run_all()
-                            res_text = checker.render_results()
+                            report = await run_diagnostics(check_nvidia=True)
+                            res_text = report.render_console()
                             await ws.send_json({
                                 "type": "response",
                                 "text": res_text,
