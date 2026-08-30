@@ -303,13 +303,13 @@ async def run_diagnostics(check_nvidia: bool = True) -> HealthCheckReport:
     start_time = time.time()
     report = HealthCheckReport()
 
-    # Synchronous checks
-    check_port_8765(report)
-    check_sqlite_db(report)
-    check_github_auth(report)
-    check_google_auth(report)
-    check_obsidian(report)
-    check_voice_tts(report)
+    # Synchronous checks in thread pool to prevent blocking asyncio loop
+    await asyncio.to_thread(check_port_8765, report)
+    await asyncio.to_thread(check_sqlite_db, report)
+    await asyncio.to_thread(check_github_auth, report)
+    await asyncio.to_thread(check_google_auth, report)
+    await asyncio.to_thread(check_obsidian, report)
+    await asyncio.to_thread(check_voice_tts, report)
 
     # Async API check
     if check_nvidia:

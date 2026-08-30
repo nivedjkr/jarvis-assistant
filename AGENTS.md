@@ -18,6 +18,8 @@ against the actual code. Before saying something works:
 
 ## Architecture
 
+- **`jarvis/llm_provider.py`** — Mark 5 High-Performance LLM Provider layer. Manages a shared persistent `httpx.AsyncClient` keep-alive connection pool (`get_shared_http_client`) configured with keep-alive limits across NVIDIA NIM, Groq, Ollama, and Gemini, eliminating SSL/TCP handshake latency.
+- **`jarvis/diagnostics.py`** — Non-blocking system diagnostic suite offloading synchronous subprocess and socket checks to worker threads via `asyncio.to_thread`.
 - **`jarvis/tools.py`** — all tool logic lives here, registered via `ToolRegistry`. Tools are
   plain functions added with `self._add("tool_name", fn, schema)`, not classes.
 - **`jarvis/tool_normalizer.py`** — tool call normalization layer. Standardizes native OpenAI `tool_calls` and text-based JSON formats into a single internal format `[{"id": "...", "name": "...", "arguments": {...}}]` and prevents raw tool JSON from reaching the user.

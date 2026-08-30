@@ -13,6 +13,19 @@ load_dotenv(Path(__file__).parent.parent / '.env')
 from jarvis.config_manager import config
 from jarvis.error_recovery import recovery
 
+_SHARED_HTTP_CLIENT: Optional[httpx.AsyncClient] = None
+
+
+def get_shared_http_client() -> httpx.AsyncClient:
+    global _SHARED_HTTP_CLIENT
+    if _SHARED_HTTP_CLIENT is None or _SHARED_HTTP_CLIENT.is_closed:
+        _SHARED_HTTP_CLIENT = httpx.AsyncClient(
+            limits=httpx.Limits(max_keepalive_connections=30, max_connections=100, keepalive_expiry=300.0),
+            timeout=httpx.Timeout(45.0, connect=10.0)
+        )
+    return _SHARED_HTTP_CLIENT
+
+
 class LLMProvider(ABC):
     @abstractmethod
     async def chat(
@@ -33,7 +46,7 @@ class NVIDIAProvider(LLMProvider):
         self.client = AsyncOpenAI(
             base_url=base_url,
             api_key=os.getenv("NVIDIA_NIM_API_KEY") or "mock_key",
-            timeout=httpx.Timeout(45.0, connect=10.0)
+            http_client=get_shared_http_client()
         )
         self.model = model_name
 
@@ -68,7 +81,7 @@ class GroqProvider(LLMProvider):
         self.client = AsyncOpenAI(
             base_url="https://api.groq.com/openai/v1",
             api_key=os.getenv("GROQ_API_KEY") or "mock_key",
-            timeout=httpx.Timeout(45.0, connect=10.0)
+            http_client=get_shared_http_client()
         )
         self.model = "llama-3.3-70b-versatile"
 
@@ -147,7 +160,7 @@ class OllamaProvider(LLMProvider):
         self.client = AsyncOpenAI(
             base_url="http://localhost:11434/v1",
             api_key="ollama",
-            timeout=httpx.Timeout(45.0, connect=10.0)
+            http_client=get_shared_http_client()
         )
         self.model = "llama3.2"
 
@@ -182,7 +195,7 @@ class GeminiProvider(LLMProvider):
         self.client = AsyncOpenAI(
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
             api_key=api_key,
-            timeout=httpx.Timeout(45.0, connect=10.0)
+            http_client=get_shared_http_client()
         )
         self.model = model_name
 

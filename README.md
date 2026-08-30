@@ -1,9 +1,9 @@
 <div align="center">
 
-# J.A.R.V.I.S. Mk 5.2.0
+# J.A.R.V.I.S. Mk 5
 ### Just A Rather Very Intelligent System
 
-*An autonomous personal AI intelligence system featuring a Mark 5.2 Persistent Mission Next Action Engine, Mark 5 Proactive Follow-Up Engine, Persistent Mission Intelligence & task tracking, unified Tool Call Normalization, Electron + React desktop UI, Tailscale Mobile PWA integration, live Gmail integration & Email UI panel, voice TTS engine, dual SQLite & FAISS vector memory, native GitHub & Git workflows, system diagnostics, and full PC control — powered by NVIDIA Nemotron & Google Gemini.*
+*An autonomous personal AI intelligence system featuring a Mark 5 High-Performance Network & Async Engine, Mark 5.2 Persistent Mission Next Action Engine, Mark 5 Proactive Follow-Up Engine, Persistent Mission Intelligence & task tracking, unified Tool Call Normalization, Electron + React desktop UI, Tailscale Mobile PWA integration, live Gmail integration & Email UI panel, voice TTS engine, dual SQLite & FAISS vector memory, native GitHub & Git workflows, system diagnostics, and full PC control — powered by NVIDIA Nemotron & Google Gemini.*
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)
 ![Electron](https://img.shields.io/badge/Electron-Desktop-47848F?style=flat-square&logo=electron)
@@ -13,7 +13,7 @@
 ![Gmail](https://img.shields.io/badge/Gmail-Google%20OAuth-EA4335?style=flat-square&logo=gmail)
 ![Memory](https://img.shields.io/badge/Memory-SQLite%20%2B%20FAISS-003B57?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Version](https://img.shields.io/badge/Release-Mk%205.2.0-brightgreen?style=flat-square)
+![Version](https://img.shields.io/badge/Release-Mk%205.3.0-brightgreen?style=flat-square)
 
 
 **Built by [Nived](https://github.com/nivedjkr)**
@@ -33,6 +33,10 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) direc
 ---
 
 ## Key Features
+
+### ⚡ Mark 5 High-Performance Network & Async Engine (`llm_provider.py` & `diagnostics.py`)
+- **Persistent HTTP Connection Pooling**: Shared persistent `httpx.AsyncClient` keep-alive pool (`max_keepalive_connections=30`, `max_connections=100`, `keepalive_expiry=300s`) across all LLM providers (NVIDIA NIM, Groq, Ollama, Gemini), reducing connection handshake overhead by up to 3x per request.
+- **Non-Blocking Async System Diagnostics**: Offloads blocking system & CLI checks to worker threads (`asyncio.to_thread`), preventing event-loop stalls during WebSocket connection startup.
 
 ### 🎯 Mark 5.2 Persistent Mission Next Action Engine (`mission_manager.py`)
 - **Deterministic Task Selection**: `get_next_actionable_task(mission_id)` evaluates real SQLite-persisted mission state and deterministically selects the single next actionable task without executing actions.
