@@ -53,6 +53,7 @@
   let recognition = null;
   let orbState = 'idle';
   let thinkingTimeout = null;
+  let mobilePingInterval = null;
 
   let currentSessionId = localStorage.getItem('jarvis_session_id');
   if (!currentSessionId) {
@@ -472,6 +473,13 @@
         statusText.textContent = 'Connected';
         statusBadge.className = 'status-badge connected';
         setOrbState('idle');
+
+        if (mobilePingInterval) clearInterval(mobilePingInterval);
+        mobilePingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 25000);
       };
 
       ws.onmessage = (event) => {
@@ -482,6 +490,7 @@
       };
 
       ws.onerror = (err) => {
+        if (mobilePingInterval) clearInterval(mobilePingInterval);
         console.error('[WS] Connection error:', err);
         localStorage.removeItem('jarvis_ws_token');
         statusText.textContent = 'Auth Error';
@@ -490,6 +499,7 @@
       };
 
       ws.onclose = () => {
+        if (mobilePingInterval) clearInterval(mobilePingInterval);
         console.log('[WS] Connection closed. Retrying in 4s...');
         isConnected = false;
         statusText.textContent = 'Disconnected';
@@ -590,11 +600,14 @@
         appendMessage('jarvis', respText, { toolCalls: data.tool_calls });
       }
 
-      const tailText = streamingFullText.slice(lastProcessedIndex) || respText;
-      if (tailText && !sentenceQueue.length && !isSpeaking) {
-        enqueueSentence(tailText);
-      } else if (tailText && isSpeaking) {
-        sentenceQueue.push(cleanTextForSpeech(tailText));
+      const hasStreamed = streamingFullText.length > 0;
+      if (hasStreamed) {
+        const tailText = streamingFullText.slice(lastProcessedIndex);
+        if (tailText) {
+          enqueueSentence(tailText);
+        }
+      } else if (!sentenceQueue.length && !isSpeaking) {
+        enqueueSentence(respText);
       }
 
       currentStreamingBubble = null;

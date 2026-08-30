@@ -162,9 +162,11 @@ async def websocket_endpoint(ws: WebSocket):
         # Check for auth handshake message
         await ws.accept()
         try:
-            auth_data = await asyncio.wait_for(ws.receive_json(), timeout=2.0)
+            auth_data = await asyncio.wait_for(ws.receive_json(), timeout=10.0)
             if auth_data.get("type") == "auth" and auth_data.get("token") == WS_AUTH_TOKEN:
                 token = WS_AUTH_TOKEN
+                if ws not in manager.active_connections:
+                    manager.active_connections.add(ws)
             else:
                 await ws.send_json({"type": "error", "message": "Authentication failed: Invalid token"})
                 await ws.close(code=1008)
@@ -188,12 +190,8 @@ async def websocket_endpoint(ws: WebSocket):
         else:
             # Requested session was deleted from DB! Fall back to most recent valid session
             session_id = existing_sessions[0]["session_id"]
-            print(f"[SESSION_DEBUG] Requested session '{target_sid}' was deleted from DB. Falling back to active session '{session_id}'")
     else:
-        if existing_sessions:
-            session_id = existing_sessions[0]["session_id"]
-        else:
-            session_id = f"electron_{uuid.uuid4().hex[:8]}"
+        session_id = existing_sessions[0]["session_id"] if existing_sessions else api_client.default_session
 
     active_sess = api_client.get_session(session_id)
     if active_sess is None:
@@ -220,6 +218,10 @@ async def websocket_endpoint(ws: WebSocket):
             msg_type = data.get("type", "message")
 
             try:
+                if msg_type == "ping":
+                    await ws.send_json({"type": "pong"})
+                    continue
+
                 if msg_type == "get_sessions" or msg_type == "list_sessions":
                     sessions = api_client.list_sessions()
                     await ws.send_json({

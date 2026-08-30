@@ -336,12 +336,19 @@ function connectWebSocket() {
     const wsToken = process.env.JARVIS_WS_TOKEN || 'jarvis_secure_local_token_2026'
     const sessionId = getOrCreateSessionId()
     ws = new WebSocket(`ws://127.0.0.1:8765/ws?token=${wsToken}&session_id=${sessionId}`)
+    let pingInterval = null
     
     ws.on('open', () => {
       console.log('[WS] Connected to JARVIS backend')
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('connection-status', 'connected')
       }
+      if (pingInterval) clearInterval(pingInterval)
+      pingInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }))
+        }
+      }, 25000)
     })
     
     ws.on('message', (data) => {
@@ -359,6 +366,7 @@ function connectWebSocket() {
     })
     
     ws.on('error', (err) => {
+      if (pingInterval) clearInterval(pingInterval)
       console.error('[WS] Error:', err.message)
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('connection-status', 'disconnected')
@@ -366,6 +374,7 @@ function connectWebSocket() {
     })
     
     ws.on('close', () => {
+      if (pingInterval) clearInterval(pingInterval)
       if (backendFailed) {
         console.warn('[WS] Connection closed. Not retrying since backend failed.')
         return

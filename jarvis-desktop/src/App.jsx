@@ -271,6 +271,8 @@ export default function App() {
         else if (data.type === 'response' || data.type === 'command_response') {
           clearPendingTimeout()
           const respText = data.text || 'Command executed, sir.'
+          const hasStreamed = streamingTextRef.current.length > 0
+
           setMessages(prev => {
             const filtered = prev.filter(m => !m.isStreaming)
             return [...filtered, {
@@ -281,19 +283,16 @@ export default function App() {
             }]
           })
 
-          if (data.audio) {
+          if (!hasStreamed && data.audio) {
             speakResponse(respText, data.audio)
-          } else {
+          } else if (hasStreamed) {
             const remainingText = streamingTextRef.current.slice(lastProcessedSentenceIndexRef.current)
-            const cleanTail = cleanTextForSpeech(remainingText || respText)
-            
-            if (cleanTail && (!sentenceQueueRef.current.length && !isSpeakingRef.current)) {
+            const cleanTail = cleanTextForSpeech(remainingText)
+            if (cleanTail) {
               enqueueSentences(cleanTail)
-            } else if (cleanTail && isSpeakingRef.current) {
-              sentenceQueueRef.current.push(cleanTail)
-            } else if (!sentenceQueueRef.current.length && !isSpeakingRef.current) {
-              speakResponse(respText)
             }
+          } else if (!sentenceQueueRef.current.length && !isSpeakingRef.current) {
+            speakResponse(respText)
           }
 
           streamingTextRef.current = ''
