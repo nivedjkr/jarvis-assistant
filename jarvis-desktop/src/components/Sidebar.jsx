@@ -25,7 +25,7 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, sessions: s
         console.log('Error fetching reminders:', e)
       }
     }
-  }  // One-time fallback for sessions if WS payload has not arrived yet
+    // One-time fallback for sessions if WS payload has not arrived yet
     if ((!sessionsProp || sessionsProp.length === 0) && window.jarvis?.getSessions) {
       try {
         const s = await window.jarvis.getSessions()
