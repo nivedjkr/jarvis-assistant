@@ -33,6 +33,10 @@ against the actual code. Before saying something works:
 - **`jarvis/cli.py`** — Antigravity Agentic CLI. Interactive prompt toolkit with `/screen`, `/vision <path>`, `/skills`, `/skill <name>`, `/learn`, `/subagents`, `/boost` (rigorous verification mode), `/goal` / `/plan`, `/grill-me`, `/inspect`, `/test`, interactive questions, and Rich UI panels.
 - Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`, `BrowserService`, `ProactiveFollowUpEngine`, `MissionManager`, `SkillsEngine`, `VisionService`) live in their own
   files and are instantiated once, then reused — never create a second competing instance of a service elsewhere.
+- **Persistent multi-session conversations**: Stored in `jarvis.db` (`sessions` & `session_messages` tables). Clients reuse a stable `session_id` to auto-resume conversations across restarts. Tools: `list_sessions`, `new_session`, `switch_session`, `rename_session`, `delete_session`.
+- **Desktop sessions UI**: Uses a top-left 3-dots button (`⋮`) triggering a floating overlay drawer so layout geometry of the central Orb and Chat log remains uncompressed.
+- **Proactive Obsidian memory filing**: Uses vault folder structure `Memory/profile.md`, `Memory/topics/<topic>.md`, `Memory/people/<name>.md`, `Memory/areas/<project>.md`. System prompt directs JARVIS to evaluate user messages for durable facts, search Obsidian first, extend existing notes, filter throwaway queries, and avoid credential logging.
+- **Headless Browsing Engine (`jarvis/browser_service.py`)**: Manages a persistent Playwright Chromium instance with async-sync thread loop bridging, 15s navigation timeout, and 5m idle auto-close timer. Exposed tools: `browse_page`, `browse_click`, `browse_screenshot`, `browse_extract_links`, `browse_close`. `browse_click` is integrated into `RISKY_TOOLS` confirmation gate and logged to `CommandLogger`. All page text is wrapped in `<untrusted_external_content source='browser'>` prompt-injection defense boundaries.
 - Current model: `nvidia/nemotron-3-super-120b-a12b` (NVIDIA NIM, free endpoint, 120B MoE,
   verified ultra-fast 0.8s tool-calling support with automated failover to `meta/llama-3.2-11b-vision-instruct`
   and `openai/gpt-oss-20b`). Don't swap models without testing a multi-tool-call request
@@ -115,15 +119,22 @@ All coding modification tasks must follow the verified-not-claimed discipline us
 4. **Execution Cap**: Cap debug iterations at a maximum of 5 turns before reporting remaining issues. Never claim a fix is complete without verifying that `run_tests` output passes cleanly.
 5. **Path & Process Security**: All debug loop tools (`inspect_project`, `run_tests`, `run_project`, `dependency_scan`, `secret_scan`) enforce `ALLOWED_ROOTS` path sandboxing and execute subprocesses strictly with list-form arguments and `shell=False`.
 
-- Persistent multi-session conversations are stored in `jarvis.db` (`sessions` & `session_messages` tables). Clients reuse a stable `session_id` to auto-resume conversations across restarts.
-- Session management tools: `list_sessions`, `new_session`, `switch_session`, `rename_session`, `delete_session`.
-- Desktop sessions UI uses a top-left 3-dots button (`⋮`) triggering a floating overlay drawer so layout geometry of the central Orb and Chat log remains uncompressed.
-- Proactive Obsidian memory filing uses vault folder structure: `Memory/profile.md`, `Memory/topics/<topic>.md`, `Memory/people/<name>.md`, `Memory/areas/<project>.md`. System prompt directs JARVIS to evaluate user messages for durable facts, search Obsidian first, extend existing notes, filter throwaway queries, and avoid credential logging.
-- Headless Browsing Engine (`jarvis/browser_service.py`): Manages a persistent Playwright Chromium instance with async-sync thread loop bridging, 15s navigation timeout, and 5m idle auto-close timer. Exposed tools: `browse_page`, `browse_click`, `browse_screenshot`, `browse_extract_links`, `browse_close`. `browse_click` is integrated into `RISKY_TOOLS` confirmation gate and logged to `CommandLogger`. All page text is wrapped in `<untrusted_external_content source='browser'>` prompt-injection defense boundaries.
+## Test Execution & Verification Discipline
 
-## Open / incomplete work
+All changes must be validated against the automated test suite before reporting completion or pushing commits:
+```powershell
+.\venv\Scripts\python.exe -m pytest jarvis/tests/test_antigravity_skills_and_cli.py jarvis/tests/test_vision_system.py jarvis/tests/test_latency_and_mobile_features.py -v
+```
+- **Virtual Environment**: Always use `.\venv\Scripts\python.exe`. The global Python interpreter lacks required dependencies (`Pillow`, `prompt_toolkit`, `psutil`, `pytest`).
+- **Test Artifact Isolation**: When writing tests for dynamic skill creation or file generation, always isolate outputs using pytest's `tmp_path` fixture (e.g., `SkillsEngine(skills_dirs=[str(tmp_path)])`). Never generate test skills or temporary files inside `jarvis/skills/` or the tracked repository tree.
+- **Vision Capture & Safety**: Desktop screen capture in `jarvis/vision_service.py` executes via native Windows `.NET System.Drawing` graphics pipelines to avoid headless/session capture limitations. All image analysis tools (`analyze_image`, `inspect_screen`) enforce `ALLOWED_ROOTS` file sandboxing before dispatching base64 payloads to `meta/llama-3.2-11b-vision-instruct`.
 
-- None at present.
+## Open / incomplete work (Mark 5.4 Roadmap Candidates)
+
+JARVIS architectural priorities identified for Mark 5.4:
+1. **Persistent Contextual Memory Layer (Hierarchical Vector Store)**: Dual-tier memory (short-term episodic session buffer + long-term hierarchical vector store using FAISS/HNSW embeddings) layered onto the Obsidian vault and SQLite for rich multi-session continuity and proactive recall.
+2. **Adaptive Tool-Chaining Planner (Neuro-Symbolic Scheduler)**: Autonomous task planner capable of multi-step subtask decomposition, optimal tool selection graphs, and dynamic replanning on tool failures.
+3. **Cross-Modal Real-Time Streaming Perception Pipeline**: Continuous sensory awareness ingesting live desktop and terminal state updates for anticipatory assistance.
 
 ## Persona
 
@@ -139,3 +150,4 @@ preserve its tone when editing.
 2. If it touches a risky tool, does `RISKY_TOOLS` + the confirmation flow still gate it?
 3. If it touches external content, is it wrapped in `<untrusted_external_content>`?
 4. Did you update this file if you changed a convention described here?
+
