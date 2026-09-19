@@ -153,6 +153,36 @@ class ConnectionManager:
 manager = ConnectionManager()
 backend_wake_detector = None
 
+def handle_sentinel_event(evt):
+    if evt.event_type == "CODE_ANOMALY":
+        details = evt.details or {}
+        file_name = details.get("file", "a file")
+        anom_type = details.get("anomaly_type", "anomaly")
+        if anom_type == "SYNTAX_ERROR":
+            msg = f"Sir, Sentinel Co-Pilot detected a syntax error in '{file_name}' on line {details.get('line')}: {details.get('msg')}. Shall I inspect and patch it?"
+        elif anom_type == "MERGE_CONFLICT":
+            msg = f"Sir, Sentinel Co-Pilot detected git merge conflict markers in '{file_name}'. Shall I review the conflicts?"
+        else:
+            msg = f"Sir, Sentinel Co-Pilot noticed an issue: {evt.summary}."
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(manager.broadcast({
+                "type": "proactive_alert",
+                "alert_type": "copilot",
+                "text": msg,
+                "sound": "alert"
+            }))
+        except Exception:
+            pass
+
+try:
+    from jarvis.workspace_sentinel import get_workspace_sentinel
+    backend_sentinel = get_workspace_sentinel()
+    backend_sentinel.add_callback(handle_sentinel_event)
+except Exception as e:
+    print(f"[SENTINEL] Could not attach listener on API init: {e}")
+
 import uuid
 
 @app.websocket("/ws")
@@ -689,6 +719,60 @@ async def websocket_endpoint(ws: WebSocket):
                                 "text": res,
                                 "status": "speaking",
                                 "sound": "done"
+                            })
+                        elif cmd in ("/briefing", "/morning", "/debrief"):
+                            from jarvis.stark_protocols import get_briefing_engine
+                            engine = get_briefing_engine()
+                            res = engine.generate_briefing()
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking",
+                                "sound": "done"
+                            })
+                        elif cmd.startswith("/protocol"):
+                            from jarvis.stark_protocols import get_protocols_engine
+                            engine = get_protocols_engine()
+                            parts = user_msg.strip().split(maxsplit=1)
+                            target = parts[1].strip() if len(parts) > 1 else ""
+                            if not target or target == "list":
+                                protos = engine.list_protocols()
+                                lines = [f"• **{p['title']}** (`/protocol {p['name']}`): {p['description']}" for p in protos]
+                                res = "=== STARK HOUSE PROTOCOLS ===\n" + "\n".join(lines)
+                                await ws.send_json({
+                                    "type": "response",
+                                    "text": res,
+                                    "status": "speaking"
+                                })
+                            else:
+                                exec_res = engine.execute_protocol(target)
+                                await ws.send_json({
+                                    "type": "response",
+                                    "text": exec_res["message"],
+                                    "status": "speaking",
+                                    "sound": exec_res.get("sound", "done")
+                                })
+                        elif cmd.startswith("/copilot"):
+                            from jarvis.workspace_sentinel import get_workspace_sentinel
+                            sentinel = get_workspace_sentinel()
+                            parts = user_msg.strip().split()
+                            sub = parts[1].lower() if len(parts) > 1 else "status"
+                            if sub in ("on", "start", "enable"):
+                                sentinel.toggle_copilot(True)
+                                if not sentinel.running:
+                                    sentinel.start()
+                                res = "Sentinel Autonomous Co-Pilot ACTIVATED, sir. Monitoring workspace for syntax errors and anomalies."
+                            elif sub in ("off", "stop", "disable"):
+                                sentinel.toggle_copilot(False)
+                                res = "Sentinel Autonomous Co-Pilot paused, sir."
+                            else:
+                                st = sentinel.get_status()
+                                res = f"Sentinel Co-Pilot is {'ACTIVE' if st.get('co_pilot_enabled') else 'INACTIVE'} (Sentinel running: {st.get('running')}), sir."
+
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking"
                             })
                         elif cmd.startswith("/provider"):
 

@@ -128,7 +128,7 @@ All coding modification tasks must follow the verified-not-claimed discipline us
 
 All changes must be validated against the automated test suite before reporting completion or pushing commits:
 ```powershell
-.\venv\Scripts\python.exe -m pytest jarvis/tests/test_hierarchical_memory.py jarvis/tests/test_dag_planner.py jarvis/tests/test_workspace_sentinel.py jarvis/tests/test_antigravity_skills_and_cli.py jarvis/tests/test_vision_system.py jarvis/tests/test_latency_and_mobile_features.py jarvis/tests/test_stark_workshop.py -v
+.\venv\Scripts\python.exe -m pytest jarvis/tests/test_hierarchical_memory.py jarvis/tests/test_dag_planner.py jarvis/tests/test_workspace_sentinel.py jarvis/tests/test_antigravity_skills_and_cli.py jarvis/tests/test_vision_system.py jarvis/tests/test_latency_and_mobile_features.py jarvis/tests/test_stark_workshop.py jarvis/tests/test_stark_briefing_and_copilot.py -v
 ```
 - **Virtual Environment**: Always use `.\venv\Scripts\python.exe`. The global Python interpreter lacks required dependencies (`Pillow`, `prompt_toolkit`, `psutil`, `pytest`, `openwakeword`).
 - **Test Artifact Isolation**: When writing tests for dynamic skill creation or file generation, always isolate outputs using pytest's `tmp_path` fixture (e.g., `SkillsEngine(skills_dirs=[str(tmp_path)])`). Never generate test skills or temporary files inside `jarvis/skills/` or the tracked repository tree.
@@ -136,11 +136,13 @@ All changes must be validated against the automated test suite before reporting 
 
 ## Open / incomplete work
 
-Mark 5.5 Stark Workshop Architecture is operational across Backend, Electron Desktop, and Mobile PWA:
+Mark 5.6 Stark Workshop Architecture is operational across Backend, Electron Desktop, and Mobile PWA:
 1. **Hands-Free Wake-Word Engine**: Local ONNX `openWakeWord` (`hey_jarvis`) with background streaming microphone VAD in `jarvis/wake_word.py`. Exposed via `/handsfree` slash command and interactive toggle buttons on both Desktop (`src/components/InputBar.jsx`) and Mobile PWA (`#mobileHandsFreeBtn`).
 2. **Real-Time Barge-In Interruption**: Active TTS playback is halted immediately when user speech or hotword is detected, or on client tap/click interruption.
-3. **Stark Audio FX**: Zero-latency Web Audio hardware synthesized audio cues (`wake`, `ack`, `done`, `alert`) on both Desktop and Mobile PWA, perfectly synchronized with backend WebSocket `sound` events and native Windows `winsound`.
+3. **Stark Audio FX**: Zero-latency Web Audio hardware synthesized audio cues (`wake`, `alert`, `done`) on both Desktop and Mobile PWA, perfectly synchronized with backend WebSocket `sound` events and native Windows `winsound` (submission chime silenced per user preference).
 4. **Desktop & Mobile Vision**: One-click screen capture inspection on Desktop (`📷` button calling `/screen`), and native environment camera capture & image upload on Mobile PWA (`#mobileCameraBtn` & `#mobileInputCamBtn` transmitting base64 to multimodal vision engine).
+5. **The Stark Morning Briefing & House Protocols**: `jarvis/stark_protocols.py`. Delivers full atmospheric weather, psutil hardware vitals, calendar directives, unread dispatches, and git repository debrief via `/briefing` and `get_stark_briefing`. Executes macros (`workshop`, `clean_slate`, `lockdown`, `overdrive`) via `/protocol <name>` and `execute_house_protocol`.
+6. **Autonomous Sentinel Co-Pilot**: `jarvis/workspace_sentinel.py`. Real-time code anomaly detection (`scan_for_code_anomalies`) inspecting modified Python files for syntax errors and merge conflicts, broadcasting proactive spoken warnings over WebSocket via `/copilot` and `toggle_sentinel_copilot`.
 
 Roadmap Candidates:
 - **Full-Duplex Streaming Spoken Dialogue via WebRTC**: Ultra-low latency voice bridging live PCM bidirectional streams.

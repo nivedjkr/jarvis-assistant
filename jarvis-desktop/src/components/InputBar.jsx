@@ -84,6 +84,14 @@ export default function InputBar({ onSend, currentSessionId, isHandsFree, onTogg
       <div className="input-action-buttons">
         <button
           type="button"
+          className="input-action-btn briefing-btn"
+          onClick={(e) => { e.stopPropagation(); onSend && onSend('/briefing'); }}
+          title="Stark Morning Briefing: Atmospheric weather, vitals, directives, and workshop debrief"
+        >
+          🌅
+        </button>
+        <button
+          type="button"
           className="input-action-btn vision-btn"
           onClick={(e) => { e.stopPropagation(); onTriggerVision && onTriggerVision(); }}
           title="Screen Vision: Capture & inspect desktop screen"

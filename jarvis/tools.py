@@ -4059,6 +4059,39 @@ class ToolRegistry:
             {},
             required=[])
 
+        def get_stark_briefing() -> str:
+            from jarvis.stark_protocols import get_briefing_engine
+            return get_briefing_engine().generate_briefing()
+
+        def execute_house_protocol(protocol_name: str) -> str:
+            from jarvis.stark_protocols import get_protocols_engine
+            res = get_protocols_engine().execute_protocol(protocol_name)
+            return res.get("message", "Protocol executed.")
+
+        def toggle_sentinel_copilot(enabled: bool = True) -> str:
+            from jarvis.workspace_sentinel import get_workspace_sentinel
+            active = get_workspace_sentinel().toggle_copilot(enabled)
+            return f"Sentinel Co-Pilot {'ACTIVATED' if active else 'PAUSED'}, sir."
+
+        self._add("get_stark_briefing", get_stark_briefing,
+            "Generate the authentic Tony Stark Morning Briefing debrief covering atmospheric weather, hardware vitals, directives, and workspace status.",
+            {},
+            required=[])
+
+        self._add("execute_house_protocol", execute_house_protocol,
+            "Execute an autonomous Stark House Protocol macro ('workshop', 'clean_slate', 'lockdown', 'overdrive').",
+            {
+                "protocol_name": {"type": "string", "description": "Name of protocol to initiate (e.g. 'workshop', 'clean_slate', 'lockdown', 'overdrive')."}
+            },
+            required=["protocol_name"])
+
+        self._add("toggle_sentinel_copilot", toggle_sentinel_copilot,
+            "Toggle Sentinel Co-Pilot autonomous code anomaly and syntax error monitoring.",
+            {
+                "enabled": {"type": "boolean", "description": "True to activate Co-Pilot monitoring, False to pause.", "default": True}
+            },
+            required=[])
+
 
 
 def _resolve_obsidian_vault_path() -> Optional[str]:

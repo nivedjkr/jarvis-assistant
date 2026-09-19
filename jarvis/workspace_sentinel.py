@@ -51,6 +51,8 @@ class WorkspaceSentinel:
         
         self.last_window_title: str = ""
         self.last_git_status: str = ""
+        self.co_pilot_enabled: bool = True
+        self.last_reported_anomalies: set = set()
         self.callbacks: List[Callable[[PerceptualEvent], Any]] = []
         
         self._thread: Optional[threading.Thread] = None
@@ -100,7 +102,75 @@ class WorkspaceSentinel:
                 return res.stdout.strip()
         except Exception:
             pass
-        return None
+    def scan_for_code_anomalies(self) -> List[PerceptualEvent]:
+        """Inspects modified Python files in the workspace for syntax errors or merge conflicts."""
+        anomalies = []
+        import ast
+        try:
+            res = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(self.workspace_path),
+                capture_output=True,
+                text=True,
+                timeout=4,
+                shell=False
+            )
+            if res.returncode != 0:
+                return anomalies
+            
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(maxsplit=1)
+                if len(parts) < 2:
+                    continue
+                file_rel = parts[1].strip()
+                if not file_rel.endswith(".py"):
+                    continue
+                file_path = self.workspace_path / file_rel
+                if not file_path.exists() or not file_path.is_file():
+                    continue
+
+                try:
+                    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+
+                    # 1. Check for merge conflicts
+                    if "<<<<<<< HEAD" in content and "=======" in content:
+                        anomaly_key = f"conflict_{file_rel}"
+                        if anomaly_key not in self.last_reported_anomalies:
+                            self.last_reported_anomalies.add(anomaly_key)
+                            anomalies.append(PerceptualEvent(
+                                id=f"evt_{uuid.uuid4().hex[:8]}",
+                                event_type="CODE_ANOMALY",
+                                summary=f"Merge conflict detected in '{file_rel}'",
+                                details={"file": file_rel, "anomaly_type": "MERGE_CONFLICT"}
+                            ))
+
+                    # 2. Check for syntax error
+                    try:
+                        ast.parse(content, filename=file_rel)
+                    except SyntaxError as syn_err:
+                        anomaly_key = f"syntax_{file_rel}_{syn_err.lineno}"
+                        if anomaly_key not in self.last_reported_anomalies:
+                            self.last_reported_anomalies.add(anomaly_key)
+                            anomalies.append(PerceptualEvent(
+                                id=f"evt_{uuid.uuid4().hex[:8]}",
+                                event_type="CODE_ANOMALY",
+                                summary=f"Syntax error in '{file_rel}' at line {syn_err.lineno}: {syn_err.msg}",
+                                details={
+                                    "file": file_rel,
+                                    "line": syn_err.lineno,
+                                    "msg": syn_err.msg,
+                                    "anomaly_type": "SYNTAX_ERROR"
+                                }
+                            ))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return anomalies
 
     def scan_once(self) -> List[PerceptualEvent]:
         """
@@ -142,6 +212,11 @@ class WorkspaceSentinel:
                 )
                 new_events.append(evt)
             self.last_git_status = current_git
+
+        # 3. Autonomous Code Anomaly / Co-Pilot Check
+        if self.co_pilot_enabled:
+            anomaly_events = self.scan_for_code_anomalies()
+            new_events.extend(anomaly_events)
 
         # Record events and dispatch callbacks
         with self._lock:
@@ -187,11 +262,17 @@ class WorkspaceSentinel:
         print("[SENTINEL] Background sentinel stopped.")
         return True
 
+    def toggle_copilot(self, enabled: bool) -> bool:
+        """Toggles Sentinel Co-Pilot real-time code anomaly detection."""
+        self.co_pilot_enabled = enabled
+        return self.co_pilot_enabled
+
     def get_status(self) -> Dict[str, Any]:
         """Returns runtime status and event counts."""
         return {
             "running": self.running,
             "interval_seconds": self.interval_seconds,
+            "co_pilot_enabled": self.co_pilot_enabled,
             "buffered_events_count": len(self.events_buffer),
             "last_active_window": self.last_window_title,
             "workspace_path": str(self.workspace_path)
