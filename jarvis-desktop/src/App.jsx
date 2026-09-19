@@ -311,7 +311,6 @@ export default function App() {
           return
         }
         if (data.type === 'handsfree_command') {
-          playStarkChime('ack')
           setOrbState('thinking')
           setMessages(prev => [...prev, { role: 'user', text: data.text, timestamp: timeStr }])
           return
@@ -526,7 +525,6 @@ export default function App() {
       return
     }
 
-    playStarkChime('ack')
     setMessages(prev => [...prev, {
       role: 'user',
       text: cleanInput,
@@ -564,7 +562,6 @@ export default function App() {
   }
 
   const handleTriggerVision = () => {
-    playStarkChime('ack')
     setOrbState('thinking')
     if (window.jarvis?.sendSlashCommand) {
       window.jarvis.sendSlashCommand('/screen')

@@ -625,7 +625,6 @@
       }
       return;
     } else if (data.type === 'handsfree_command') {
-      playStarkChime('ack');
       appendMessage('user', data.text || '');
       setOrbState('thinking');
       statusText.textContent = 'Processing';
@@ -761,7 +760,6 @@
       return;
     }
 
-    playStarkChime('ack');
     appendMessage('user', clean);
     setOrbState('thinking');
     statusText.textContent = 'Processing';
@@ -792,7 +790,6 @@
       return;
     }
 
-    playStarkChime('ack');
     appendMessage('user', `📷 [Camera Vision Request] ${promptText || ''}`, { imageUrl: base64Data });
     setOrbState('thinking');
     statusText.textContent = 'Analyzing Vision';

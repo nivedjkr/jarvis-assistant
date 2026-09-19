@@ -364,7 +364,7 @@ async def websocket_endpoint(ws: WebSocket):
                         with open(img_path, "wb") as f:
                             f.write(img_bytes)
 
-                        await ws.send_json({"type": "status", "status": "thinking", "sound": "ack"})
+                        await ws.send_json({"type": "status", "status": "thinking"})
                         res_analysis = await tool_registry.execute("analyze_image", {"path": img_path, "prompt": user_prompt})
                         api_client.add_user_message(f"[Image Attached] {user_prompt}", session_id=session_id)
                         api_client.add_assistant_message(res_analysis, session_id=session_id)
@@ -537,8 +537,7 @@ async def websocket_endpoint(ws: WebSocket):
                     # Send thinking status
                     await ws.send_json({
                         "type": "status",
-                        "status": "thinking",
-                        "sound": "ack"
+                        "status": "thinking"
                     })
                 
                     # Check slash command handling
