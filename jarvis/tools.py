@@ -616,6 +616,13 @@ class ToolRegistry:
             elif name == "activate_skill":
                 if "skill_name" in normalized_args and "name" not in normalized_args:
                     normalized_args["name"] = normalized_args.pop("skill_name")
+            elif name == "analyze_image":
+                if "image_path" in normalized_args and "path" not in normalized_args:
+                    normalized_args["path"] = normalized_args.pop("image_path")
+                if "image" in normalized_args and "path" not in normalized_args:
+                    normalized_args["path"] = normalized_args.pop("image")
+                if "file_path" in normalized_args and "path" not in normalized_args:
+                    normalized_args["path"] = normalized_args.pop("file_path")
 
 
             # Check if this tool is a risky tool requiring human-in-the-loop pending confirmation
@@ -3707,6 +3714,22 @@ class ToolRegistry:
             cron_info = f", Cron: {cron_expr}" if cron_expr else ""
             return f"Task scheduled: '{description}' (Delay: {sec}s{cron_info}). Background notification queued."
 
+        async def analyze_image(path: str, prompt: Optional[str] = None) -> str:
+            is_valid, real_path_or_err = _validate_sandbox_path(path)
+            if not is_valid:
+                abs_p = os.path.abspath(path)
+                if not abs_p.lower().startswith(os.path.abspath("jarvis/data/screenshots").lower()):
+                    return real_path_or_err
+                real_path_or_err = abs_p
+            from jarvis.vision_service import get_vision_service
+            vs = get_vision_service()
+            return await vs.analyze_image(real_path_or_err, prompt=prompt)
+
+        async def inspect_screen(query: Optional[str] = None) -> str:
+            from jarvis.vision_service import get_vision_service
+            vs = get_vision_service()
+            return await vs.inspect_screen(query=query)
+
         # Register tools with schemas
         self._add("view_file", view_file,
             "View file content with line numbering and optional line range slicing.",
@@ -3784,6 +3807,21 @@ class ToolRegistry:
                 "cron_expr": {"type": "string", "description": "Standard 5-field cron expression for recurring tasks."}
             },
             required=["description"])
+
+        self._add("analyze_image", analyze_image,
+            "Analyze an image, UI mockup, chart, or screenshot using multimodal vision (meta/llama-3.2-11b-vision-instruct).",
+            {
+                "path": {"type": "string", "description": "Workspace or screenshots path to image file."},
+                "prompt": {"type": "string", "description": "Specific visual inspection prompt or question."}
+            },
+            required=["path"])
+
+        self._add("inspect_screen", inspect_screen,
+            "Capture the active desktop screen and visually inspect it for UI layouts, active apps, or errors.",
+            {
+                "query": {"type": "string", "description": "Optional prompt focusing on specific elements."}
+            },
+            required=[])
 
 
 

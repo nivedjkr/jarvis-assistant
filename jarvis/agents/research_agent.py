@@ -21,6 +21,8 @@ RESEARCH_TOOLS: Set[str] = {
     "list_skills",
     "activate_skill",
     "view_file",
+    "analyze_image",
+    "inspect_screen",
 }
 
 

@@ -52,7 +52,7 @@ BOOT_ART = """
 SLASH_COMMANDS = [
     '/help', '/model', '/mode', '/plan', '/goal', '/boost', '/grill-me',
     '/skills', '/skill', '/learn', '/subagents', '/agents',
-    '/inspect', '/test',
+    '/inspect', '/test', '/screen', '/vision',
     '/tools', '/missions', '/mission',
     '/sessions', '/session', '/diagnose', '/status', '/vitals',
     '/context', '/history', '/speak', '/clear', '/exit',
@@ -277,6 +277,16 @@ class JarvisAssistant:
         elif cmd == '/test':
             target_path = (subcmd + " " + arg).strip() or "."
             return await self._execute_tool("run_tests", {"path": target_path})
+        elif cmd in ('/screen', '/vision'):
+            if cmd == '/screen':
+                query = (subcmd + " " + arg).strip() or None
+                return await self._execute_tool("inspect_screen", {"query": query} if query else {})
+            else:
+                img_path = subcmd
+                query = arg.strip() or None
+                if not img_path:
+                    return "Usage: [cyan]/vision <image_path> [optional prompt][/]"
+                return await self._execute_tool("analyze_image", {"path": img_path, "prompt": query} if query else {"path": img_path})
         elif cmd == '/tools':
             return self._handle_tools_command(subcmd)
         elif cmd in ('/status', '/vitals'):
@@ -573,18 +583,20 @@ class JarvisAssistant:
   /mode [auto|agent|boost|direct] Toggle agent operational mode
   /plan <goal> / /goal <goal>     Decompose & execute goal with autonomous swarm
   /boost                          Activate Boost Mode (deep verification & test gating)
-  /skills [category]              View all 11 embedded Antigravity skills
+  /skills [category]              View all 12 embedded Antigravity skills
   /skill <name>                   Inspect full instructions & runbook for a skill
   /learn [name]                   Interactive wizard to learn & persist a new skill
   /subagents / /agents            Inspect the 5 logical subagents in the JARVIS fleet
   /inspect [path]                 Inspect project directory structure & entry points
   /test [path]                    Run test suite with pass/fail telemetry
+  /screen [query]                 Capture & analyze active screen using vision model
+  /vision <path> [prompt]         Analyze an image or screenshot with multimodal vision
   /grill-me                       Enter interactive requirements clarification mode
 
 --- MODEL & RUNTIME CONTROLS ---
   /model [name]       Switch LLM (super, llama, gpt, gemini, groq)
   /status / /vitals   View live CPU, RAM, disk, and model vitals
-  /tools [query]      Search and inspect 105 registered tools
+  /tools [query]      Search and inspect 107 registered tools
   /missions           Manage persistent background missions
   /sessions           Manage multi-turn conversation sessions
   /diagnose           Run comprehensive non-blocking system diagnostics

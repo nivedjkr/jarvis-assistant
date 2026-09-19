@@ -45,6 +45,8 @@ CODING_TOOLS: Set[str] = {
     "list_subagents",
     "ask_question",
     "schedule_task",
+    "analyze_image",
+    "inspect_screen",
 }
 
 

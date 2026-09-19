@@ -50,11 +50,10 @@ class SkillsEngine:
         base_dir = Path(__file__).parent.resolve()
         default_dir = base_dir / "skills"
         
-        self.skills_dirs = [str(default_dir)]
-        if skills_dirs:
-            for d in skills_dirs:
-                if d not in self.skills_dirs:
-                    self.skills_dirs.append(d)
+        if skills_dirs is not None:
+            self.skills_dirs = list(skills_dirs)
+        else:
+            self.skills_dirs = [str(default_dir)]
                     
         self.discover_skills()
 
