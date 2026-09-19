@@ -311,16 +311,49 @@ class JarvisAssistant:
                 st = sentinel.get_status()
                 state_str = "[bold green]ACTIVE[/]" if st["running"] else "[dim]INACTIVE[/]"
                 return (
-                    f"◈ [bold cyan]Streaming Perception Sentinel:[/] {state_str}\n"
+                    f"[+] [bold cyan]Streaming Perception Sentinel:[/] {state_str}\n"
                     f"  Polling Interval: {st['interval_seconds']}s\n"
                     f"  Buffered Events: {st['buffered_events_count']}\n"
                     f"  Active Window: {st['last_active_window'] or '(none)'}\n\n"
                     f"Usage:\n"
-                    f"  • [cyan]/sentinel start[/]  - Start background workspace & focus observer\n"
-                    f"  • [cyan]/sentinel stop[/]   - Stop background sentinel\n"
-                    f"  • [cyan]/sentinel scan[/]   - Run immediate perceptual observation pass\n"
-                    f"  • [cyan]/sentinel events[/] - List recent perceptual events"
+                    f"  - [cyan]/sentinel start[/]  - Start background workspace & focus observer\n"
+                    f"  - [cyan]/sentinel stop[/]   - Stop background sentinel\n"
+                    f"  - [cyan]/sentinel scan[/]   - Run immediate perceptual observation pass\n"
+                    f"  - [cyan]/sentinel events[/] - List recent perceptual events"
                 )
+        elif cmd in ('/handsfree', '/listen'):
+            action = (subcmd or "status").strip().lower()
+            if not hasattr(self, '_voice_manager') or self._voice_manager is None:
+                from jarvis.voice import VoiceManager
+                self._voice_manager = VoiceManager({"enabled": True, "voice": {"speak_responses": True}})
+                self._voice_manager.set_callbacks(
+                    on_transcription=lambda text: print(f"\n[bold cyan]⚡ Hands-Free Input:[/] {text}"),
+                    on_response=lambda text: None
+                )
+
+            if action in ("start", "on", "enable"):
+                self._voice_manager.enable_hands_free()
+                from jarvis.sound_effects import play_sound
+                play_sound("wake")
+                return "[bold green]Tony Stark Hands-Free Mode ENABLED.[/] Speak [cyan]'Hey JARVIS'[/] to activate."
+            elif action in ("stop", "off", "disable"):
+                self._voice_manager.disable_hands_free()
+                return "Hands-free wake-word detection deactivated, sir."
+            else:
+                is_active = bool(self._voice_manager.wake_detector and self._voice_manager.wake_detector.running)
+                state_str = "[bold green]ACTIVE ('Hey JARVIS')[/]" if is_active else "[dim]INACTIVE[/]"
+                return (
+                    f"[+] [bold cyan]Tony Stark Hands-Free Engine:[/] {state_str}\n"
+                    f"Usage:\n"
+                    f"  - [cyan]/handsfree on[/]   - Activate open-mic 'Hey JARVIS' wake-word listener\n"
+                    f"  - [cyan]/handsfree off[/]  - Deactivate hands-free listening\n"
+                    f"  - [cyan]/sound [cue][/]     - Test UI audio cue (wake, ack, done, alert)"
+                )
+        elif cmd == '/sound':
+            from jarvis.sound_effects import play_sound
+            cue = (subcmd or "wake").strip().lower()
+            play_sound(cue)
+            return f"Played Stark audio cue: '{cue}', sir."
         elif cmd == '/tools':
             return self._handle_tools_command(subcmd)
         elif cmd in ('/status', '/vitals'):
@@ -626,6 +659,8 @@ class JarvisAssistant:
   /screen [query]                 Capture & analyze active screen using vision model
   /vision <path> [prompt]         Analyze an image or screenshot with multimodal vision
   /sentinel [start|stop|scan]     Streaming perception background observer & events
+  /handsfree [on|off]             Tony Stark hands-free 'Hey JARVIS' wake-word listener
+  /sound [wake|ack|done|alert]    Trigger Stark UI audio cue
   /grill-me                       Enter interactive requirements clarification mode
 
 --- MODEL & RUNTIME CONTROLS ---

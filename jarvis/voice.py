@@ -672,6 +672,7 @@ class VoiceManager:
         
         self.transcription_callback = None
         self.response_callback = None
+        self.wake_detector = None
     
     @property
     def is_speaking(self) -> bool:
@@ -701,11 +702,43 @@ class VoiceManager:
             on_release=self._on_ptt_release
         )
         self.ptt.start()
+
+    def enable_hands_free(self, threshold: float = 0.5):
+        """Enable hands-free wake-word detection mode ('Hey JARVIS')"""
+        self.enabled = True
+        if self.wake_detector is None:
+            from jarvis.wake_word import WakeWordDetector
+            self.wake_detector = WakeWordDetector(
+                threshold=threshold,
+                on_wake=self._on_wake_detected,
+                on_command=self._on_hands_free_command,
+                barge_in_callback=self.stop_speaking,
+                stt_engine=self.stt
+            )
+        self.wake_detector.start()
+        console.print("[bold cyan]Tony Stark Hands-Free Mode ACTIVATED ('Hey JARVIS')[/bold cyan]")
+
+    def disable_hands_free(self):
+        """Disable hands-free wake-word mode"""
+        if self.wake_detector:
+            self.wake_detector.stop()
+        console.print("[dim]Hands-free mode deactivated.[/dim]")
+
+    def _on_wake_detected(self):
+        ui.set_state(UIState.LISTENING)
+        console.print("\n[bold cyan]⚡ 'Hey JARVIS' detected! Listening...[/bold cyan]")
+
+    def _on_hands_free_command(self, text: str):
+        ui.set_state(UIState.THINKING)
+        console.print(f"[yellow]Hands-Free Command:[/yellow] {text}")
+        if self.transcription_callback:
+            self.transcription_callback(text)
     
     def disable(self):
         """Disable voice mode"""
         self.enabled = False
         self.ptt.stop()
+        self.disable_hands_free()
     
     def _on_ptt_press(self):
         """Handle push-to-talk press"""
@@ -767,6 +800,11 @@ class VoiceManager:
                 sentence_callback=self.response_callback,
                 speak_code_blocks=self.speak_code_blocks
             )
+            try:
+                from jarvis.sound_effects import play_sound
+                play_sound("done")
+            except Exception:
+                pass
         except Exception as e:
             console.print(f"[dim yellow]TTS warning: {e}[/dim yellow]")
     

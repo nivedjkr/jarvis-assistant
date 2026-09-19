@@ -34,7 +34,9 @@ against the actual code. Before saying something works:
 - **`jarvis/workspace_sentinel.py`** — Mark 5.4 Streaming Perception Sentinel. Non-blocking background observer tracking real-time desktop window focus (`ctypes.windll.user32`), workspace modifications (`git status --porcelain`), and diagnostic health. Tools: `get_sentinel_events`, `scan_workspace_now`. Slash command: `/sentinel`.
 - **Antigravity Tool Suite (`jarvis/tools.py`)** — 116 validated tools including `extract_archive` / `list_archive` / `create_archive` (zip & archive manipulation), `execute_autonomous_plan` (DAG planner), `get_sentinel_events` / `scan_workspace_now` (streaming perception), `search_hierarchical_memory` / `store_contextual_memory` / `index_obsidian_vault` (hierarchical memory), `analyze_image` / `inspect_screen` (multimodal vision), `view_file` / `replace_file_content` (surgical editing), `invoke_subagent` / `list_subagents` (swarm delegation).
 - **`jarvis/cli.py`** — Antigravity Agentic CLI. Interactive prompt toolkit with `/sentinel`, `/screen`, `/vision <path>`, `/skills`, `/skill <name>`, `/learn`, `/subagents`, `/boost` (rigorous verification mode), `/goal` / `/plan`, `/grill-me`, `/inspect`, `/test`, interactive questions, and Rich UI panels.
-- Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`, `BrowserService`, `ProactiveFollowUpEngine`, `MissionManager`, `SkillsEngine`, `VisionService`, `WorkspaceSentinel`, `DAGPlanner`) live in their own
+- **`jarvis/sound_effects.py`** — Mark 5.5 Stark Sound Effects Engine. Asynchronous synthesized futuristic UI audio cues (`wake.wav`, `ack.wav`, `done.wav`, `alert.wav`) via native Windows `winsound` with fallback to `sounddevice`.
+- **`jarvis/wake_word.py`** — Mark 5.5 Hands-Free Wake-Word Engine. Always-listening open-microphone detector powered by local ONNX `openWakeWord` (`hey_jarvis`), energy-based VAD, and automated barge-in speech interruption.
+- Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`, `BrowserService`, `ProactiveFollowUpEngine`, `MissionManager`, `SkillsEngine`, `VisionService`, `WorkspaceSentinel`, `DAGPlanner`, `WakeWordDetector`) live in their own
   files and are instantiated once, then reused — never create a second competing instance of a service elsewhere.
 - **Persistent multi-session conversations**: Stored in `jarvis.db` (`sessions` & `session_messages` tables). Clients reuse a stable `session_id` to auto-resume conversations across restarts. Tools: `list_sessions`, `new_session`, `switch_session`, `rename_session`, `delete_session`.
 - **Desktop sessions UI**: Uses a top-left 3-dots button (`⋮`) triggering a floating overlay drawer so layout geometry of the central Orb and Chat log remains uncompressed.
@@ -126,21 +128,21 @@ All coding modification tasks must follow the verified-not-claimed discipline us
 
 All changes must be validated against the automated test suite before reporting completion or pushing commits:
 ```powershell
-.\venv\Scripts\python.exe -m pytest jarvis/tests/test_hierarchical_memory.py jarvis/tests/test_dag_planner.py jarvis/tests/test_workspace_sentinel.py jarvis/tests/test_antigravity_skills_and_cli.py jarvis/tests/test_vision_system.py jarvis/tests/test_latency_and_mobile_features.py -v
+.\venv\Scripts\python.exe -m pytest jarvis/tests/test_hierarchical_memory.py jarvis/tests/test_dag_planner.py jarvis/tests/test_workspace_sentinel.py jarvis/tests/test_antigravity_skills_and_cli.py jarvis/tests/test_vision_system.py jarvis/tests/test_latency_and_mobile_features.py jarvis/tests/test_stark_workshop.py -v
 ```
-- **Virtual Environment**: Always use `.\venv\Scripts\python.exe`. The global Python interpreter lacks required dependencies (`Pillow`, `prompt_toolkit`, `psutil`, `pytest`).
+- **Virtual Environment**: Always use `.\venv\Scripts\python.exe`. The global Python interpreter lacks required dependencies (`Pillow`, `prompt_toolkit`, `psutil`, `pytest`, `openwakeword`).
 - **Test Artifact Isolation**: When writing tests for dynamic skill creation or file generation, always isolate outputs using pytest's `tmp_path` fixture (e.g., `SkillsEngine(skills_dirs=[str(tmp_path)])`). Never generate test skills or temporary files inside `jarvis/skills/` or the tracked repository tree.
 - **Vision Capture & Safety**: Desktop screen capture in `jarvis/vision_service.py` executes via native Windows `.NET System.Drawing` graphics pipelines to avoid headless/session capture limitations. All image analysis tools (`analyze_image`, `inspect_screen`) enforce `ALLOWED_ROOTS` file sandboxing before dispatching base64 payloads to `meta/llama-3.2-11b-vision-instruct`.
 
 ## Open / incomplete work
 
-Mark 5.4 Unified Autonomous Intelligence is fully implemented and operational across all three pillars:
-1. **Hierarchical Contextual Memory Layer**: Implemented in `jarvis/semantic_memory.py` with metadata filtering and automated Obsidian vault chunking.
-2. **Adaptive Neuro-Symbolic Task Planner**: Implemented in `jarvis/orchestration/dag_planner.py` with topological dependency resolution and self-healing replanning.
-3. **Cross-Modal Streaming Perception Pipeline**: Implemented in `jarvis/workspace_sentinel.py` with non-blocking desktop focus tracking and workspace monitoring.
+Mark 5.5 Stark Workshop Architecture is operational:
+1. **Hands-Free Wake-Word Engine**: Local ONNX `openWakeWord` (`hey_jarvis`) with background streaming microphone VAD in `jarvis/wake_word.py`.
+2. **Real-Time Barge-In Interruption**: Active TTS playback is halted immediately when user speech or hotword is detected.
+3. **Stark Audio FX**: Native zero-latency synthesized UI audio cues (`wake`, `ack`, `done`, `alert`) in `jarvis/sound_effects.py` and slash commands (`/handsfree`, `/sound`).
 
-Mark 5.5 Roadmap Candidates:
-- **Full-Duplex Streaming Voice via WebRTC**: Ultra-low latency spoken dialogue bridging Edge-TTS and live microphone PCM streams.
+Roadmap Candidates:
+- **Full-Duplex Streaming Spoken Dialogue via WebRTC**: Ultra-low latency voice bridging live PCM bidirectional streams.
 - **Distributed Multi-Node Subagent Fleet**: Remote execution across multiple developer workstations and edge nodes.
 
 ## Persona
