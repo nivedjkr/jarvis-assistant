@@ -1,5 +1,5 @@
 """
-DAGPlanner — Mark 5.4 Adaptive Neuro-Symbolic Task Scheduler
+DAGPlanner -- Mark 5.4 Adaptive Neuro-Symbolic Task Scheduler
 Decomposes complex, multi-step goals into a Directed Acyclic Graph (DAG) of subtasks,
 executes them with topological dependency resolution, monitors intermediate results,
 and autonomously replans upon tool failure.
@@ -368,26 +368,26 @@ Ensure dependencies are strictly acyclic. No preamble or explanations."""
     def render_ascii_dag(self, plan: DAGPlan) -> str:
         """Returns a clean ASCII visualization of the DAG plan."""
         status_icons = {
-            "COMPLETED": "[bold green]✓[/]",
-            "RUNNING": "[bold yellow]⏳[/]",
-            "FAILED": "[bold red]✗[/]",
-            "SKIPPED": "[dim]↷[/]",
-            "PENDING": "[dim]○[/]"
+            "COMPLETED": "[bold green][OK][/]",
+            "RUNNING": "[bold yellow][..][/]",
+            "FAILED": "[bold red][FAIL][/]",
+            "SKIPPED": "[dim][SKIP][/]",
+            "PENDING": "[dim][ ][/]"
         }
         lines = [
-            f"◈ [bold cyan]DAG Execution Plan:[/] {plan.plan_id} ([bold]{plan.status}[/])",
+            f"[+] [bold cyan]DAG Execution Plan:[/] {plan.plan_id} ([bold]{plan.status}[/])",
             f"  Goal: [italic]{plan.goal}[/]",
             ""
         ]
 
         for t in plan.tasks.values():
-            icon = status_icons.get(t.status, "○")
+            icon = status_icons.get(t.status, "[ ]")
             deps_str = f" <- [dim]depends on: {', '.join(t.depends_on)}[/]" if t.depends_on else ""
             lines.append(f"  {icon} [bold]{t.id}[/]: {t.title} [cyan]({t.tool})[/]{deps_str}")
             if t.result and t.status == "COMPLETED":
                 summary = t.result.strip().split("\n")[0][:80]
-                lines.append(f"     [green]↳ Result:[/] {summary}...")
+                lines.append(f"     [green]-> Result:[/] {summary}...")
             elif t.error and t.status == "FAILED":
-                lines.append(f"     [red]↳ Error:[/] {t.error[:80]}")
+                lines.append(f"     [red]-> Error:[/] {t.error[:80]}")
 
         return "\n".join(lines)

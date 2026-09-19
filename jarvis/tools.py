@@ -452,7 +452,16 @@ class ToolRegistry:
             sig = inspect.signature(fn)
             has_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
             valid_args = payload if has_kwargs else {k: v for k, v in payload.items() if k in sig.parameters}
-            return fn(**valid_args)
+            res = fn(**valid_args)
+            if inspect.iscoroutine(res):
+                import asyncio
+                try:
+                    return asyncio.run(res)
+                except RuntimeError:
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        return pool.submit(asyncio.run, res).result()
+            return res
         return f"FAILED: Tool '{name}' not found"
 
     async def execute(self, name: str, args: dict) -> str:
@@ -2133,7 +2142,7 @@ class ToolRegistry:
                             return f"Archive '{archive_path}' is empty."
                         lines = [f"Archive '{archive_path}' contains {len(names)} entries:"]
                         for n in names[:30]:
-                            lines.append(f"  • {n}")
+                            lines.append(f"  - {n}")
                         if len(names) > 30:
                             lines.append(f"  ... and {len(names) - 30} more entries")
                         return "\n".join(lines)
