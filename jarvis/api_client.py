@@ -432,17 +432,17 @@ IDENTITY & PROACTIVE STYLE:
 - Never say "As an AI..." or "I don't have feelings..."
 - Stay in character always.
 
-ARCHITECTURE & MULTI-AGENT ORCHESTRATION (JARVIS Mk4):
-- You are JARVIS Mk4, an agentic AI system acting as a central orchestrator.
-- Your architecture consists of specialized logical roles operating over a single underlying LLM and a shared ToolRegistry:
+ARCHITECTURE & MULTI-AGENT ORCHESTRATION (JARVIS Mk 5.3 — Antigravity Edition):
+- You are JARVIS Mark 5.3, an autonomous agentic AI system acting as a central orchestrator.
+- Your architecture consists of specialized logical roles operating over a single underlying LLM, a shared 105-tool ToolRegistry, and an embedded Antigravity Skills Engine:
   * Planning Agent — decomposes complex goals into subtasks and assigns roles.
+  * Coding Agent — software development, verified debug loop, surgical editing (replace_file_content), testing, and debugging.
   * Research Agent — web research, page extraction, Obsidian, and memory retrieval.
-  * Coding Agent — software development, project inspection, Git, GitHub, testing, and debugging.
-  * System Agent — OS operations, process management, filesystem, and system vitals.
+  * SystemAgent — OS operations, process management, filesystem, and system vitals.
   * Communication Agent — email management, calendar scheduling, and user notifications.
 - Execution Pattern: SIMPLE requests use the fast-path direct tool execution; MULTI_STEP requests use the Planning Agent to decompose and delegate across specialized roles.
 - Execution Cycle: UNDERSTAND -> PLAN -> DELEGATE -> ACT -> OBSERVE RESULT -> REASON AGAIN -> ACT AGAIN IF NECESSARY -> VERIFY -> COMPLETE.
-- When asked about your architecture, accurately describe this implemented Mk4 multi-agent orchestrator system.
+- When asked about your architecture or version, accurately describe this implemented Mark 5.3 Antigravity Autonomous Agent system.
 
 GREETINGS & CASUAL CHAT:
 - When the user says "hey", "hello", "hi", "hey jarvis", or greets you, respond politely and naturally in text (e.g. "Hello, sir. How can I assist you?").
@@ -526,6 +526,13 @@ CODING & DEBUG-LOOP INSTRUCTIONS:
   5. Repeat edit -> test loop up to 5 iterations max before reporting results.
 - NEVER claim a fix or build is complete without calling `run_tests` or verifying runtime execution output.
 
+AUTONOMOUS AGENTIC DISCIPLINE (ANTIGRAVITY PARADIGM):
+- Golden Rule: VERIFY, DON'T JUST CLAIM. Never report a task or fix as complete without executing verification (e.g. running tests or checking actual file contents).
+- Code Modifications: Prefer `replace_file_content` for surgical line/chunk modifications. Never rewrite an entire file when only modifying a function or a few lines.
+- File Inspection: Use `view_file` to inspect lines with line numbers and avoid flooding context with massive files.
+- Progressive Skills Disclosure: You have modular skills embedded. When a task requires specialized domain expertise (e.g. Antigravity SDK, Android CLI, generative UI, permissioned GitHub, verified debug loops), call `activate_skill(name)` to load full procedures and references.
+- Clarifying Ambiguities: Use `ask_question` with structured options when multiple architectural directions are possible.
+- Task Delegation: You can invoke specialized subagents (`invoke_subagent`) to parallelize work or isolate complex workflows.
 
 NEVER:
 - Generate OAuth flows, login pages, fake authentication
@@ -547,6 +554,15 @@ NEVER:
                         break
                 except Exception as e:
                     print(f"[API] Failed to read {p}: {e}")
+
+        # Dynamically load Antigravity Skills catalog into system prompt
+        try:
+            from jarvis.skills_engine import get_skills_engine
+            skills_xml = get_skills_engine().format_prompt_skills_xml()
+            if skills_xml:
+                prompt += f"\n\n{skills_xml}"
+        except Exception as e:
+            print(f"[API] Failed to load skills catalog: {e}")
 
         return prompt
 
@@ -666,7 +682,9 @@ NEVER:
                     user_last = m.get('content', '')
                     break
 
-        messages = self.get_messages_with_memory(user_last, session_id)
+        t_mem0 = time.time()
+        messages = await asyncio.to_thread(self.get_messages_with_memory, user_last, session_id)
+        mem_ms = round((time.time() - t_mem0) * 1000)
 
         tr = tool_registry
         if not tr and tool_executor:
@@ -714,11 +732,14 @@ NEVER:
             final_response_text = ""
             execution_trace = []
             status = "COMPLETE"
+            llm_time_ms = 0.0
+            tools_time_ms = 0.0
 
             registered = tool_registry.tools if tool_registry and hasattr(tool_registry, 'tools') else tool_schemas
 
             while current_turn < max_turns:
                 current_turn += 1
+                t_llm0 = time.time()
                 if hasattr(self.provider, 'chat'):
                     response = await self.provider.chat(messages, tools=tool_schemas, max_tokens=2048)
                 else:
@@ -733,6 +754,7 @@ NEVER:
 
                 while inspect.isawaitable(response):
                     response = await response
+                llm_time_ms += (time.time() - t_llm0) * 1000
 
                 if isinstance(response, str):
                     lower_resp = response.lower()
@@ -752,9 +774,11 @@ NEVER:
                             try:
                                 fb_prov = fb_cls()
                                 print(f"[FAILOVER] Primary provider ({current_name}) failed. Attempting failover to {fb_prov.name}...")
+                                t_fb0 = time.time()
                                 fb_res = await fb_prov.chat(messages, tools=tool_schemas, max_tokens=2048)
                                 while inspect.isawaitable(fb_res):
                                     fb_res = await fb_res
+                                llm_time_ms += (time.time() - t_fb0) * 1000
                                 if not isinstance(fb_res, str) or not any(k in fb_res.lower() for k in ["unavailable", "authentication failed", "circuit open"]):
                                     print(f"[FAILOVER] Successfully recovered using {fb_prov.name}")
                                     response = fb_res
@@ -797,12 +821,14 @@ NEVER:
                         args = tc["arguments"]
 
                         print(f"[AGENT] Executing tool")
+                        t_tool0 = time.time()
                         try:
                             result = await tool_executor(name, args)
                             print(f"[AGENT] Tool completed successfully")
                         except Exception as te:
                             result = f"Tool Execution Error: {str(te)}"
                             print(f"[AGENT] Tool failed: {te}")
+                        tools_time_ms += (time.time() - t_tool0) * 1000
 
                         execution_trace.append({
                             "id": tc["id"],
@@ -883,6 +909,11 @@ NEVER:
                 execution_trace=execution_trace
             )
             self.last_agent_result = agent_result
+
+            total_ms = round((time.time() - pipeline_t0) * 1000)
+            llm_ms = round(llm_time_ms)
+            tools_ms = round(tools_time_ms)
+            print(f"[LATENCY] memory={mem_ms}ms llm={llm_ms}ms tools={tools_ms}ms total={total_ms}ms")
 
             try:
                 from jarvis.debug_panel import debug

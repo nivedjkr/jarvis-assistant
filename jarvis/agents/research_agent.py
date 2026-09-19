@@ -18,6 +18,9 @@ RESEARCH_TOOLS: Set[str] = {
     "search_obsidian",
     "search_memory",
     "remember_fact",
+    "list_skills",
+    "activate_skill",
+    "view_file",
 }
 
 

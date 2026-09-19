@@ -2,11 +2,11 @@
 
 api:
   provider: nvidia
-  model: nvidia/nemotron-3-ultra-550b-a55b
+  model: nvidia/nemotron-3-super-120b-a12b
   base_url: https://integrate.api.nvidia.com/v1
-  max_tokens: 500
+  max_tokens: 1024
   max_history_messages: 40
-  stream: false
+  stream: true
 
 personality:
   user_title: sir

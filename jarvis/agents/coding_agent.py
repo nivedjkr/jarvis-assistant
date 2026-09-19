@@ -36,6 +36,15 @@ CODING_TOOLS: Set[str] = {
     "gh_create_pr",
     "gh_merge_pr",
     "gh_ci_status",
+    "view_file",
+    "replace_file_content",
+    "list_skills",
+    "activate_skill",
+    "learn_skill",
+    "invoke_subagent",
+    "list_subagents",
+    "ask_question",
+    "schedule_task",
 }
 
 

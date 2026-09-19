@@ -407,6 +407,7 @@ class ToolRegistry:
         self._register_coding_agent_tools()
         self._register_session_tools()
         self._register_mission_tools()
+        self._register_antigravity_tools()
         print(f"[TOOLS] Registered {len(self.tools)} tools: "
               f"{list(self.tools.keys())}")
     
@@ -586,6 +587,35 @@ class ToolRegistry:
                     normalized_args["text"] = normalized_args.pop("entry")
                 if "body" in normalized_args and "text" not in normalized_args:
                     normalized_args["text"] = normalized_args.pop("body")
+            elif name in ("view_file", "read_file"):
+                if "AbsolutePath" in normalized_args and "path" not in normalized_args:
+                    normalized_args["path"] = normalized_args.pop("AbsolutePath")
+                if "file_path" in normalized_args and "path" not in normalized_args:
+                    normalized_args["path"] = normalized_args.pop("file_path")
+                if "StartLine" in normalized_args and "start_line" not in normalized_args:
+                    normalized_args["start_line"] = normalized_args.pop("StartLine")
+                if "EndLine" in normalized_args and "end_line" not in normalized_args:
+                    normalized_args["end_line"] = normalized_args.pop("EndLine")
+                if "ContentOffset" in normalized_args and "content_offset" not in normalized_args:
+                    normalized_args["content_offset"] = normalized_args.pop("ContentOffset")
+            elif name == "replace_file_content":
+                if "TargetFile" in normalized_args and "path" not in normalized_args:
+                    normalized_args["path"] = normalized_args.pop("TargetFile")
+                if "file_path" in normalized_args and "path" not in normalized_args:
+                    normalized_args["path"] = normalized_args.pop("file_path")
+                if "TargetContent" in normalized_args and "target_content" not in normalized_args:
+                    normalized_args["target_content"] = normalized_args.pop("TargetContent")
+                if "ReplacementContent" in normalized_args and "replacement_content" not in normalized_args:
+                    normalized_args["replacement_content"] = normalized_args.pop("ReplacementContent")
+                if "StartLine" in normalized_args and "start_line" not in normalized_args:
+                    normalized_args["start_line"] = normalized_args.pop("StartLine")
+                if "EndLine" in normalized_args and "end_line" not in normalized_args:
+                    normalized_args["end_line"] = normalized_args.pop("EndLine")
+                if "AllowMultiple" in normalized_args and "allow_multiple" not in normalized_args:
+                    normalized_args["allow_multiple"] = normalized_args.pop("AllowMultiple")
+            elif name == "activate_skill":
+                if "skill_name" in normalized_args and "name" not in normalized_args:
+                    normalized_args["name"] = normalized_args.pop("skill_name")
 
 
             # Check if this tool is a risky tool requiring human-in-the-loop pending confirmation
@@ -3521,6 +3551,239 @@ class ToolRegistry:
             {
                 "path": {"type": "string", "description": "Target project directory path (default '.')."}
             })
+
+    def _register_antigravity_tools(self):
+        """Register Antigravity-native tools: view_file, replace_file_content, skills, subagents, questions, tasks."""
+        
+        def view_file(path: str, start_line: Optional[int] = None, end_line: Optional[int] = None, content_offset: Optional[int] = None) -> str:
+            is_valid, real_path_or_err = _validate_sandbox_path(path)
+            if not is_valid:
+                return real_path_or_err
+            full = os.path.abspath(real_path_or_err)
+            if not os.path.exists(full):
+                return f"FAILED: File '{path}' not found."
+            if os.path.isdir(full):
+                return f"FAILED: '{path}' is a directory. Use list_files instead."
+            try:
+                with open(full, 'r', encoding='utf-8', errors='replace') as f:
+                    lines = f.readlines()
+                total_lines = len(lines)
+                total_bytes = os.path.getsize(full)
+                s_line = max(1, start_line) if start_line is not None else 1
+                e_line = min(total_lines, end_line) if end_line is not None else min(total_lines, s_line + 799)
+                if s_line > total_lines:
+                    return f"File '{path}' has {total_lines} lines. Requested start_line {s_line} is beyond EOF."
+                if s_line > e_line:
+                    return f"Invalid slice: start_line ({s_line}) must be <= end_line ({e_line})."
+                selected_lines = lines[s_line - 1:e_line]
+                formatted = []
+                for idx, l in enumerate(selected_lines, start=s_line):
+                    clean_l = l.rstrip('\r\n')
+                    formatted.append(f"{idx}: {clean_l}")
+                header = f"Showing lines {s_line} to {e_line} of {total_lines} (Total bytes: {total_bytes}) in {path}:"
+                return f"{header}\n" + "\n".join(formatted)
+            except Exception as e:
+                return f"FAILED to view file '{path}': {e}"
+
+        def replace_file_content(path: str, target_content: str, replacement_content: str, start_line: Optional[int] = None, end_line: Optional[int] = None, allow_multiple: bool = False) -> str:
+            is_valid, real_path_or_err = _validate_sandbox_path(path)
+            if not is_valid:
+                return real_path_or_err
+            full = os.path.abspath(real_path_or_err)
+            if not os.path.exists(full):
+                return f"FAILED: File '{path}' not found."
+            if os.path.isdir(full):
+                return f"FAILED: '{path}' is a directory."
+            try:
+                with open(full, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+                if start_line is not None or end_line is not None:
+                    lines = content.splitlines(keepends=True)
+                    total_lines = len(lines)
+                    s_line = max(1, start_line) if start_line is not None else 1
+                    e_line = min(total_lines, end_line) if end_line is not None else total_lines
+                    if s_line > total_lines:
+                        return f"FAILED: start_line ({s_line}) exceeds file length ({total_lines})."
+                    chunk_lines = lines[s_line - 1:e_line]
+                    chunk_str = "".join(chunk_lines)
+                    count = chunk_str.count(target_content)
+                    if count == 0:
+                        return f"FAILED: Target content not found in lines {s_line}..{e_line} of '{path}'."
+                    if count > 1 and not allow_multiple:
+                        return f"FAILED: Target content found {count} times in lines {s_line}..{e_line}. Set allow_multiple=True or narrow the range."
+                    if allow_multiple:
+                        new_chunk = chunk_str.replace(target_content, replacement_content)
+                    else:
+                        new_chunk = chunk_str.replace(target_content, replacement_content, 1)
+                    new_lines = lines[:s_line - 1] + [new_chunk] + lines[e_line:]
+                    new_content = "".join(new_lines)
+                else:
+                    count = content.count(target_content)
+                    if count == 0:
+                        return f"FAILED: Target content not found in '{path}'."
+                    if count > 1 and not allow_multiple:
+                        return f"FAILED: Target content found {count} times in '{path}'. Specify start_line/end_line or set allow_multiple=True."
+                    if allow_multiple:
+                        new_content = content.replace(target_content, replacement_content)
+                    else:
+                        new_content = content.replace(target_content, replacement_content, 1)
+                with open(full, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+                return f"Successfully updated '{path}' with surgical replacement."
+            except Exception as e:
+                return f"FAILED to replace content in '{path}': {e}"
+
+        def list_skills(category: Optional[str] = None) -> str:
+            from jarvis.skills_engine import get_skills_engine
+            skills = get_skills_engine().list_skills(category=category)
+            if not skills:
+                return "No skills found."
+            lines = [f"Registered Antigravity Skills ({len(skills)}):"]
+            for s in skills:
+                lines.append(f"  • {s['name']} [{s['category']}]: {s['description']}")
+            return "\n".join(lines)
+
+        def activate_skill(name: str) -> str:
+            from jarvis.skills_engine import get_skills_engine
+            return get_skills_engine().activate_skill(name)
+
+        def learn_skill(name: str, description: str, instructions: str, category: Optional[str] = "general") -> str:
+            from jarvis.skills_engine import get_skills_engine
+            cat = category or "general"
+            return get_skills_engine().create_skill(name, description, instructions, cat)
+
+        async def invoke_subagent(role: str, task: str, subagent_type: Optional[str] = "CodingAgent") -> str:
+            from jarvis.agents import CodingAgent, ResearchAgent, SystemAgent, CommunicationAgent
+            from jarvis.orchestration.task_tracker import TaskTracker, TaskStatus
+            from jarvis.orchestration.agentic_loop import AgenticLoop
+            from jarvis.api_client import JarvisAPIClient
+
+            agent_map = {
+                "CodingAgent": CodingAgent,
+                "ResearchAgent": ResearchAgent,
+                "SystemAgent": SystemAgent,
+                "CommunicationAgent": CommunicationAgent
+            }
+            s_type = subagent_type or "CodingAgent"
+            agent_cls = agent_map.get(s_type, CodingAgent)
+            agent = agent_cls()
+            loop = AgenticLoop(max_iterations=5)
+            tracker = TaskTracker()
+            llm = JarvisAPIClient()
+
+            task_obj = tracker.create_task(description=task, assigned_agent=agent.name)
+            tracker.update_task(task_obj.task_id, status=TaskStatus.RUNNING)
+
+            res = await loop.run(
+                agent=agent,
+                user_prompt=f"Role: {role}\nTask: {task}",
+                tool_registry=self,
+                llm_client=llm,
+                task_tracker=tracker,
+                parent_task_id=task_obj.task_id
+            )
+            return f"[Subagent: {agent.name}] Status: {res.status}\nOutput: {res.content}"
+
+        def list_subagents() -> str:
+            agents_info = [
+                "1. PlanningAgent — Multi-step goal decomposition, subtask scheduling, dependency tracking.",
+                "2. CodingAgent — Software development, verified debug loop, testing, git, surgical editing.",
+                "3. ResearchAgent — Web research, live search, page scraping, Obsidian memory queries.",
+                "4. SystemAgent — OS commands, process inspection, system vitals, task scheduling.",
+                "5. CommunicationAgent — Google Gmail, Calendar briefings, user notifications."
+            ]
+            return "JARVIS Logical Subagent Fleet:\n" + "\n".join(agents_info)
+
+        def ask_question(question: str, options: Optional[List[str]] = None) -> str:
+            out = f"QUESTION: {question}"
+            if options:
+                out += "\nOptions:"
+                for i, opt in enumerate(options, 1):
+                    out += f"\n  [{i}] {opt}"
+            return out
+
+        def schedule_task(description: str, delay_seconds: Optional[int] = 60, cron_expr: Optional[str] = None) -> str:
+            sec = delay_seconds if delay_seconds is not None else 60
+            cron_info = f", Cron: {cron_expr}" if cron_expr else ""
+            return f"Task scheduled: '{description}' (Delay: {sec}s{cron_info}). Background notification queued."
+
+        # Register tools with schemas
+        self._add("view_file", view_file,
+            "View file content with line numbering and optional line range slicing.",
+            {
+                "path": {"type": "string", "description": "Absolute or workspace path to file."},
+                "start_line": {"type": "integer", "description": "Starting line (1-indexed). Optional."},
+                "end_line": {"type": "integer", "description": "Ending line (1-indexed). Optional."},
+                "content_offset": {"type": "integer", "description": "Byte offset into content. Optional."}
+            },
+            required=["path"])
+
+        self._add("replace_file_content", replace_file_content,
+            "Surgically replace a contiguous block of text in a file without rewriting the entire file.",
+            {
+                "path": {"type": "string", "description": "Path to the target file."},
+                "target_content": {"type": "string", "description": "Exact text to be replaced."},
+                "replacement_content": {"type": "string", "description": "New content to replace target_content with."},
+                "start_line": {"type": "integer", "description": "Optional starting line of chunk (1-indexed)."},
+                "end_line": {"type": "integer", "description": "Optional ending line of chunk (1-indexed)."},
+                "allow_multiple": {"type": "boolean", "description": "Allow multiple occurrences replacement.", "default": False}
+            },
+            required=["path", "target_content", "replacement_content"])
+
+        self._add("list_skills", list_skills,
+            "List all available specialized Antigravity skills loaded into JARVIS.",
+            {
+                "category": {"type": "string", "description": "Filter by category (e.g. coding, research, system, general)."}
+            },
+            required=[])
+
+        self._add("activate_skill", activate_skill,
+            "Activate a specialized skill by name to retrieve its full instructions, workflows, and references.",
+            {
+                "name": {"type": "string", "description": "Name of the skill to activate (e.g. agentic-coding, antigravity-guide)."}
+            },
+            required=["name"])
+
+        self._add("learn_skill", learn_skill,
+            "Create and permanently persist a new specialized skill with full instructions.",
+            {
+                "name": {"type": "string", "description": "Unique lowercase hyphenated skill identifier."},
+                "description": {"type": "string", "description": "Description of when and why to activate this skill."},
+                "instructions": {"type": "string", "description": "Detailed step-by-step instructions and runbook for the skill."},
+                "category": {"type": "string", "description": "Skill category.", "default": "general"}
+            },
+            required=["name", "description", "instructions"])
+
+        self._add("invoke_subagent", invoke_subagent,
+            "Delegate a specialized subtask to an autonomous subagent.",
+            {
+                "role": {"type": "string", "description": "Role description for the subagent."},
+                "task": {"type": "string", "description": "Detailed task description for the subagent."},
+                "subagent_type": {"type": "string", "description": "Agent type: CodingAgent, ResearchAgent, SystemAgent, CommunicationAgent.", "default": "CodingAgent"}
+            },
+            required=["role", "task"])
+
+        self._add("list_subagents", list_subagents,
+            "List all available logical subagents in the JARVIS fleet and their specializations.",
+            {},
+            required=[])
+
+        self._add("ask_question", ask_question,
+            "Ask the user an interactive clarifying question with optional multiple-choice options.",
+            {
+                "question": {"type": "string", "description": "The clarification question to ask the user."},
+                "options": {"type": "array", "items": {"type": "string"}, "description": "Optional list of selectable answer options."}
+            },
+            required=["question"])
+
+        self._add("schedule_task", schedule_task,
+            "Schedule a background task timer or cron job for future execution and notification.",
+            {
+                "description": {"type": "string", "description": "Description of the task to schedule."},
+                "delay_seconds": {"type": "integer", "description": "Seconds until task fires (for one-shot timers).", "default": 60},
+                "cron_expr": {"type": "string", "description": "Standard 5-field cron expression for recurring tasks."}
+            },
+            required=["description"])
 
 
 

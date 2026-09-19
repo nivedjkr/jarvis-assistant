@@ -24,6 +24,8 @@ SYSTEM_TOOLS: Set[str] = {
     "copy_to_clipboard",
     "paste_from_clipboard",
     "run_command",
+    "schedule_task",
+    "view_file",
 }
 
 

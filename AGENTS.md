@@ -27,13 +27,14 @@ against the actual code. Before saying something works:
 - **`jarvis/mission_manager.py`** — Persistent Mission Intelligence & Mk 5.2.0 Next Action Engine. SQLite persistence (`missions` & `mission_tasks`), `MissionDetector` for goal detection, explicit user approval gates, controlled state machines, `get_next_actionable_task()` deterministic next-task selection engine with dependency resolution, candidate ranking, structured `NextActionResult` contract, slash commands (`/missions`, `/mission`), REST APIs, and event broadcasting.
 - **`jarvis/api_client.py`** — the conversation loop, persona/system prompt, tool-call normalization, and tool-call dispatch to the LLM.
 - **`jarvis/api.py`** — FastAPI + WebSocket backend, serves the Electron desktop app, slash commands, REST API endpoints, and proactive/mission WebSocket events.
-- **`jarvis-desktop/`** — Electron + React frontend. `App.jsx` handles the WebSocket connection
-  and routes `state_update`, `proactive_event`, `proactive_followup`, and `mission_event` messages to panel components.
-- **`jarvis-mobile/`** — Plain HTML/JS PWA mobile client (no Electron). Served directly at `/mobile` by FastAPI when `JARVIS_ALLOW_REMOTE=true` or accessible over LAN/Tailscale.
-- Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`, `BrowserService`, `ProactiveFollowUpEngine`, `MissionManager`) live in their own
+- **`jarvis/skills_engine.py` & `jarvis/skills/`** — Embedded Antigravity Skills Engine. Discovers, indexes, and activates modular skill packages (`SKILL.md` with YAML frontmatter). Enforces progressive disclosure via `<skills>` prompt catalog, on-demand instructions via `activate_skill`, and permanent skill learning via `learn_skill`. Bundles 11 comprehensive Antigravity skills: `agentic-coding`, `antigravity-guide`, `agy-customizations`, `google-antigravity-sdk`, `android-cli`, `permissioned-github`, `generative-ui`, `migrate-workflows`, `subagent-orchestrator`, `system-automation`, `web-research`.
+- **Antigravity Tool Suite (`jarvis/tools.py`)** — `view_file` (sandboxed line slicing with line numbers), `replace_file_content` (surgical search-and-replace chunk editing), `invoke_subagent` / `list_subagents` (swarm delegation to logical roles), `ask_question` (interactive multiple-choice CLI prompt), `schedule_task` (one-shot and cron timers).
+- **`jarvis/cli.py`** — Antigravity Agentic CLI. Interactive prompt toolkit with `/skills`, `/skill <name>`, `/learn`, `/subagents`, `/boost` (rigorous verification mode), `/goal` / `/plan`, `/grill-me`, `/inspect`, `/test`, interactive questions, and Rich UI panels.
+- Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`, `BrowserService`, `ProactiveFollowUpEngine`, `MissionManager`, `SkillsEngine`) live in their own
   files and are instantiated once, then reused — never create a second competing instance of a service elsewhere.
-- Current model: `nvidia/nemotron-3-ultra-550b-a55b` (NVIDIA NIM, free endpoint, 1M context,
-  verified tool-calling support). Don't swap models without testing a multi-tool-call request
+- Current model: `nvidia/nemotron-3-super-120b-a12b` (NVIDIA NIM, free endpoint, 120B MoE,
+  verified ultra-fast 0.8s tool-calling support with automated failover to `meta/llama-3.2-11b-vision-instruct`
+  and `openai/gpt-oss-20b`). Don't swap models without testing a multi-tool-call request
   end-to-end afterward — different models format tool calls differently.
 
 ## Hard security rules — do not violate these

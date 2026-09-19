@@ -49,7 +49,7 @@ class PlanningAgent(BaseAgent):
 
     def classify_request_rule_based(self, prompt: str) -> Optional[GoalPlan]:
         """
-        Fast heuristic classification to bypass LLM latency for common simple queries.
+        Fast heuristic classification to bypass LLM planning latency for single-turn requests.
         """
         p_lower = prompt.lower().strip()
 
@@ -57,28 +57,19 @@ class PlanningAgent(BaseAgent):
         multistep_indicators = [
             "and then", "then ", "after that", "step 1", "step 2",
             "first ", "workflow", "pipeline", "multi-step", "multistep",
-            "\n1.", "\n2.", "create ... and", "inspect ... then", "and also",
-            "build a", "web application", "full stack", "database",
-            "architecture", "system design"
+            "\n1.", "\n2.", "inspect ... then", "and also",
+            "full stack", "architecture", "system design",
+            "build a complete", "web application", "complete application",
+            "backend and", "frontend and", "database and", "create a full"
         ]
         if any(ind in p_lower for ind in multistep_indicators):
             return None
 
-        simple_triggers = [
-            "what time", "current time", "what date", "today's date",
-            "open chrome", "open notepad", "open calculator", "open spotify",
-            "cpu usage", "system status", "memory status", "vitals", "disk usage",
-            "check email", "list emails", "unread emails", "email summary",
-            "check calendar", "list calendar", "weather", "git status", "git log",
-            "list files", "read file", "clipboard"
-        ]
+        return GoalPlan(
+            is_multi_step=False,
+            reasoning="Rule-based classification identified direct request."
+        )
 
-        if any(trigger in p_lower for trigger in simple_triggers) or len(prompt.split()) <= 8:
-            return GoalPlan(
-                is_multi_step=False,
-                reasoning="Rule-based classification identified simple direct query."
-            )
-        return None
 
     async def plan_goal(self, user_prompt: str, llm_client) -> GoalPlan:
         """

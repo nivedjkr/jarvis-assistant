@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import numpy as np
 from pathlib import Path
 
@@ -12,14 +13,23 @@ class SemanticMemory:
         self.index_path = Path('jarvis/data/semantic_index.faiss')
         self.facts_path = Path('jarvis/data/semantic_facts.json')
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        self._model_lock = threading.Lock()
         self._load_existing()
     
     def _get_model(self):
         if self.model is None:
-            print("[SEMANTIC] Loading embedding model...")
-            from sentence_transformers import SentenceTransformer
-            self.model = SentenceTransformer('all-MiniLM-L6-v2')  # small, fast, local
+            with self._model_lock:
+                if self.model is None:
+                    print("[SEMANTIC] Loading embedding model...")
+                    from sentence_transformers import SentenceTransformer
+                    self.model = SentenceTransformer('all-MiniLM-L6-v2')  # small, fast, local
         return self.model
+
+
+    def _encode(self, texts: list):
+        model = self._get_model()
+        with self._model_lock:
+            return model.encode(texts)
 
     def prewarm(self):
         """Pre-load embedding model during startup to eliminate first-query latency."""
@@ -38,10 +48,9 @@ class SemanticMemory:
             self.index = faiss.read_index(str(self.index_path))
     
     def add_fact(self, fact: str, category: str = "") -> str:
-        model = self._get_model()
         import faiss
         
-        embedding = model.encode([fact])
+        embedding = self._encode([fact])
         
         if self.index is None:
             dim = embedding.shape[1]
@@ -61,12 +70,11 @@ class SemanticMemory:
         
         return f"Fact stored: {fact[:80]}"
     
-    def search(self, query: str, top_k: int = 5) -> list:
-        if not self.index or not self.facts:
+    def search(self, query: str, top_k: int = 5, max_distance: float = 1.3) -> list:
+        if not self.index or not self.facts or not query or not query.strip():
             return []
         
-        model = self._get_model()
-        query_embedding = model.encode([query])
+        query_embedding = self._encode([query.strip()])
         
         distances, indices = self.index.search(
             query_embedding.astype('float32'), 
@@ -76,17 +84,22 @@ class SemanticMemory:
         results = []
         for i, idx in enumerate(indices[0]):
             if idx < len(self.facts) and idx >= 0:
-                fact = self.facts[idx].copy()
-                fact['score'] = float(distances[0][i])
-                results.append(fact)
+                dist = float(distances[0][i])
+                if dist <= max_distance:
+                    fact = self.facts[idx].copy()
+                    fact['score'] = dist
+                    results.append(fact)
         
         # Sort by relevance (lower distance = better)
         results.sort(key=lambda x: x['score'])
         return results
     
-    def get_relevant_context(self, query: str, top_k: int = 5) -> str:
-        results = self.search(query, top_k)
+    def get_relevant_context(self, query: str, top_k: int = 5, max_distance: float = 1.3) -> str:
+        if not query or len(query.strip()) < 4 or query.strip().lower() in {"hi", "hello", "hey", "thanks", "thank you", "ok", "okay", "bye"}:
+            return ""
+        results = self.search(query, top_k, max_distance=max_distance)
         if not results:
             return ""
         facts = [r['text'] for r in results]
         return "Relevant facts: " + "; ".join(facts)
+
