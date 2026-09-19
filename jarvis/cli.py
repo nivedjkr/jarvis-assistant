@@ -631,7 +631,7 @@ class JarvisAssistant:
 --- MODEL & RUNTIME CONTROLS ---
   /model [name]       Switch LLM (super, llama, gpt, gemini, groq)
   /status / /vitals   View live CPU, RAM, disk, and model vitals
-  /tools [query]      Search and inspect 113 registered tools
+  /tools [query]      Search and inspect 116 registered tools
   /missions           Manage persistent background missions
   /sessions           Manage multi-turn conversation sessions
   /diagnose           Run comprehensive non-blocking system diagnostics

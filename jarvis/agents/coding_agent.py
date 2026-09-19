@@ -51,6 +51,9 @@ CODING_TOOLS: Set[str] = {
     "search_hierarchical_memory",
     "store_contextual_memory",
     "scan_workspace_now",
+    "extract_archive",
+    "list_archive",
+    "create_archive",
 }
 
 

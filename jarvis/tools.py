@@ -103,8 +103,18 @@ BLOCKED_PATTERNS = [
 
 def _get_allowed_roots() -> List[str]:
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    roots = [base_dir]
-    resolved_roots = [os.path.realpath(r).lower() for r in roots]
+    roots = [
+        base_dir,
+        os.path.abspath("D:\\"),
+        os.path.expanduser("~/Downloads"),
+        os.path.expanduser("~/Documents"),
+        os.path.expanduser("~/Desktop"),
+    ]
+    cfg = _load_config()
+    extra_roots = cfg.get("tools", {}).get("allowed_roots", [])
+    if isinstance(extra_roots, list):
+        roots.extend(extra_roots)
+    resolved_roots = [os.path.realpath(r).lower() for r in roots if os.path.exists(r)]
     return resolved_roots
 
 def _validate_sandbox_path(path: str) -> Tuple[bool, str]:
@@ -129,7 +139,7 @@ def _validate_sandbox_path(path: str) -> Tuple[bool, str]:
     allowed_roots = _get_allowed_roots()
     is_allowed = False
     for root in allowed_roots:
-        norm_root = root.replace("\\", "/").lower()
+        norm_root = root.replace("\\", "/").rstrip("/").lower()
         if norm_real_path == norm_root or norm_real_path.startswith(norm_root + "/"):
             is_allowed = True
             break
@@ -2079,10 +2089,105 @@ class ToolRegistry:
             {"path": {"type": "string"},
              "search_term": {"type": "string"}})
         
+        def extract_archive(archive_path: str, destination_dir: Optional[str] = None) -> str:
+            from pathlib import Path
+            ok, real_archive = _validate_sandbox_path(archive_path)
+            if not ok: return real_archive
+            if not os.path.exists(real_archive):
+                return f"Archive not found: '{archive_path}'"
+
+            if destination_dir:
+                ok_dest, real_dest = _validate_sandbox_path(destination_dir)
+                if not ok_dest: return real_dest
+            else:
+                p = Path(real_archive)
+                real_dest = str(p.parent / p.stem)
+
+            os.makedirs(real_dest, exist_ok=True)
+            import zipfile
+            try:
+                if zipfile.is_zipfile(real_archive):
+                    with zipfile.ZipFile(real_archive, 'r') as zf:
+                        dest_path = Path(real_dest).resolve()
+                        for member in zf.namelist():
+                            member_path = (dest_path / member).resolve()
+                            if not str(member_path).startswith(str(dest_path)):
+                                return f"SECURITY ERROR: Archive member '{member}' attempts directory traversal outside destination."
+                        zf.extractall(real_dest)
+                        return f"Successfully extracted {len(zf.namelist())} files from '{archive_path}' to '{real_dest}'."
+                return f"Unsupported archive format: '{archive_path}'. Supports .zip archives."
+            except Exception as e:
+                return f"FAILED to extract archive '{archive_path}': {e}"
+
+        def list_archive(archive_path: str) -> str:
+            ok, real_archive = _validate_sandbox_path(archive_path)
+            if not ok: return real_archive
+            if not os.path.exists(real_archive):
+                return f"Archive not found: '{archive_path}'"
+            import zipfile
+            try:
+                if zipfile.is_zipfile(real_archive):
+                    with zipfile.ZipFile(real_archive, 'r') as zf:
+                        names = zf.namelist()
+                        if not names:
+                            return f"Archive '{archive_path}' is empty."
+                        lines = [f"Archive '{archive_path}' contains {len(names)} entries:"]
+                        for n in names[:30]:
+                            lines.append(f"  • {n}")
+                        if len(names) > 30:
+                            lines.append(f"  ... and {len(names) - 30} more entries")
+                        return "\n".join(lines)
+                return f"Unsupported archive format: '{archive_path}'."
+            except Exception as e:
+                return f"FAILED to list archive '{archive_path}': {e}"
+
+        def create_archive(source_path: str, archive_path: str) -> str:
+            ok_src, real_src = _validate_sandbox_path(source_path)
+            if not ok_src: return real_src
+            ok_dst, real_dst = _validate_sandbox_path(archive_path)
+            if not ok_dst: return real_dst
+            import zipfile
+            try:
+                with zipfile.ZipFile(real_dst, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    if os.path.isdir(real_src):
+                        for root, _, files in os.walk(real_src):
+                            for f in files:
+                                full_f = os.path.join(root, f)
+                                rel_f = os.path.relpath(full_f, real_src)
+                                zf.write(full_f, rel_f)
+                    else:
+                        zf.write(real_src, os.path.basename(real_src))
+                return f"Successfully created archive '{archive_path}' from '{source_path}'."
+            except Exception as e:
+                return f"FAILED to create archive: {e}"
+
         self._add("get_disk_usage", get_disk_usage,
             "Get real disk space usage.",
             {"path": {"type": "string", "default": "C:\\"}},
             required=[])
+
+        self._add("extract_archive", extract_archive,
+            "Extract a .zip archive to a destination directory with path traversal security protection.",
+            {
+                "archive_path": {"type": "string", "description": "Path to the .zip archive."},
+                "destination_dir": {"type": "string", "description": "Optional destination directory (defaults to directory named after archive)."}
+            },
+            required=["archive_path"])
+
+        self._add("list_archive", list_archive,
+            "List all files and directory structure inside a .zip archive without extracting.",
+            {
+                "archive_path": {"type": "string", "description": "Path to the .zip archive."}
+            },
+            required=["archive_path"])
+
+        self._add("create_archive", create_archive,
+            "Compress a file or directory into a .zip archive.",
+            {
+                "source_path": {"type": "string", "description": "Path to file or directory to compress."},
+                "archive_path": {"type": "string", "description": "Destination path for the created .zip archive."}
+            },
+            required=["source_path", "archive_path"])
 
     def _register_semantic_memory_tools(self):
         def remember_fact(fact: str, category: str = "") -> str:
