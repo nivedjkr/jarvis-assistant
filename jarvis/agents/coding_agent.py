@@ -47,6 +47,10 @@ CODING_TOOLS: Set[str] = {
     "schedule_task",
     "analyze_image",
     "inspect_screen",
+    "execute_autonomous_plan",
+    "search_hierarchical_memory",
+    "store_contextual_memory",
+    "scan_workspace_now",
 }
 
 

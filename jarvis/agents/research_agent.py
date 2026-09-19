@@ -23,6 +23,9 @@ RESEARCH_TOOLS: Set[str] = {
     "view_file",
     "analyze_image",
     "inspect_screen",
+    "search_hierarchical_memory",
+    "store_contextual_memory",
+    "index_obsidian_vault",
 }
 
 

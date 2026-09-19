@@ -29,9 +29,12 @@ against the actual code. Before saying something works:
 - **`jarvis/api.py`** — FastAPI + WebSocket backend, serves the Electron desktop app, slash commands, REST API endpoints, and proactive/mission WebSocket events.
 - **`jarvis/skills_engine.py` & `jarvis/skills/`** — Embedded Antigravity Skills Engine. Discovers, indexes, and activates modular skill packages (`SKILL.md` with YAML frontmatter). Enforces progressive disclosure via `<skills>` prompt catalog, on-demand instructions via `activate_skill`, and permanent skill learning via `learn_skill`. Bundles 12 comprehensive Antigravity skills: `cross-modal-vision`, `agentic-coding`, `antigravity-guide`, `agy-customizations`, `google-antigravity-sdk`, `android-cli`, `permissioned-github`, `generative-ui`, `migrate-workflows`, `subagent-orchestrator`, `system-automation`, `web-research`.
 - **`jarvis/vision_service.py`** — Mark 5.3 Cross-Modal Vision Engine. Desktop screen capture via native Windows APIs, Playwright browser screenshot analysis, image optimization/resizing, and multimodal inspection via `meta/llama-3.2-11b-vision-instruct` over NVIDIA NIM.
-- **Antigravity Tool Suite (`jarvis/tools.py`)** — 107 validated tools including `analyze_image`, `inspect_screen` (multimodal vision), `view_file` (sandboxed line slicing with line numbers), `replace_file_content` (surgical search-and-replace chunk editing), `invoke_subagent` / `list_subagents` (swarm delegation to logical roles), `ask_question` (interactive multiple-choice CLI prompt), `schedule_task` (one-shot and cron timers).
-- **`jarvis/cli.py`** — Antigravity Agentic CLI. Interactive prompt toolkit with `/screen`, `/vision <path>`, `/skills`, `/skill <name>`, `/learn`, `/subagents`, `/boost` (rigorous verification mode), `/goal` / `/plan`, `/grill-me`, `/inspect`, `/test`, interactive questions, and Rich UI panels.
-- Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`, `BrowserService`, `ProactiveFollowUpEngine`, `MissionManager`, `SkillsEngine`, `VisionService`) live in their own
+- **`jarvis/semantic_memory.py`** — Mark 5.4 Hierarchical Contextual Memory Layer. Dual-tier memory (short-term episodic session buffer + long-term FAISS vector store with metadata filtering across projects, topics, entities, and Obsidian vault notes). Tools: `search_hierarchical_memory`, `store_contextual_memory`, `index_obsidian_vault`.
+- **`jarvis/orchestration/dag_planner.py`** — Mark 5.4 Adaptive Neuro-Symbolic Task Scheduler. Decomposes multi-step goals into a Directed Acyclic Graph (DAG) of subtasks, executes them with topological dependency resolution, and autonomously performs self-healing replanning upon failure. Tool: `execute_autonomous_plan`. Slash commands: `/plan`, `/goal`.
+- **`jarvis/workspace_sentinel.py`** — Mark 5.4 Streaming Perception Sentinel. Non-blocking background observer tracking real-time desktop window focus (`ctypes.windll.user32`), workspace modifications (`git status --porcelain`), and diagnostic health. Tools: `get_sentinel_events`, `scan_workspace_now`. Slash command: `/sentinel`.
+- **Antigravity Tool Suite (`jarvis/tools.py`)** — 113 validated tools including `execute_autonomous_plan` (DAG planner), `get_sentinel_events` / `scan_workspace_now` (streaming perception), `search_hierarchical_memory` / `store_contextual_memory` / `index_obsidian_vault` (hierarchical memory), `analyze_image` / `inspect_screen` (multimodal vision), `view_file` / `replace_file_content` (surgical editing), `invoke_subagent` / `list_subagents` (swarm delegation).
+- **`jarvis/cli.py`** — Antigravity Agentic CLI. Interactive prompt toolkit with `/sentinel`, `/screen`, `/vision <path>`, `/skills`, `/skill <name>`, `/learn`, `/subagents`, `/boost` (rigorous verification mode), `/goal` / `/plan`, `/grill-me`, `/inspect`, `/test`, interactive questions, and Rich UI panels.
+- Service classes (`EmailService`, `CalendarService`, `ObsidianMCPClient`, `BrowserService`, `ProactiveFollowUpEngine`, `MissionManager`, `SkillsEngine`, `VisionService`, `WorkspaceSentinel`, `DAGPlanner`) live in their own
   files and are instantiated once, then reused — never create a second competing instance of a service elsewhere.
 - **Persistent multi-session conversations**: Stored in `jarvis.db` (`sessions` & `session_messages` tables). Clients reuse a stable `session_id` to auto-resume conversations across restarts. Tools: `list_sessions`, `new_session`, `switch_session`, `rename_session`, `delete_session`.
 - **Desktop sessions UI**: Uses a top-left 3-dots button (`⋮`) triggering a floating overlay drawer so layout geometry of the central Orb and Chat log remains uncompressed.
@@ -123,18 +126,22 @@ All coding modification tasks must follow the verified-not-claimed discipline us
 
 All changes must be validated against the automated test suite before reporting completion or pushing commits:
 ```powershell
-.\venv\Scripts\python.exe -m pytest jarvis/tests/test_antigravity_skills_and_cli.py jarvis/tests/test_vision_system.py jarvis/tests/test_latency_and_mobile_features.py -v
+.\venv\Scripts\python.exe -m pytest jarvis/tests/test_hierarchical_memory.py jarvis/tests/test_dag_planner.py jarvis/tests/test_workspace_sentinel.py jarvis/tests/test_antigravity_skills_and_cli.py jarvis/tests/test_vision_system.py jarvis/tests/test_latency_and_mobile_features.py -v
 ```
 - **Virtual Environment**: Always use `.\venv\Scripts\python.exe`. The global Python interpreter lacks required dependencies (`Pillow`, `prompt_toolkit`, `psutil`, `pytest`).
 - **Test Artifact Isolation**: When writing tests for dynamic skill creation or file generation, always isolate outputs using pytest's `tmp_path` fixture (e.g., `SkillsEngine(skills_dirs=[str(tmp_path)])`). Never generate test skills or temporary files inside `jarvis/skills/` or the tracked repository tree.
 - **Vision Capture & Safety**: Desktop screen capture in `jarvis/vision_service.py` executes via native Windows `.NET System.Drawing` graphics pipelines to avoid headless/session capture limitations. All image analysis tools (`analyze_image`, `inspect_screen`) enforce `ALLOWED_ROOTS` file sandboxing before dispatching base64 payloads to `meta/llama-3.2-11b-vision-instruct`.
 
-## Open / incomplete work (Mark 5.4 Roadmap Candidates)
+## Open / incomplete work
 
-JARVIS architectural priorities identified for Mark 5.4:
-1. **Persistent Contextual Memory Layer (Hierarchical Vector Store)**: Dual-tier memory (short-term episodic session buffer + long-term hierarchical vector store using FAISS/HNSW embeddings) layered onto the Obsidian vault and SQLite for rich multi-session continuity and proactive recall.
-2. **Adaptive Tool-Chaining Planner (Neuro-Symbolic Scheduler)**: Autonomous task planner capable of multi-step subtask decomposition, optimal tool selection graphs, and dynamic replanning on tool failures.
-3. **Cross-Modal Real-Time Streaming Perception Pipeline**: Continuous sensory awareness ingesting live desktop and terminal state updates for anticipatory assistance.
+Mark 5.4 Unified Autonomous Intelligence is fully implemented and operational across all three pillars:
+1. **Hierarchical Contextual Memory Layer**: Implemented in `jarvis/semantic_memory.py` with metadata filtering and automated Obsidian vault chunking.
+2. **Adaptive Neuro-Symbolic Task Planner**: Implemented in `jarvis/orchestration/dag_planner.py` with topological dependency resolution and self-healing replanning.
+3. **Cross-Modal Streaming Perception Pipeline**: Implemented in `jarvis/workspace_sentinel.py` with non-blocking desktop focus tracking and workspace monitoring.
+
+Mark 5.5 Roadmap Candidates:
+- **Full-Duplex Streaming Voice via WebRTC**: Ultra-low latency spoken dialogue bridging Edge-TTS and live microphone PCM streams.
+- **Distributed Multi-Node Subagent Fleet**: Remote execution across multiple developer workstations and edge nodes.
 
 ## Persona
 

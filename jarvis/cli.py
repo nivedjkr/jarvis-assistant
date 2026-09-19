@@ -287,6 +287,40 @@ class JarvisAssistant:
                 if not img_path:
                     return "Usage: [cyan]/vision <image_path> [optional prompt][/]"
                 return await self._execute_tool("analyze_image", {"path": img_path, "prompt": query} if query else {"path": img_path})
+        elif cmd == '/sentinel':
+            from jarvis.workspace_sentinel import get_workspace_sentinel
+            sentinel = get_workspace_sentinel()
+            action = (subcmd or "status").strip().lower()
+            if action == "start":
+                sentinel.start()
+                return "Streaming perception sentinel started in background, sir."
+            elif action == "stop":
+                sentinel.stop()
+                return "Streaming perception sentinel stopped, sir."
+            elif action == "scan":
+                evts = sentinel.scan_once()
+                if not evts:
+                    return "Sentinel scan complete: No active window or workspace changes detected."
+                return "\n".join([f"  • [{e.event_type}] {e.summary}" for e in evts])
+            elif action in ("events", "history"):
+                evts = sentinel.get_recent_events(limit=10)
+                if not evts:
+                    return "No perceptual events logged yet."
+                return "\n".join([f"  • [{e['event_type']}] {e['summary']} ({e['timestamp']})" for e in evts])
+            else:
+                st = sentinel.get_status()
+                state_str = "[bold green]ACTIVE[/]" if st["running"] else "[dim]INACTIVE[/]"
+                return (
+                    f"◈ [bold cyan]Streaming Perception Sentinel:[/] {state_str}\n"
+                    f"  Polling Interval: {st['interval_seconds']}s\n"
+                    f"  Buffered Events: {st['buffered_events_count']}\n"
+                    f"  Active Window: {st['last_active_window'] or '(none)'}\n\n"
+                    f"Usage:\n"
+                    f"  • [cyan]/sentinel start[/]  - Start background workspace & focus observer\n"
+                    f"  • [cyan]/sentinel stop[/]   - Stop background sentinel\n"
+                    f"  • [cyan]/sentinel scan[/]   - Run immediate perceptual observation pass\n"
+                    f"  • [cyan]/sentinel events[/] - List recent perceptual events"
+                )
         elif cmd == '/tools':
             return self._handle_tools_command(subcmd)
         elif cmd in ('/status', '/vitals'):
@@ -591,12 +625,13 @@ class JarvisAssistant:
   /test [path]                    Run test suite with pass/fail telemetry
   /screen [query]                 Capture & analyze active screen using vision model
   /vision <path> [prompt]         Analyze an image or screenshot with multimodal vision
+  /sentinel [start|stop|scan]     Streaming perception background observer & events
   /grill-me                       Enter interactive requirements clarification mode
 
 --- MODEL & RUNTIME CONTROLS ---
   /model [name]       Switch LLM (super, llama, gpt, gemini, groq)
   /status / /vitals   View live CPU, RAM, disk, and model vitals
-  /tools [query]      Search and inspect 107 registered tools
+  /tools [query]      Search and inspect 113 registered tools
   /missions           Manage persistent background missions
   /sessions           Manage multi-turn conversation sessions
   /diagnose           Run comprehensive non-blocking system diagnostics
@@ -613,33 +648,26 @@ class JarvisAssistant:
 ====================================================="""
     
     async def _run_plan_flow(self, goal: str) -> str:
-        """Explicit multi-step agent planning and execution flow."""
-        console.print(f"\n[bold cyan]◈ [Autonomous Planning][/] Analyzing goal: [white]{goal}[/]")
-        if not getattr(self.api, 'dispatcher', None):
-            return "Agent dispatcher not initialized."
+        """Mark 5.4 Adaptive Neuro-Symbolic Task Scheduler flow with dependency resolution."""
+        console.print(f"\n[bold cyan]◈ [Adaptive Neuro-Symbolic Planner][/] Analyzing goal: [white]{goal}[/]")
+        from jarvis.orchestration.dag_planner import DAGPlanner
+        planner = DAGPlanner()
+        available = list(self.tools.tools.keys())
         
-        with console.status("[bold cyan]Synthesizing execution plan...[/]", spinner="dots"):
-            plan = await self.api.dispatcher.planning_agent.plan_goal(goal, self.api)
-        
-        if not plan.subtasks:
-            console.print("[yellow]Plan resolved to direct execution.[/]")
-            return await self._run_direct_flow(goal)
+        with console.status("[bold cyan]Synthesizing DAG execution plan...[/]", spinner="dots"):
+            dag = await planner.create_plan(goal, available_tools=available)
 
-        console.print(f"[bold cyan]Plan decomposed into {len(plan.subtasks)} subtask(s):[/]")
-        for i, st in enumerate(plan.subtasks, 1):
-            console.print(f"  [cyan]{i}.[/] [bold white]{st.description}[/] [dim]→ Assigned: {st.assigned_agent}[/]")
+        console.print(planner.render_ascii_dag(dag))
         console.print()
 
-        with console.status("[bold cyan]Executing autonomous subtasks...[/]", spinner="dots"):
-            dispatch_res = await self.api.dispatcher.dispatch(
-                user_prompt=goal,
-                tool_registry=self.tools,
-                llm_client=self.api
-            )
+        with console.status("[bold cyan]Executing DAG subtasks with dependency resolution...[/]", spinner="dots"):
+            res = await planner.execute_plan(dag, tool_registry=self.tools)
 
-        resp = dispatch_res.get("content", "") or "Goal execution completed, sir."
-        self.api.add_assistant_message(resp, session_id="cli")
-        return resp
+        console.print(f"\n[bold cyan]◈ DAG Execution Complete:[/] {dag.status}")
+        console.print(planner.render_ascii_dag(dag))
+        summary = f"DAG plan execution finished with status: {dag.status}."
+        self.api.add_assistant_message(summary, session_id="cli")
+        return summary
 
     async def _run_direct_flow(self, user_input: str) -> str:
         """Direct fast-path tool-calling execution."""

@@ -78,4 +78,4 @@ async def test_cli_vision_slash_commands():
     res_help = await app.process("/help")
     assert "/screen" in res_help
     assert "/vision" in res_help
-    assert "107" in res_help
+    assert "registered tools" in res_help

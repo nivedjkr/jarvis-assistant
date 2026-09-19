@@ -2101,6 +2101,52 @@ class ToolRegistry:
             except Exception as e:
                 return f"FAILED: {e}"
 
+        def search_hierarchical_memory(
+            query: str,
+            category: Optional[str] = None,
+            project_id: Optional[str] = None,
+            top_k: int = 5
+        ) -> str:
+            try:
+                from jarvis.semantic_memory import get_semantic_memory
+                mem = get_semantic_memory()
+                results = mem.search(query=query, top_k=top_k, category=category, project_id=project_id)
+                if not results:
+                    return f"No relevant memories found for query '{query}'."
+                lines = []
+                for r in results:
+                    cat = r.get("category", "general").upper()
+                    proj = f" [proj: {r['project_id']}]" if r.get("project_id") else ""
+                    lines.append(f"• [{cat}]{proj} {r['text']} (score: {round(r.get('score', 0.0), 3)})")
+                return "\n".join(lines)
+            except Exception as e:
+                return f"FAILED: {e}"
+
+        def store_contextual_memory(
+            text: str,
+            category: str = "general",
+            project_id: Optional[str] = None,
+            tags: Optional[List[str]] = None
+        ) -> str:
+            try:
+                from jarvis.semantic_memory import get_semantic_memory
+                mem = get_semantic_memory()
+                return mem.add_fact(fact=text, category=category, project_id=project_id, tags=tags)
+            except Exception as e:
+                return f"FAILED: {e}"
+
+        def index_obsidian_vault(vault_path: Optional[str] = None) -> str:
+            try:
+                from jarvis.semantic_memory import get_semantic_memory
+                mem = get_semantic_memory()
+                res = mem.index_obsidian_vault(vault_path=vault_path)
+                if res.get("status") == "success":
+                    return f"Obsidian vault successfully indexed: {res['notes_scanned']} notes scanned, {res['chunks_indexed']} chunks embedded and committed to hierarchical vector store."
+                else:
+                    return f"Failed to index vault: {res.get('error')}"
+            except Exception as e:
+                return f"FAILED: {e}"
+
         self._add("remember_fact", remember_fact,
             "Store a fact in semantic memory for later recall.",
             {"fact": {"type": "string"},
@@ -2112,6 +2158,33 @@ class ToolRegistry:
             "even without exact keyword match.",
             {"query": {"type": "string"}},
             required=["query"])
+
+        self._add("search_hierarchical_memory", search_hierarchical_memory,
+            "Search contextual memory semantically with optional category and project filtering.",
+            {
+                "query": {"type": "string", "description": "The search query."},
+                "category": {"type": "string", "description": "Optional category filter: profile, project, topic, person, general."},
+                "project_id": {"type": "string", "description": "Optional project identifier filter."},
+                "top_k": {"type": "integer", "description": "Maximum number of results (default 5)."}
+            },
+            required=["query"])
+
+        self._add("store_contextual_memory", store_contextual_memory,
+            "Store durable knowledge in hierarchical vector memory with project and category tagging.",
+            {
+                "text": {"type": "string", "description": "The fact, learning, or context to store."},
+                "category": {"type": "string", "description": "Category: profile, project, topic, person, tool_solution, general."},
+                "project_id": {"type": "string", "description": "Associated project name or ID."},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "List of descriptive tags."}
+            },
+            required=["text"])
+
+        self._add("index_obsidian_vault", index_obsidian_vault,
+            "Scan, chunk, and embed all markdown notes from the Obsidian vault into hierarchical vector store.",
+            {
+                "vault_path": {"type": "string", "description": "Optional custom vault path override."}
+            },
+            required=[])
 
     def _register_inventory_tools(self):
         def set_inventory_threshold(sku: str, item_name: str, reorder_threshold: int) -> str:
@@ -3730,6 +3803,36 @@ class ToolRegistry:
             vs = get_vision_service()
             return await vs.inspect_screen(query=query)
 
+        async def execute_autonomous_plan(goal: str) -> str:
+            from jarvis.orchestration.dag_planner import DAGPlanner
+            planner = DAGPlanner()
+            available = list(self.tools.keys())
+            plan = await planner.create_plan(goal, available_tools=available)
+            res = await planner.execute_plan(plan, tool_registry=self)
+            return planner.render_ascii_dag(plan)
+
+        def get_sentinel_events(limit: Optional[int] = 5) -> str:
+            from jarvis.workspace_sentinel import get_workspace_sentinel
+            sentinel = get_workspace_sentinel()
+            evts = sentinel.get_recent_events(limit=limit or 5)
+            if not evts:
+                return "No perceptual sentinel events recorded."
+            lines = [f"Recent Perceptual Sentinel Events ({len(evts)}):"]
+            for e in evts:
+                lines.append(f"  • [{e['event_type']}] {e['summary']} ({e['timestamp']})")
+            return "\n".join(lines)
+
+        def scan_workspace_now() -> str:
+            from jarvis.workspace_sentinel import get_workspace_sentinel
+            sentinel = get_workspace_sentinel()
+            new_evts = sentinel.scan_once()
+            if not new_evts:
+                return "Workspace scan complete: No state or window changes detected."
+            lines = [f"Workspace scan detected {len(new_evts)} new event(s):"]
+            for e in new_evts:
+                lines.append(f"  • [{e.event_type}] {e.summary}")
+            return "\n".join(lines)
+
         # Register tools with schemas
         self._add("view_file", view_file,
             "View file content with line numbering and optional line range slicing.",
@@ -3821,6 +3924,25 @@ class ToolRegistry:
             {
                 "query": {"type": "string", "description": "Optional prompt focusing on specific elements."}
             },
+            required=[])
+
+        self._add("execute_autonomous_plan", execute_autonomous_plan,
+            "Decompose a complex multi-step objective into a DAG of subtasks, resolve dependencies, and execute with self-healing replanning.",
+            {
+                "goal": {"type": "string", "description": "High-level goal or objective to plan and achieve."}
+            },
+            required=["goal"])
+
+        self._add("get_sentinel_events", get_sentinel_events,
+            "Retrieve recent desktop and workspace events captured by the background streaming perception sentinel.",
+            {
+                "limit": {"type": "integer", "description": "Maximum events to return (default 5)."}
+            },
+            required=[])
+
+        self._add("scan_workspace_now", scan_workspace_now,
+            "Execute an immediate perceptual scan of the active desktop window, git status, and workspace health.",
+            {},
             required=[])
 
 
