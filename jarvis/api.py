@@ -151,11 +151,13 @@ class ConnectionManager:
             self.disconnect(conn)
 
 manager = ConnectionManager()
+backend_wake_detector = None
 
 import uuid
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    global backend_wake_detector
     # Verify auth token from query params or headers
     token = ws.query_params.get("token") or ws.headers.get("x-auth-token")
     if not token or token != WS_AUTH_TOKEN:
@@ -282,6 +284,95 @@ async def websocket_endpoint(ws: WebSocket):
                             "type": "sessions_list",
                             "sessions": sessions,
                             "session_id": session_id
+                        })
+                    continue
+
+                if msg_type == "handsfree":
+                    action = data.get("action", "toggle").lower()
+                    from jarvis.sound_effects import play_sound
+                    if action in ("start", "on", "enable"):
+                        if backend_wake_detector is None:
+                            from jarvis.wake_word import WakeWordDetector
+                            loop = asyncio.get_event_loop()
+                            backend_wake_detector = WakeWordDetector(
+                                on_wake=lambda: asyncio.run_coroutine_threadsafe(
+                                    manager.broadcast({"type": "wake_detected", "sound": "wake"}),
+                                    loop
+                                ),
+                                on_command=lambda text: asyncio.run_coroutine_threadsafe(
+                                    manager.broadcast({"type": "handsfree_command", "text": text}),
+                                    loop
+                                )
+                            )
+                        backend_wake_detector.start()
+                        play_sound("wake")
+                        await manager.broadcast({"type": "handsfree_status", "active": True})
+                    elif action in ("stop", "off", "disable"):
+                        if backend_wake_detector:
+                            backend_wake_detector.stop()
+                        await manager.broadcast({"type": "handsfree_status", "active": False})
+                    else:
+                        if backend_wake_detector and backend_wake_detector.running:
+                            backend_wake_detector.stop()
+                            await manager.broadcast({"type": "handsfree_status", "active": False})
+                        else:
+                            if backend_wake_detector is None:
+                                from jarvis.wake_word import WakeWordDetector
+                                loop = asyncio.get_event_loop()
+                                backend_wake_detector = WakeWordDetector(
+                                    on_wake=lambda: asyncio.run_coroutine_threadsafe(
+                                        manager.broadcast({"type": "wake_detected", "sound": "wake"}),
+                                        loop
+                                    ),
+                                    on_command=lambda text: asyncio.run_coroutine_threadsafe(
+                                        manager.broadcast({"type": "handsfree_command", "text": text}),
+                                        loop
+                                    )
+                                )
+                            backend_wake_detector.start()
+                            play_sound("wake")
+                            await manager.broadcast({"type": "handsfree_status", "active": True})
+                    continue
+
+                if msg_type == "sound":
+                    cue = data.get("sound", "wake")
+                    try:
+                        from jarvis.sound_effects import play_sound
+                        play_sound(cue)
+                    except Exception:
+                        pass
+                    await manager.broadcast({"type": "sound", "sound": cue})
+                    continue
+
+                if msg_type == "barge_in":
+                    await manager.broadcast({"type": "barge_in"})
+                    continue
+
+                if msg_type == "image_message":
+                    image_b64 = data.get("image_data") or data.get("image", "")
+                    user_prompt = data.get("prompt", "Analyze this image and describe what you see, sir.")
+                    if image_b64:
+                        import base64
+                        import time
+                        from pathlib import Path
+                        if "," in image_b64:
+                            image_b64 = image_b64.split(",", 1)[1]
+                        img_bytes = base64.b64decode(image_b64)
+                        saved_dir = Path("jarvis/data/screenshots")
+                        saved_dir.mkdir(parents=True, exist_ok=True)
+                        img_path = str((saved_dir / f"upload_{int(time.time()*1000)}.png").resolve())
+                        with open(img_path, "wb") as f:
+                            f.write(img_bytes)
+
+                        await ws.send_json({"type": "status", "status": "thinking", "sound": "ack"})
+                        res_analysis = await tool_registry.execute("analyze_image", {"path": img_path, "prompt": user_prompt})
+                        api_client.add_user_message(f"[Image Attached] {user_prompt}", session_id=session_id)
+                        api_client.add_assistant_message(res_analysis, session_id=session_id)
+                        await ws.send_json({
+                            "type": "response",
+                            "text": res_analysis,
+                            "status": "speaking",
+                            "sound": "done"
                         })
                     continue
 
@@ -446,7 +537,8 @@ async def websocket_endpoint(ws: WebSocket):
                     # Send thinking status
                     await ws.send_json({
                         "type": "status",
-                        "status": "thinking"
+                        "status": "thinking",
+                        "sound": "ack"
                     })
                 
                     # Check slash command handling
@@ -542,6 +634,62 @@ async def websocket_endpoint(ws: WebSocket):
                                 "type": "response",
                                 "text": res,
                                 "status": "speaking"
+                            })
+                        elif cmd.startswith("/handsfree") or cmd.startswith("/listen"):
+                            from jarvis.sound_effects import play_sound
+                            parts = user_msg.strip().split()
+                            sub = parts[1].lower() if len(parts) > 1 else "status"
+                            if sub in ("on", "start", "enable"):
+                                if backend_wake_detector is None:
+                                    from jarvis.wake_word import WakeWordDetector
+                                    loop = asyncio.get_event_loop()
+                                    backend_wake_detector = WakeWordDetector(
+                                        on_wake=lambda: asyncio.run_coroutine_threadsafe(
+                                            manager.broadcast({"type": "wake_detected", "sound": "wake"}),
+                                            loop
+                                        ),
+                                        on_command=lambda text: asyncio.run_coroutine_threadsafe(
+                                            manager.broadcast({"type": "handsfree_command", "text": text}),
+                                            loop
+                                        )
+                                    )
+                                backend_wake_detector.start()
+                                play_sound("wake")
+                                await manager.broadcast({"type": "handsfree_status", "active": True})
+                                res = "Tony Stark Hands-Free Mode ENABLED. Speak 'Hey JARVIS' to activate, sir."
+                            elif sub in ("off", "stop", "disable"):
+                                if backend_wake_detector:
+                                    backend_wake_detector.stop()
+                                await manager.broadcast({"type": "handsfree_status", "active": False})
+                                res = "Hands-free wake-word detection deactivated, sir."
+                            else:
+                                is_act = bool(backend_wake_detector and backend_wake_detector.running)
+                                res = f"Hands-Free Status: {'ACTIVE' if is_act else 'INACTIVE'}, sir."
+
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking",
+                                "sound": "done"
+                            })
+                        elif cmd.startswith("/sound"):
+                            from jarvis.sound_effects import play_sound
+                            parts = user_msg.strip().split()
+                            cue = parts[1].lower() if len(parts) > 1 else "wake"
+                            play_sound(cue)
+                            await manager.broadcast({"type": "sound", "sound": cue})
+                            await ws.send_json({
+                                "type": "response",
+                                "text": f"Played Stark UI audio cue: '{cue}', sir.",
+                                "status": "idle"
+                            })
+                        elif cmd.startswith("/screen") or cmd.startswith("/vision"):
+                            res = await tool_registry.execute("inspect_screen", {"prompt": "Analyze what is on the user screen and provide high-level assistance, sir."})
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking",
+                                "sound": "done"
                             })
                         elif cmd.startswith("/provider"):
 
@@ -839,7 +987,8 @@ async def websocket_endpoint(ws: WebSocket):
                             "type": "response",
                             "text": response,
                             "tool_calls": executed_tools,
-                            "status": "speaking"
+                            "status": "speaking",
+                            "sound": "done"
                         })
                     
                         print(f"[WS] Sent response ({len(executed_tools)} tools executed): {response[:100]}")

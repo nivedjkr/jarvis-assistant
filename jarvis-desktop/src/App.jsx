@@ -10,9 +10,73 @@ import EmailPanel from './components/EmailPanel'
 import Sidebar from './components/Sidebar'
 import CalendarPanel from './components/CalendarPanel'
 
+function playStarkChime(type) {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext
+    if (!AudioCtx) return
+    const ctx = new AudioCtx()
+    if (ctx.state === 'suspended') ctx.resume()
+    const now = ctx.currentTime
+
+    if (type === 'wake') {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(880, now)
+      osc.frequency.exponentialRampToValueAtTime(1760, now + 0.12)
+      gain.gain.setValueAtTime(0.3, now)
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(now)
+      osc.stop(now + 0.35)
+    } else if (type === 'ack') {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(523.25, now)
+      osc.frequency.setValueAtTime(659.25, now + 0.08)
+      gain.gain.setValueAtTime(0.25, now)
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(now)
+      osc.stop(now + 0.25)
+    } else if (type === 'done') {
+      ;[659.25, 880.0, 1318.5].forEach((freq, i) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(freq, now + i * 0.07)
+        gain.gain.setValueAtTime(0.2, now + i * 0.07)
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.3)
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.start(now + i * 0.07)
+        osc.stop(now + i * 0.07 + 0.3)
+      })
+    } else if (type === 'alert') {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'triangle'
+      osc.frequency.setValueAtTime(440, now)
+      osc.frequency.exponentialRampToValueAtTime(370, now + 0.15)
+      gain.gain.setValueAtTime(0.3, now)
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(now)
+      osc.stop(now + 0.3)
+    }
+  } catch (e) {
+    console.warn('Stark chime error:', e)
+  }
+}
+
 export default function App() {
   const [orbState, setOrbState] = useState('idle')
   const [isConnected, setIsConnected] = useState(true)
+  const [isHandsFree, setIsHandsFree] = useState(false)
   const [lastStateUpdate, setLastStateUpdate] = useState(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
@@ -229,6 +293,30 @@ export default function App() {
       window.jarvis.onResponse((data) => {
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 
+        if (data.sound) {
+          playStarkChime(data.sound)
+        }
+        if (data.type === 'wake_detected') {
+          playStarkChime('wake')
+          stopSpeech()
+          setOrbState('listening')
+          return
+        }
+        if (data.type === 'barge_in') {
+          stopSpeech()
+          return
+        }
+        if (data.type === 'handsfree_status') {
+          setIsHandsFree(Boolean(data.active))
+          return
+        }
+        if (data.type === 'handsfree_command') {
+          playStarkChime('ack')
+          setOrbState('thinking')
+          setMessages(prev => [...prev, { role: 'user', text: data.text, timestamp: timeStr }])
+          return
+        }
+
         if (data.type === 'chunk') {
           clearPendingTimeout()
           const chunkText = data.text || ''
@@ -438,6 +526,7 @@ export default function App() {
       return
     }
 
+    playStarkChime('ack')
     setMessages(prev => [...prev, {
       role: 'user',
       text: cleanInput,
@@ -462,6 +551,23 @@ export default function App() {
       if (window.jarvis?.sendMessage) {
         window.jarvis.sendMessage(cleanInput)
       }
+    }
+  }
+
+  const handleToggleHandsFree = () => {
+    const nextState = !isHandsFree
+    setIsHandsFree(nextState)
+    playStarkChime(nextState ? 'wake' : 'ack')
+    if (window.jarvis?.sendSlashCommand) {
+      window.jarvis.sendSlashCommand(nextState ? '/handsfree on' : '/handsfree off')
+    }
+  }
+
+  const handleTriggerVision = () => {
+    playStarkChime('ack')
+    setOrbState('thinking')
+    if (window.jarvis?.sendSlashCommand) {
+      window.jarvis.sendSlashCommand('/screen')
     }
   }
 
@@ -586,7 +692,13 @@ export default function App() {
         <EmailPanel isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
       </div>
 
-      <InputBar onSend={handleSendMessage} currentSessionId={currentSessionId} />
+      <InputBar 
+        onSend={handleSendMessage} 
+        currentSessionId={currentSessionId}
+        isHandsFree={isHandsFree}
+        onToggleHandsFree={handleToggleHandsFree}
+        onTriggerVision={handleTriggerVision}
+      />
     </div>
   )
 }

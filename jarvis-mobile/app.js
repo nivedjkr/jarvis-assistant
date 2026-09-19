@@ -38,11 +38,81 @@
   const wsHostInput = document.getElementById('wsHostInput');
   const wsTokenInput = document.getElementById('wsTokenInput');
   const ttsToggle = document.getElementById('ttsToggle');
+  const mobileHandsFreeBtn = document.getElementById('mobileHandsFreeBtn');
+  const mobileCameraBtn = document.getElementById('mobileCameraBtn');
+  const mobileCameraInput = document.getElementById('mobileCameraInput');
+  const mobileInputCamBtn = document.getElementById('mobileInputCamBtn');
+
+  // Stark Web Audio Synthesizer (Zero-latency hardware chimes)
+  function playStarkChime(type) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+      const now = ctx.currentTime;
+
+      if (type === 'wake') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(1760, now + 0.12);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.35);
+      } else if (type === 'ack') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.setValueAtTime(659.25, now + 0.08);
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.25);
+      } else if (type === 'done') {
+        [659.25, 880.0, 1318.5].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + i * 0.07);
+          gain.gain.setValueAtTime(0.2, now + i * 0.07);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.3);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + i * 0.07);
+          osc.stop(now + i * 0.07 + 0.3);
+        });
+      } else if (type === 'alert') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(370, now + 0.15);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.3);
+      }
+    } catch (e) {
+      console.warn('Stark chime error:', e);
+    }
+  }
 
   // App State
   let ws = null;
   let isConnected = false;
   let isListening = false;
+  let isHandsFreeActive = false;
+  let handsFreeRecognition = null;
   let currentStreamingBubble = null;
   let streamingFullText = '';
   let lastProcessedIndex = 0;
@@ -403,6 +473,19 @@
     const msgBubble = document.createElement('div');
     msgBubble.className = 'msg-bubble';
     msgBubble.innerHTML = renderMarkdown(text);
+
+    if (options.imageUrl) {
+      const img = document.createElement('img');
+      img.src = options.imageUrl;
+      img.style.maxWidth = '100%';
+      img.style.maxHeight = '220px';
+      img.style.borderRadius = '8px';
+      img.style.marginTop = '8px';
+      img.style.display = 'block';
+      img.style.objectFit = 'contain';
+      msgBubble.appendChild(img);
+    }
+
     msgRow.appendChild(msgBubble);
 
     if (options.toolCalls && options.toolCalls.length > 0) {
@@ -514,7 +597,40 @@
   }
 
   function handleServerMessage(data) {
-    if (data.type === 'status') {
+    if (data.sound) {
+      playStarkChime(data.sound);
+    }
+
+    if (data.type === 'wake_detected') {
+      stopSpeech();
+      playStarkChime('wake');
+      setOrbState('listening');
+      statusText.textContent = 'Wake Detected';
+      appendMessage('jarvis', 'JARVIS is listening, sir...', { isAlert: false });
+      return;
+    } else if (data.type === 'barge_in') {
+      stopSpeech();
+      setOrbState('listening');
+      return;
+    } else if (data.type === 'handsfree_status') {
+      isHandsFreeActive = !!data.active;
+      if (mobileHandsFreeBtn) {
+        if (isHandsFreeActive) {
+          mobileHandsFreeBtn.classList.add('active');
+          mobileHandsFreeBtn.textContent = '🎙️ Hands-Free ON';
+        } else {
+          mobileHandsFreeBtn.classList.remove('active');
+          mobileHandsFreeBtn.textContent = '🎙️ Hands-Free';
+        }
+      }
+      return;
+    } else if (data.type === 'handsfree_command') {
+      playStarkChime('ack');
+      appendMessage('user', data.text || '');
+      setOrbState('thinking');
+      statusText.textContent = 'Processing';
+      return;
+    } else if (data.type === 'status') {
       if (data.status === 'thinking') {
         clearThinkingTimeout();
         setOrbState('thinking');
@@ -600,6 +716,10 @@
         appendMessage('jarvis', respText, { toolCalls: data.tool_calls });
       }
 
+      if (!data.sound) {
+        playStarkChime('done');
+      }
+
       const hasStreamed = streamingFullText.length > 0;
       if (hasStreamed) {
         const tailText = streamingFullText.slice(lastProcessedIndex);
@@ -615,6 +735,7 @@
       lastProcessedIndex = 0;
     } else if (data.type === 'proactive_alert') {
       clearThinkingTimeout();
+      playStarkChime('alert');
       const alertText = data.text || 'Proactive alert received.';
       appendMessage('jarvis', alertText, { isAlert: true });
       enqueueSentence(alertText);
@@ -636,9 +757,11 @@
 
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       appendMessage('jarvis', 'Error: Backend is disconnected.', { isAlert: true });
+      playStarkChime('alert');
       return;
     }
 
+    playStarkChime('ack');
     appendMessage('user', clean);
     setOrbState('thinking');
     statusText.textContent = 'Processing';
@@ -654,6 +777,37 @@
     } else {
       ws.send(JSON.stringify({ type: 'message', message: clean }));
     }
+
+    userInput.value = '';
+    userInput.style.height = 'auto';
+  }
+
+  function sendImageMessage(base64Data, promptText) {
+    stopSpeech();
+    clearThinkingTimeout();
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      appendMessage('jarvis', 'Error: Backend is disconnected.', { isAlert: true });
+      playStarkChime('alert');
+      return;
+    }
+
+    playStarkChime('ack');
+    appendMessage('user', `📷 [Camera Vision Request] ${promptText || ''}`, { imageUrl: base64Data });
+    setOrbState('thinking');
+    statusText.textContent = 'Analyzing Vision';
+
+    thinkingTimeout = setTimeout(() => {
+      setOrbState('idle');
+      statusText.textContent = 'Connected';
+      appendMessage('jarvis', 'Vision processing timeout, sir.', { isAlert: true });
+    }, 60000);
+
+    ws.send(JSON.stringify({
+      type: 'image_message',
+      image_data: base64Data,
+      prompt: promptText || 'Analyze this camera image in detail, sir.'
+    }));
 
     userInput.value = '';
     userInput.style.height = 'auto';
@@ -721,6 +875,80 @@
     const pill = e.target.closest('.pill-btn');
     if (pill && pill.dataset.cmd) sendMessage(pill.dataset.cmd);
   });
+
+  // Camera & Vision Handlers
+  if (mobileCameraBtn) {
+    mobileCameraBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (mobileCameraInput) mobileCameraInput.click();
+    });
+  }
+
+  if (mobileInputCamBtn) {
+    mobileInputCamBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (mobileCameraInput) mobileCameraInput.click();
+    });
+  }
+
+  if (mobileCameraInput) {
+    mobileCameraInput.addEventListener('change', () => {
+      const file = mobileCameraInput.files && mobileCameraInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64Data = e.target.result;
+        sendImageMessage(base64Data, userInput.value.trim() || 'Analyze this camera image in detail, sir.');
+        mobileCameraInput.value = '';
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Hands-Free Toggle Handler
+  if (mobileHandsFreeBtn) {
+    mobileHandsFreeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const nextState = !isHandsFreeActive;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'handsfree', action: nextState ? 'start' : 'stop' }));
+      }
+      isHandsFreeActive = nextState;
+      if (isHandsFreeActive) {
+        mobileHandsFreeBtn.classList.add('active');
+        mobileHandsFreeBtn.textContent = '🎙️ Hands-Free ON';
+        playStarkChime('wake');
+      } else {
+        mobileHandsFreeBtn.classList.remove('active');
+        mobileHandsFreeBtn.textContent = '🎙️ Hands-Free';
+        playStarkChime('ack');
+      }
+    });
+  }
+
+  // Tap-to-Barge-In Handlers
+  if (orbCanvas) {
+    orbCanvas.addEventListener('click', () => {
+      if (isSpeaking) {
+        stopSpeech();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'barge_in' }));
+        }
+      }
+    });
+  }
+
+  if (chatContainer) {
+    chatContainer.addEventListener('click', (e) => {
+      if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) return;
+      if (isSpeaking) {
+        stopSpeech();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'barge_in' }));
+        }
+      }
+    });
+  }
 
   function renderSessionsList(sessions, activeId) {
     if (!sessionsList) return;

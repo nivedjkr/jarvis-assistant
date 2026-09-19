@@ -136,10 +136,11 @@ All changes must be validated against the automated test suite before reporting 
 
 ## Open / incomplete work
 
-Mark 5.5 Stark Workshop Architecture is operational:
-1. **Hands-Free Wake-Word Engine**: Local ONNX `openWakeWord` (`hey_jarvis`) with background streaming microphone VAD in `jarvis/wake_word.py`.
-2. **Real-Time Barge-In Interruption**: Active TTS playback is halted immediately when user speech or hotword is detected.
-3. **Stark Audio FX**: Native zero-latency synthesized UI audio cues (`wake`, `ack`, `done`, `alert`) in `jarvis/sound_effects.py` and slash commands (`/handsfree`, `/sound`).
+Mark 5.5 Stark Workshop Architecture is operational across Backend, Electron Desktop, and Mobile PWA:
+1. **Hands-Free Wake-Word Engine**: Local ONNX `openWakeWord` (`hey_jarvis`) with background streaming microphone VAD in `jarvis/wake_word.py`. Exposed via `/handsfree` slash command and interactive toggle buttons on both Desktop (`src/components/InputBar.jsx`) and Mobile PWA (`#mobileHandsFreeBtn`).
+2. **Real-Time Barge-In Interruption**: Active TTS playback is halted immediately when user speech or hotword is detected, or on client tap/click interruption.
+3. **Stark Audio FX**: Zero-latency Web Audio hardware synthesized audio cues (`wake`, `ack`, `done`, `alert`) on both Desktop and Mobile PWA, perfectly synchronized with backend WebSocket `sound` events and native Windows `winsound`.
+4. **Desktop & Mobile Vision**: One-click screen capture inspection on Desktop (`📷` button calling `/screen`), and native environment camera capture & image upload on Mobile PWA (`#mobileCameraBtn` & `#mobileInputCamBtn` transmitting base64 to multimodal vision engine).
 
 Roadmap Candidates:
 - **Full-Duplex Streaming Spoken Dialogue via WebRTC**: Ultra-low latency voice bridging live PCM bidirectional streams.

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import './InputBar.css'
 
-export default function InputBar({ onSend, currentSessionId }) {
+export default function InputBar({ onSend, currentSessionId, isHandsFree, onToggleHandsFree, onTriggerVision }) {
   const [text, setText] = useState('')
   const inputRef = useRef(null)
 
@@ -12,10 +12,8 @@ export default function InputBar({ onSend, currentSessionId }) {
   }
 
   useEffect(() => {
-    // Focus input field immediately when mounted
     focusInput()
 
-    // Global listener to re-focus input box whenever user starts typing outside any form control
     const handleGlobalKeyDown = (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const activeEl = document.activeElement
@@ -31,7 +29,6 @@ export default function InputBar({ onSend, currentSessionId }) {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown)
   }, [])
 
-  // Auto-focus input whenever session switches or active session changes
   useEffect(() => {
     focusInput()
     const timer = setTimeout(focusInput, 50)
@@ -78,12 +75,31 @@ export default function InputBar({ onSend, currentSessionId }) {
         ref={inputRef}
         type="text"
         className="terminal-input-field"
-        placeholder="Type a command or ask JARVIS..."
+        placeholder={isHandsFree ? "Say 'Hey JARVIS' or type a command..." : "Type a command or ask JARVIS..."}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
         autoFocus
       />
+      <div className="input-action-buttons">
+        <button
+          type="button"
+          className="input-action-btn vision-btn"
+          onClick={(e) => { e.stopPropagation(); onTriggerVision && onTriggerVision(); }}
+          title="Screen Vision: Capture & inspect desktop screen"
+        >
+          📷
+        </button>
+        <button
+          type="button"
+          className={`input-action-btn handsfree-btn ${isHandsFree ? 'active' : ''}`}
+          onClick={(e) => { e.stopPropagation(); onToggleHandsFree && onToggleHandsFree(); }}
+          title={isHandsFree ? "Hands-Free Mode: ACTIVE ('Hey JARVIS') - Click to disable" : "Hands-Free Mode: OFF - Click to enable"}
+        >
+          🎙️
+          {isHandsFree && <span className="handsfree-dot"></span>}
+        </button>
+      </div>
       <span className="send-hint">ENTER TO SEND</span>
     </div>
   )

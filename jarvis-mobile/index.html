@@ -62,17 +62,26 @@
 
     <!-- Quick Action Pills -->
     <div class="action-pills" id="actionPills">
-      <button class="pill-btn" data-cmd="/email">📩 Check Email</button>
-      <button class="pill-btn" data-cmd="/diagnose">🩺 Diagnostics</button>
+      <button class="pill-btn" id="mobileHandsFreeBtn">🎙️ Hands-Free</button>
+      <button class="pill-btn" id="mobileCameraBtn">📷 Camera Vision</button>
+      <button class="pill-btn" data-cmd="/sentinel status">🛡️ Sentinel</button>
+      <button class="pill-btn" data-cmd="/missions">🚀 Missions</button>
+      <button class="pill-btn" data-cmd="/email">📩 Email</button>
       <button class="pill-btn" data-cmd="/vitals">📊 Vitals</button>
       <button class="pill-btn" data-cmd="/tools">⚡ Tools</button>
       <button class="pill-btn" data-cmd="/help">❓ Help</button>
     </div>
 
+    <!-- Hidden native camera / photo capture input -->
+    <input type="file" id="mobileCameraInput" accept="image/*" capture="environment" style="display:none;" />
+
     <!-- Floating Input Bar -->
     <footer class="input-container">
       <div class="input-wrapper">
         <textarea id="userInput" placeholder="Ask JARVIS..." rows="1"></textarea>
+        <button class="cam-btn" id="mobileInputCamBtn" title="Take photo or send image">
+          <span>📷</span>
+        </button>
         <button class="mic-btn" id="micBtn" title="Voice Input">
           <span class="mic-icon">🎙️</span>
         </button>

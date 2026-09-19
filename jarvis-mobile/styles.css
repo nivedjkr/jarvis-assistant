@@ -432,7 +432,7 @@ html, body {
   color: var(--text-muted);
 }
 
-.mic-btn, .send-btn {
+.mic-btn, .send-btn, .cam-btn {
   background: transparent;
   border: none;
   color: var(--text-muted);
@@ -447,10 +447,22 @@ html, body {
   transition: all 0.2s ease;
 }
 
+.cam-btn:active {
+  color: var(--accent);
+  transform: scale(0.92);
+}
+
 .mic-btn.listening {
   color: var(--danger);
   background: rgba(255, 71, 87, 0.15);
   animation: pulse 0.8s infinite alternate;
+}
+
+.pill-btn.active {
+  background: rgba(46, 213, 115, 0.2) !important;
+  border-color: #2ed573 !important;
+  color: #2ed573 !important;
+  box-shadow: 0 0 10px rgba(46, 213, 115, 0.3);
 }
 
 .send-btn {
