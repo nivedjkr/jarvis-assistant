@@ -737,17 +737,36 @@ NEVER:
 
             registered = tool_registry.tools if tool_registry and hasattr(tool_registry, 'tools') else tool_schemas
 
+            # Fast-path check: pure conversational queries bypass 116 tool schema overhead
+            is_pure_convo = False
+            if user_last:
+                clean_ul = user_last.lower().strip().rstrip(".!?")
+                convo_set = {
+                    "hi", "hello", "hey", "hey jarvis", "hi jarvis", "hello jarvis",
+                    "good morning", "good afternoon", "good evening", "good night",
+                    "how are you", "how are you doing", "what's up", "whats up",
+                    "who are you", "what are you", "tell me about yourself",
+                    "thank you", "thanks", "thank you jarvis", "thanks jarvis",
+                    "cool", "nice", "awesome", "great", "ok", "okay", "understood",
+                    "stand down", "stand by", "standing by", "sleep", "goodbye", "bye"
+                }
+                if clean_ul in convo_set or (clean_ul.startswith(("hello ", "hey ", "hi ")) and len(clean_ul.split()) <= 3):
+                    is_pure_convo = True
+                    print(f"[FAST-PATH] Pure conversational turn detected ('{user_last}'). Bypassing tool schema overhead.")
+
             while current_turn < max_turns:
                 current_turn += 1
                 t_llm0 = time.time()
+                # Use tools on turn 1 for non-conversational prompts; synthesis turns drop tool schemas to accelerate inference
+                current_tools = None if (is_pure_convo or current_turn > 1) else tool_schemas
                 if hasattr(self.provider, 'chat'):
-                    response = await self.provider.chat(messages, tools=tool_schemas, max_tokens=2048)
+                    response = await self.provider.chat(messages, tools=current_tools, max_tokens=2048)
                 else:
                     response = await self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
-                        tools=tool_schemas,
-                        tool_choice="auto" if tool_schemas else None,
+                        tools=current_tools,
+                        tool_choice="auto" if current_tools else None,
                         max_tokens=2048,
                         stream=False
                     )
@@ -775,7 +794,7 @@ NEVER:
                                 fb_prov = fb_cls()
                                 print(f"[FAILOVER] Primary provider ({current_name}) failed. Attempting failover to {fb_prov.name}...")
                                 t_fb0 = time.time()
-                                fb_res = await fb_prov.chat(messages, tools=tool_schemas, max_tokens=2048)
+                                fb_res = await fb_prov.chat(messages, tools=current_tools, max_tokens=2048)
                                 while inspect.isawaitable(fb_res):
                                     fb_res = await fb_res
                                 llm_time_ms += (time.time() - t_fb0) * 1000
@@ -816,39 +835,67 @@ NEVER:
                     overflow_count = len(tool_calls) - max_allowed_calls
                     pending_confirmation = False
 
-                    for tc in calls_to_process:
-                        name = tc["name"]
-                        args = tc["arguments"]
-
-                        print(f"[AGENT] Executing tool")
-                        t_tool0 = time.time()
+                    async def _execute_single_tool(tc_item):
+                        t_name = tc_item["name"]
+                        t_args = tc_item["arguments"]
+                        t_t0 = time.time()
                         try:
-                            result = await tool_executor(name, args)
-                            print(f"[AGENT] Tool completed successfully")
+                            t_res = await tool_executor(t_name, t_args)
                         except Exception as te:
-                            result = f"Tool Execution Error: {str(te)}"
-                            print(f"[AGENT] Tool failed: {te}")
-                        tools_time_ms += (time.time() - t_tool0) * 1000
+                            t_res = f"Tool Execution Error: {str(te)}"
+                        t_dur = (time.time() - t_t0) * 1000
+                        return tc_item, t_name, t_args, t_res, t_dur
 
-                        execution_trace.append({
-                            "id": tc["id"],
-                            "name": name,
-                            "args": args,
-                            "result": str(result)
-                        })
-                        tool_results.append(result)
-
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc["id"],
-                            "content": str(result)
-                        })
-
-                        if "PENDING_CONFIRMATION" in str(result) or "CONFIRMATION REQUIRED" in str(result):
-                            print(f"[PIPELINE] Risky tool '{name}' requires confirmation. Halting loop.")
-                            pending_confirmation = True
-                            final_response_text = str(result)
-                            break
+                    if len(calls_to_process) > 1:
+                        # Parallel execution optimization for concurrent tools
+                        t_batch0 = time.time()
+                        batch_results = await asyncio.gather(*[_execute_single_tool(tc_item) for tc_item in calls_to_process])
+                        tools_time_ms += (time.time() - t_batch0) * 1000
+                        for tc_item, name, args, result, dur in batch_results:
+                            execution_trace.append({
+                                "id": tc_item["id"],
+                                "name": name,
+                                "args": args,
+                                "result": str(result)
+                            })
+                            tool_results.append(result)
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc_item["id"],
+                                "content": str(result)
+                            })
+                            if "PENDING_CONFIRMATION" in str(result) or "CONFIRMATION REQUIRED" in str(result):
+                                print(f"[PIPELINE] Risky tool '{name}' requires confirmation. Halting loop.")
+                                pending_confirmation = True
+                                final_response_text = str(result)
+                                break
+                    else:
+                        for tc in calls_to_process:
+                            name = tc["name"]
+                            args = tc["arguments"]
+                            t_tool0 = time.time()
+                            try:
+                                result = await tool_executor(name, args)
+                            except Exception as te:
+                                result = f"Tool Execution Error: {str(te)}"
+                            tools_time_ms += (time.time() - t_tool0) * 1000
+                            execution_trace.append({
+                                "id": tc["id"],
+                                "name": name,
+                                "args": args,
+                                "result": str(result)
+                            })
+                            tool_results.append(result)
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": str(result)
+                            })
+                            if "PENDING_CONFIRMATION" in str(result) or "CONFIRMATION REQUIRED" in str(result):
+                                print(f"[PIPELINE] Risky tool '{name}' requires confirmation. Halting loop.")
+                                pending_confirmation = True
+                                final_response_text = str(result)
+                                break
 
                     if pending_confirmation:
                         break

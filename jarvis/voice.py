@@ -278,13 +278,28 @@ class TTSEngine:
             return ""
 
     async def synthesize_sentence(self, text: str) -> str:
-        """Synthesize a single sentence to base64 audio data using edge-tts with en-GB-RyanNeural"""
-        audio_bytes = await synthesize_sentence(text, voice=self.voice)
+        """Synthesize a single sentence to base64 audio data using edge-tts with en-GB-RyanNeural and memory LRU cache"""
+        clean_text = _clean_text_for_speech(text)
+        if not clean_text:
+            return ""
+
+        cache_key = f"{self.voice}:{clean_text}"
+        with _TTS_CACHE_LOCK:
+            if cache_key in _TTS_CACHE:
+                return _TTS_CACHE[cache_key]
+
+        audio_bytes = await synthesize_sentence(clean_text, voice=self.voice)
         if not audio_bytes:
             return ""
         import base64
         b64_str = base64.b64encode(audio_bytes).decode('utf-8')
-        return f"data:audio/mp3;base64,{b64_str}"
+        res = f"data:audio/mp3;base64,{b64_str}"
+
+        with _TTS_CACHE_LOCK:
+            if len(_TTS_CACHE) > 500:
+                _TTS_CACHE.pop(next(iter(_TTS_CACHE)))
+            _TTS_CACHE[cache_key] = res
+        return res
 
     def _split_sentences(self, text: str) -> list:
         """

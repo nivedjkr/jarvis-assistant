@@ -346,6 +346,33 @@
       .trim();
   }
 
+  function prefetchNextSentence(item) {
+    if (!item || item.audioPromise || item.audioData || !getTtsEnabled()) return;
+    const text = typeof item === 'string' ? item : item.text;
+    if (!text) return;
+    try {
+      const host = getWsHost();
+      const httpProto = window.location.protocol.startsWith('https') ? 'https' : 'http';
+      item.audioPromise = fetch(`${httpProto}://${host}/tts_sentence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sentence: text })
+      })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && data.audio) {
+          item.audioData = data.audio;
+          return data.audio;
+        }
+        return null;
+      })
+      .catch(err => {
+        console.warn('Mobile TTS prefetch error:', err);
+        return null;
+      });
+    } catch (e) {}
+  }
+
   async function processNextSentence() {
     const currentSession = playbackSession;
 
@@ -356,7 +383,13 @@
     }
 
     isSpeaking = true;
-    const text = sentenceQueue.shift();
+    const item = sentenceQueue.shift();
+    if (!item) {
+      processNextSentence();
+      return;
+    }
+
+    const text = typeof item === 'string' ? item : item.text;
     if (!text) {
       processNextSentence();
       return;
@@ -367,37 +400,52 @@
       return;
     }
 
+    // Pipeline prefetch: immediately trigger synthesis for upcoming sentence
+    if (sentenceQueue.length > 0) {
+      prefetchNextSentence(sentenceQueue[0]);
+    }
+
     try {
-      const host = getWsHost();
-      const httpProto = window.location.protocol.startsWith('https') ? 'https' : 'http';
-      const res = await fetch(`${httpProto}://${host}/tts_sentence`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sentence: text })
-      });
+      let audioBase64 = typeof item === 'object' ? item.audioData : null;
+      if (!audioBase64 && typeof item === 'object' && item.audioPromise) {
+        audioBase64 = await item.audioPromise;
+      }
+
+      if (!audioBase64) {
+        const host = getWsHost();
+        const httpProto = window.location.protocol.startsWith('https') ? 'https' : 'http';
+        const res = await fetch(`${httpProto}://${host}/tts_sentence`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sentence: text })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.audio) {
+            audioBase64 = data.audio;
+          }
+        }
+      }
 
       if (currentSession !== playbackSession) return;
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.audio) {
-          const audio = new Audio(data.audio);
-          activeAudio = audio;
-          audio.onplay = () => {
-            if (currentSession === playbackSession) setOrbState('speaking');
-          };
-          audio.onended = () => {
-            activeAudio = null;
-            if (currentSession === playbackSession) processNextSentence();
-          };
-          audio.onerror = () => {
-            activeAudio = null;
-            if (currentSession === playbackSession) processNextSentence();
-          };
-          setOrbState('speaking');
-          audio.play().catch(() => processNextSentence());
-          return;
-        }
+      if (audioBase64) {
+        const audio = new Audio(audioBase64);
+        activeAudio = audio;
+        audio.onplay = () => {
+          if (currentSession === playbackSession) setOrbState('speaking');
+        };
+        audio.onended = () => {
+          activeAudio = null;
+          if (currentSession === playbackSession) processNextSentence();
+        };
+        audio.onerror = () => {
+          activeAudio = null;
+          if (currentSession === playbackSession) processNextSentence();
+        };
+        setOrbState('speaking');
+        audio.play().catch(() => processNextSentence());
+        return;
       }
     } catch (e) {}
 
@@ -417,8 +465,13 @@
   function enqueueSentence(sentenceText) {
     const clean = cleanTextForSpeech(sentenceText);
     if (clean) {
-      sentenceQueue.push(clean);
-      if (!isSpeaking) processNextSentence();
+      const item = { text: clean };
+      sentenceQueue.push(item);
+      if (!isSpeaking) {
+        processNextSentence();
+      } else if (sentenceQueue.length === 1) {
+        prefetchNextSentence(item);
+      }
     }
   }
 

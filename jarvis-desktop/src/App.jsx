@@ -147,6 +147,19 @@ export default function App() {
       .trim()
   }
 
+  const prefetchSentenceItem = (item) => {
+    if (!item || !item.text || item.audioPromise || item.audioData || !window.jarvis?.synthesizeSentence) return
+    item.audioPromise = window.jarvis.synthesizeSentence(item.text)
+      .then(data => {
+        item.audioData = data
+        return data
+      })
+      .catch(err => {
+        console.warn('Sentence prefetch error:', err)
+        return null
+      })
+  }
+
   const processNextSentence = async () => {
     const currentSession = playbackSessionRef.current
 
@@ -163,8 +176,16 @@ export default function App() {
       return
     }
 
+    // Pipeline prefetch: immediately trigger synthesis for upcoming sentence
+    if (sentenceQueueRef.current.length > 0) {
+      prefetchSentenceItem(sentenceQueueRef.current[0])
+    }
+
     try {
       let audioData = item.audioData || ''
+      if (!audioData && item.audioPromise) {
+        audioData = await item.audioPromise
+      }
       if (!audioData && window.jarvis?.synthesizeSentence) {
         audioData = await window.jarvis.synthesizeSentence(item.text)
       }
@@ -224,7 +245,11 @@ export default function App() {
     for (const sentence of sentences) {
       const clean = cleanTextForSpeech(sentence)
       if (clean) {
-        sentenceQueueRef.current.push({ text: clean })
+        const item = { text: clean }
+        sentenceQueueRef.current.push(item)
+        if (isSpeakingRef.current && sentenceQueueRef.current.length === 1) {
+          prefetchSentenceItem(item)
+        }
       }
     }
 
@@ -344,9 +369,12 @@ export default function App() {
                 lastProcessedSentenceIndexRef.current += sentence.length
                 const clean = cleanTextForSpeech(sentence)
                 if (clean) {
-                  sentenceQueueRef.current.push({ text: clean })
+                  const item = { text: clean }
+                  sentenceQueueRef.current.push(item)
                   if (!isSpeakingRef.current) {
                     processNextSentence()
+                  } else if (sentenceQueueRef.current.length === 1) {
+                    prefetchSentenceItem(item)
                   }
                 }
               }
