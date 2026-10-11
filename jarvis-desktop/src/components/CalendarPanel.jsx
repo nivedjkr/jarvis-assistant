@@ -131,7 +131,7 @@ export default function CalendarPanel({ isOpen, onClose }) {
         </div>
         <div className="calendar-header-actions">
           <button className="cal-btn-icon" onClick={fetchCalendarEvents} title="Refresh Google Sync">
-            {loading ? '⏳' : '🔄'}
+            {loading ? '...' : 'SYNC'}
           </button>
           <button className="cal-btn-icon" onClick={onClose} title="Close Calendar">✕</button>
         </div>
@@ -187,7 +187,7 @@ export default function CalendarPanel({ isOpen, onClose }) {
         <div className="selected-day-modal">
           <div className="day-modal-header">
             <h4>
-              📅 {selectedDay.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+              DATE // {selectedDay.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
             </h4>
             <button className="cal-btn-icon" onClick={() => setSelectedDay(null)}>✕</button>
           </div>
@@ -199,10 +199,10 @@ export default function CalendarPanel({ isOpen, onClose }) {
                 <div key={idx} className="event-detail-card">
                   <div className="event-detail-title">{ev.summary}</div>
                   <div className="event-detail-time">
-                    ⏰ {ev.start ? new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'All Day'}
+                    TIME // {ev.start ? new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'All Day'}
                     {ev.end ? ` - ${new Date(ev.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
                   </div>
-                  {ev.location && <div className="event-detail-loc">📍 {ev.location}</div>}
+                  {ev.location && <div className="event-detail-loc">LOC // {ev.location}</div>}
                   {ev.description && <div className="event-detail-desc">{ev.description}</div>}
                 </div>
               ))

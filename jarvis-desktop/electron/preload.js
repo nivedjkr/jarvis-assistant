@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   deleteProject: (projectId) => ipcRenderer.invoke('delete-project', projectId),
   getReminders: () => ipcRenderer.invoke('get-directives'),
   getDirectives: () => ipcRenderer.invoke('get-directives'),
+  createDirective: (text, dueDate = '') => ipcRenderer.invoke('create-directive', { text, due_date: dueDate }),
   completeDirective: (directiveId) => ipcRenderer.invoke('complete-directive', directiveId),
   deleteDirective: (directiveId) => ipcRenderer.invoke('delete-directive', directiveId),
   getWatchlist: () => ipcRenderer.invoke('get-watchlist'),
@@ -33,6 +34,7 @@ contextBridge.exposeInMainWorld('jarvis', {
   deleteSentEmail: (index = 1) => ipcRenderer.invoke('send-slash-command', `/email delete ${index}`),
 
   getCalendarEvents: () => ipcRenderer.invoke('get-calendar-events'),
+  getWorkspaceDiff: (path = '') => ipcRenderer.invoke('get-workspace-diff', path),
 
   toggleFullScreen: () => ipcRenderer.invoke('toggle-fullscreen'),
   minimize: () => ipcRenderer.invoke('window-minimize'),

@@ -168,7 +168,29 @@ Ensure dependencies are strictly acyclic. No preamble or explanations."""
         tasks = {}
         goal_lower = goal.lower()
         goal_words = set(re.findall(r"\b[a-zA-Z0-9_-]+\b", goal_lower))
-        if goal_words.intersection({"test", "tests", "testing", "fix", "debug", "code", "coding", "inspect", "repo", "repository"}):
+        if goal_words.intersection({"overleaf", "latex", "tex", "archive", "zip", "paper", "manuscript"}):
+            tasks["task_1"] = DAGTask(
+                id="task_1",
+                title="Inspect project archive structure and files",
+                tool="list_archive",
+                arguments={"archive_path": "project.zip"},
+                depends_on=[]
+            )
+            tasks["task_2"] = DAGTask(
+                id="task_2",
+                title="Validate LaTeX syntax, environments, and figures",
+                tool="validate_latex_project",
+                arguments={"project_path": "."},
+                depends_on=["task_1"]
+            )
+            tasks["task_3"] = DAGTask(
+                id="task_3",
+                title="Prepare clean Overleaf upload archive",
+                tool="prepare_overleaf_archive",
+                arguments={"source_path": ".", "output_archive_path": "overleaf_ready.zip"},
+                depends_on=["task_2"]
+            )
+        elif goal_words.intersection({"test", "tests", "testing", "fix", "debug", "code", "coding", "inspect", "repo", "repository"}):
             tasks["task_1"] = DAGTask(
                 id="task_1",
                 title="Inspect project architecture & entry points",

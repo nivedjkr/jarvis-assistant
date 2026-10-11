@@ -97,9 +97,9 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, sessions: s
 
       {sessionToast && (
         <div style={{
-          background: 'rgba(239, 68, 68, 0.2)',
-          border: '1px solid #ef4444',
-          color: '#f87171',
+          background: 'rgba(255, 255, 255, 0.08)',
+          border: '1px solid rgba(255, 255, 255, 0.25)',
+          color: '#ffffff',
           padding: '8px 12px',
           margin: '8px 16px 0 16px',
           borderRadius: '4px',
@@ -141,7 +141,7 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, sessions: s
                       disabled={isDeleting}
                       onClick={(e) => handleDeleteSession(e, s.session_id)}
                     >
-                      {isDeleting ? '⏳' : '🗑️'}
+                      {isDeleting ? '...' : 'DEL'}
                     </button>
                   </div>
                   <div className="sidebar-item-sub">
@@ -175,7 +175,7 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, sessions: s
                       title="Delete project"
                       onClick={(e) => handleDeleteProject(e, pid)}
                     >
-                      🗑️
+                      DEL
                     </button>
                   </div>
                   <div className="sidebar-item-sub">
@@ -202,7 +202,7 @@ export default function Sidebar({ isOpen, onClose, currentSessionId, sessions: s
               <div key={i} className="sidebar-item">
                 <div className="sidebar-item-name">{r.summary || r.title || r.text || 'Calendar Event'}</div>
                 <div className="sidebar-item-sub">
-                  📅 {r.start ? new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : (r.due_date || 'Upcoming')}
+                  CAL // {r.start ? new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : (r.due_date || 'Upcoming')}
                 </div>
               </div>
             ))

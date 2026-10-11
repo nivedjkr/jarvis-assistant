@@ -6,9 +6,9 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 11px;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.05em;
   color: var(--text-primary);
   -webkit-app-region: drag;
 }
@@ -20,12 +20,14 @@
 }
 
 .sessions-toggle-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--accent);
-  font-size: 15px;
-  font-weight: bold;
-  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
   cursor: pointer;
   border-radius: var(--radius-sm);
   -webkit-app-region: no-drag;
@@ -36,31 +38,62 @@
 .sessions-toggle-btn:hover {
   background: var(--accent-dim);
   border-color: var(--border-hover);
-  color: var(--text-primary);
+  color: var(--accent);
+}
+
+.sessions-toggle-btn.active {
+  background: rgba(0, 229, 255, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sessions-toggle-btn.diff-btn {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  color: #00e5ff;
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  background: rgba(0, 229, 255, 0.05);
+}
+
+.sessions-toggle-btn.diff-btn:hover {
+  background: rgba(0, 229, 255, 0.15);
+  border-color: rgba(0, 229, 255, 0.4);
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.3);
+}
+
+.sessions-toggle-btn.diff-btn.active {
+  background: rgba(0, 229, 255, 0.25);
+  border-color: #00e5ff;
+  color: #ffffff;
 }
 
 .status-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  transition: background 0.3s ease;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .status-dot.online {
-  background: var(--success);
-  box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
+  background: #ffffff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
 }
 
 .status-dot.offline {
-  background: var(--warning);
-  box-shadow: 0 0 8px rgba(240, 180, 41, 0.4);
+  background: #555555;
+  box-shadow: none;
 }
 
 .brand-mark {
-  font-weight: 600;
+  font-family: var(--font-sans);
+  font-weight: 700;
   color: var(--text-primary);
   text-transform: uppercase;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.12em;
+  font-size: 11.5px;
 }
 
 .title-right {
@@ -71,12 +104,14 @@
 }
 
 .session-id {
+  font-family: var(--font-mono);
   color: var(--text-muted);
   font-size: 10px;
 }
 
 .live-clock {
-  color: var(--accent);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
   font-size: 11px;
   font-weight: 500;
 }
@@ -110,10 +145,10 @@
 
 .control-btn.help:hover {
   background: var(--accent-dim);
-  color: var(--accent);
+  color: var(--text-primary);
 }
 
 .control-btn.close:hover {
-  background: rgba(255, 71, 87, 0.2);
-  color: var(--danger);
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
 }

@@ -1143,8 +1143,8 @@ class CommandLogger:
 
 # Memory Management CRUD functions
 
-def list_all_facts(category: Optional[str] = None, limit: int = 50) -> list:
-    mem = Memory()
+def list_all_facts(category: Optional[str] = None, limit: int = 50, db_path: Optional[str] = None) -> list:
+    mem = Memory(db_path=db_path) if db_path else Memory()
     with mem._get_connection() as conn:
         if category:
             rows = conn.execute(
@@ -1158,30 +1158,30 @@ def list_all_facts(category: Optional[str] = None, limit: int = 50) -> list:
             ).fetchall()
         return [dict(r) for r in rows]
 
-def delete_fact(fact_id: int) -> str:
-    mem = Memory()
+def delete_fact(fact_id: int, db_path: Optional[str] = None) -> str:
+    mem = Memory(db_path=db_path) if db_path else Memory()
     with mem._get_connection() as conn:
         conn.execute("DELETE FROM facts WHERE id=?", (fact_id,))
         conn.commit()
     return f"Fact #{fact_id} deleted."
 
-def edit_fact(fact_id: int, new_content: str) -> str:
-    mem = Memory()
+def edit_fact(fact_id: int, new_content: str, db_path: Optional[str] = None) -> str:
+    mem = Memory(db_path=db_path) if db_path else Memory()
     with mem._get_connection() as conn:
         conn.execute("UPDATE facts SET content=? WHERE id=?", (new_content, fact_id))
         conn.commit()
     return f"Fact #{fact_id} updated."
 
-def clear_facts_by_category(category: str) -> str:
-    mem = Memory()
+def clear_facts_by_category(category: str, db_path: Optional[str] = None) -> str:
+    mem = Memory(db_path=db_path) if db_path else Memory()
     with mem._get_connection() as conn:
         count = conn.execute("SELECT COUNT(*) FROM facts WHERE category=?", (category,)).fetchone()[0]
         conn.execute("DELETE FROM facts WHERE category=?", (category,))
         conn.commit()
     return f"Deleted {count} facts in '{category}'."
 
-def get_memory_stats() -> dict:
-    mem = Memory()
+def get_memory_stats(db_path: Optional[str] = None) -> dict:
+    mem = Memory(db_path=db_path) if db_path else Memory()
     with mem._get_connection() as conn:
         total = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
         by_category = conn.execute(
@@ -1192,8 +1192,8 @@ def get_memory_stats() -> dict:
             "by_category": {r[0]: r[1] for r in by_category}
         }
 
-def search_facts(query: str, limit: int = 20) -> list:
-    mem = Memory()
+def search_facts(query: str, limit: int = 20, db_path: Optional[str] = None) -> list:
+    mem = Memory(db_path=db_path) if db_path else Memory()
     with mem._get_connection() as conn:
         rows = conn.execute(
             "SELECT id, category, content, created_at FROM facts WHERE content LIKE ? ORDER BY created_at DESC LIMIT ?",

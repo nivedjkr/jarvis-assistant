@@ -1,9 +1,10 @@
 import React, { useEffect, useRef } from 'react'
 
 const STATE_CONFIGS = {
-  idle: { speed: 0.003, jitter: 2, r: 140, g: 120, b: 200 },
-  thinking: { speed: 0.012, jitter: 14, r: 167, g: 139, b: 250 },
-  speaking: { speed: 0.007, jitter: 6, r: 217, g: 70, b: 168 }
+  idle: { speed: 0.003, jitter: 2, r: 255, g: 255, b: 255, glowAlpha: 0.12 },
+  listening: { speed: 0.007, jitter: 8, r: 255, g: 255, b: 255, glowAlpha: 0.22 },
+  thinking: { speed: 0.014, jitter: 14, r: 255, g: 255, b: 255, glowAlpha: 0.28 },
+  speaking: { speed: 0.009, jitter: 6, r: 255, g: 255, b: 255, glowAlpha: 0.22 }
 }
 
 const statusText = {
@@ -49,7 +50,7 @@ export default function Orb({ state = 'idle' }) {
     const draw = () => {
       const currentState = stateRef.current || 'idle'
       const cfg = STATE_CONFIGS[currentState] || STATE_CONFIGS.idle
-      const { speed, jitter, r, g, b } = cfg
+      const { speed, jitter, r, g, b, glowAlpha = 0.15 } = cfg
 
       rot += speed
 
@@ -60,9 +61,9 @@ export default function Orb({ state = 'idle' }) {
 
       ctx.clearRect(0, 0, W, H)
 
-      // Soft radial glow behind the sphere
+      // Subtle monochromatic white radial glow behind the sphere
       const glow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 220)
-      glow.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.35)`)
+      glow.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${glowAlpha})`)
       glow.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`)
       ctx.fillStyle = glow
       ctx.beginPath()
@@ -175,10 +176,11 @@ export default function Orb({ state = 'idle' }) {
           fontFamily: 'JetBrains Mono, monospace',
           fontSize: '10px',
           letterSpacing: '0.2em',
-          color: labelColor,
+          color: '#ffffff',
+          opacity: state === 'idle' ? 0.7 : 1,
           fontWeight: 600,
           textTransform: 'uppercase',
-          transition: 'color 0.4s ease'
+          transition: 'opacity 0.4s ease'
         }}
       >
         {statusText[state] || 'IDLE'}

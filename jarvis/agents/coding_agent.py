@@ -54,6 +54,10 @@ CODING_TOOLS: Set[str] = {
     "extract_archive",
     "list_archive",
     "create_archive",
+    "inspect_and_edit_archive",
+    "validate_latex_project",
+    "prepare_overleaf_archive",
+    "write_to_file",
 }
 
 

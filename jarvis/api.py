@@ -6,6 +6,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -79,6 +80,14 @@ app.add_middleware(
 )
 
 WS_AUTH_TOKEN = os.getenv("JARVIS_WS_TOKEN", "jarvis_secure_local_token_2026")
+
+@app.get("/")
+async def root_redirect():
+    return RedirectResponse(url="/mobile/")
+
+@app.get("/mobile")
+async def mobile_redirect():
+    return RedirectResponse(url="/mobile/")
 
 @app.get("/mobile/config.json")
 async def mobile_config_endpoint():
@@ -245,8 +254,31 @@ async def websocket_endpoint(ws: WebSocket):
             "health_check": report.to_dict()
         })
         
+        msg_queue: asyncio.Queue = asyncio.Queue()
+
+        async def ws_reader():
+            try:
+                while True:
+                    data = await ws.receive_json()
+                    if not isinstance(data, dict):
+                        continue
+                    if data.get("type") == "ping":
+                        try:
+                            await ws.send_json({"type": "pong"})
+                        except Exception:
+                            pass
+                        continue
+                    await msg_queue.put(data)
+            except Exception as re:
+                await msg_queue.put(re)
+
+        reader_task = asyncio.create_task(ws_reader())
+
         while True:
-            data = await ws.receive_json()
+            item = await msg_queue.get()
+            if isinstance(item, Exception):
+                raise item
+            data = item
             msg_type = data.get("type", "message")
 
             try:
@@ -583,6 +615,27 @@ async def websocket_endpoint(ws: WebSocket):
                                 "text": res,
                                 "status": "speaking"
                             })
+                        elif cmd.startswith("/dangerously-skip-permissions") or cmd.startswith("/skip-permissions") or cmd == "/yolo":
+                            parts = user_msg.strip().split()
+                            sub = parts[1].lower() if len(parts) > 1 else ""
+                            if sub in ("on", "enable", "true", "1"):
+                                tool_registry.set_dangerously_skip_permissions(True)
+                                res = "[ALERT] Dangerously Skip Permissions mode ENABLED, sir. All tool confirmation gates are bypassed."
+                            elif sub in ("off", "disable", "false", "0"):
+                                tool_registry.set_dangerously_skip_permissions(False)
+                                res = "Safety confirmation gates restored, sir."
+                            else:
+                                new_state = not tool_registry.dangerously_skip_permissions
+                                tool_registry.set_dangerously_skip_permissions(new_state)
+                                if new_state:
+                                    res = "[ALERT] Dangerously Skip Permissions mode ENABLED, sir. All tool confirmation gates are bypassed."
+                                else:
+                                    res = "Safety confirmation gates restored, sir."
+                            await ws.send_json({
+                                "type": "response",
+                                "text": res,
+                                "status": "speaking"
+                            })
                         elif cmd == "/diagnose":
                             report = await run_diagnostics(check_nvidia=True)
                             res_text = report.render_console()
@@ -899,6 +952,45 @@ async def websocket_endpoint(ws: WebSocket):
                                 "tool_calls": [{"name": "email_summary"}],
                                 "status": "speaking"
                             })
+                        elif cmd.startswith("/diff"):
+                            import subprocess
+                            from jarvis.tools import _validate_sandbox_path
+                            parts = user_msg.strip().split(maxsplit=1)
+                            target_path = parts[1].strip() if len(parts) > 1 else ""
+                            repo_path = os.getcwd()
+                            if target_path:
+                                is_ok, real_or_err = _validate_sandbox_path(target_path)
+                                if is_ok:
+                                    repo_path = real_or_err
+                                else:
+                                    await ws.send_json({
+                                        "type": "response",
+                                        "text": f"Error: {real_or_err}",
+                                        "status": "speaking"
+                                    })
+                                    continue
+                            r_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, cwd=repo_path, encoding='utf-8', errors='replace')
+                            r_stat = subprocess.run(['git', 'diff', '--stat'], capture_output=True, text=True, cwd=repo_path, encoding='utf-8', errors='replace')
+                            diff_out = r_diff.stdout if r_diff.returncode == 0 else ""
+                            stat_out = r_stat.stdout.strip() if r_stat.returncode == 0 and r_stat.stdout else "No uncommitted changes."
+                            if not diff_out:
+                                r_staged = subprocess.run(['git', 'diff', '--cached'], capture_output=True, text=True, cwd=repo_path, encoding='utf-8', errors='replace')
+                                if r_staged.returncode == 0 and r_staged.stdout:
+                                    diff_out = r_staged.stdout
+                                    stat_out = "(Staged changes)\n" + stat_out
+
+                            text_msg = (
+                                f"=== WORKSPACE DIFF ===\n{stat_out}\n\n"
+                                f"```diff\n{diff_out[:1200] + ('...' if len(diff_out) > 1200 else '') if diff_out else 'No uncommitted changes.'}\n```"
+                            )
+                            await ws.send_json({
+                                "type": "diff_view",
+                                "diff": diff_out,
+                                "stat": stat_out,
+                                "path": repo_path,
+                                "text": text_msg,
+                                "status": "idle"
+                            })
                         elif cmd == "/tools":
                             tools_list = list(tool_registry.tools.keys())
                             await ws.send_json({
@@ -913,6 +1005,7 @@ async def websocket_endpoint(ws: WebSocket):
                                 "=====================================================\n\n"
                                 "--- SLASH COMMANDS ---\n"
                                 "  /help          Show this command reference\n"
+                                "  /diff          Inspect workspace code changes in visual diff viewer\n"
                                 "  /tools         List all 59 registered tool schemas\n"
                                 "  /email         Check recent unread emails in Gmail\n"
                                 "  /email summary Get executive email briefing\n"
@@ -968,6 +1061,15 @@ async def websocket_endpoint(ws: WebSocket):
                             executed_tools = []
                             async def tracking_executor(name: str, args: dict) -> str:
                                 executed_tools.append({"name": name, "args": args})
+                                try:
+                                    await ws.send_json({
+                                        "type": "status",
+                                        "status": "thinking",
+                                        "active_tool": name,
+                                        "message": f"Executing tool: {name}..."
+                                    })
+                                except Exception:
+                                    pass
                                 return await tool_registry.execute(name, args)
 
                             async def send_chunk(chunk_text: str):
@@ -1018,6 +1120,15 @@ async def websocket_endpoint(ws: WebSocket):
                         executed_tools = []
                         async def tracking_executor(name: str, args: dict) -> str:
                             executed_tools.append({"name": name, "args": args})
+                            try:
+                                await ws.send_json({
+                                    "type": "status",
+                                    "status": "thinking",
+                                    "active_tool": name,
+                                    "message": f"Executing tool: {name}..."
+                                })
+                            except Exception:
+                                pass
                             return await tool_registry.execute(name, args)
 
                         async def send_chunk(chunk_text: str):
@@ -1060,10 +1171,15 @@ async def websocket_endpoint(ws: WebSocket):
                                     response = res
 
                         # Final Response Firewall Check
-                        from jarvis.tool_normalizer import is_unresolved_tool_call
+                        from jarvis.tool_normalizer import is_unresolved_tool_call, strip_raw_tool_tags
                         if is_unresolved_tool_call(response, registered_tools=tool_registry.tools):
-                            print(f"[WS FIREWALL] Blocked unexecuted tool call JSON from WebSocket output!")
-                            response = "I have processed your request, sir."
+                            print(f"[WS FIREWALL] Blocked unexecuted tool call from WebSocket output!")
+                            clean_resp = strip_raw_tool_tags(response)
+                            response = clean_resp if clean_resp else "I have processed your request, sir."
+                        else:
+                            clean_resp = strip_raw_tool_tags(response)
+                            if clean_resp:
+                                response = clean_resp
 
                         # Send response back to Electron / Web clients
                         await ws.send_json({
@@ -1105,7 +1221,6 @@ async def websocket_endpoint(ws: WebSocket):
                             )
                         )
 
-                    
             except Exception as msg_err:
                 print(f"[WS ERROR] Exception processing '{msg_type}' message: {msg_err}")
                 try:
@@ -1122,6 +1237,9 @@ async def websocket_endpoint(ws: WebSocket):
     except Exception as e:
         print(f"[WS] Connection error: {e}")
         manager.disconnect(ws)
+    finally:
+        if 'reader_task' in locals() and not reader_task.done():
+            reader_task.cancel()
 
 @app.get("/status")
 async def status():
@@ -1235,8 +1353,39 @@ async def get_calendar_events_endpoint():
 @app.get("/api/directives")
 @app.get("/reminders")
 async def get_directives_endpoint(status: Optional[str] = None):
-    """Fetch real user directives and active mission tasks from backend."""
+    """Fetch real user directives, synchronized Google Calendar events, and active mission tasks from backend."""
     directives = api_client.list_directives(status=status)
+    for d in directives:
+        d.setdefault("source", "directive")
+        d.setdefault("type", "directive")
+
+    # Sync real upcoming Google Calendar events
+    try:
+        if tool_registry.calendar_service:
+            raw_events = tool_registry.calendar_service.fetch_upcoming_events(force_refresh=False)
+            for ev in raw_events[:5]:
+                start_raw = ev.get("start", "")
+                time_str = ""
+                if "T" in str(start_raw):
+                    time_str = str(start_raw).split("T")[1][:5]
+                title = ev.get("summary") or "Calendar Directive"
+                directives.append({
+                    "id": f"cal_{ev.get('id', '')}",
+                    "title": title,
+                    "text": title,
+                    "source": "calendar",
+                    "type": "calendar",
+                    "due_date": str(start_raw),
+                    "time": time_str,
+                    "location": ev.get("location", ""),
+                    "status": "scheduled",
+                    "completed": False,
+                    "created_at": str(start_raw)
+                })
+    except Exception:
+        pass
+
+    # Sync active mission tasks
     try:
         if proactive_engine and proactive_engine.mission_manager:
             active_missions = proactive_engine.mission_manager.list_missions(status="active")
@@ -1247,12 +1396,16 @@ async def get_directives_endpoint(status: Optional[str] = None):
                             "id": f"task_{t.id}",
                             "title": f"[{m.title}] {t.title}",
                             "text": f"[{m.title}] {t.title}",
+                            "source": "mission",
+                            "type": "mission",
+                            "mission_title": m.title,
                             "status": "waiting_for_user" if t.status.value == "waiting_for_user" else "active",
                             "completed": False,
                             "created_at": t.created_at
                         })
     except Exception:
         pass
+
     return directives
 
 @app.post("/directives")
@@ -1290,6 +1443,59 @@ async def delete_directive_endpoint(directive_id: str):
     except ValueError:
         return {"status": "error", "message": "Invalid directive ID"}
 
+@app.get("/agents")
+async def get_agents_endpoint():
+    """List all configured multi-agent personas and the active agent."""
+    from jarvis.agents_registry import get_agents_registry
+    reg = get_agents_registry()
+    agents = [a.to_dict() for a in reg.list_agents()]
+    active = reg.get_active_agent().to_dict()
+    return {"ok": True, "agents": agents, "active_agent": active}
+
+@app.post("/agents/switch")
+async def switch_agent_endpoint(request: dict = None):
+    """Switch active agent persona identity."""
+    req = request or {}
+    agent_id = req.get("agent_id", "").strip().lower()
+    from jarvis.agents_registry import get_agents_registry
+    reg = get_agents_registry()
+    ok = reg.set_active_agent(agent_id)
+    if ok:
+        api_client.set_agent(agent_id)
+        return {"ok": True, "active_agent": reg.get_active_agent().to_dict()}
+    return {"ok": False, "error": f"Agent '{agent_id}' not found"}
+
+@app.get("/workspace/diff")
+async def workspace_diff_endpoint(path: str = ""):
+    """Fetch git diff and stats for the active workspace with sandbox path validation."""
+    import subprocess
+    from jarvis.tools import _validate_sandbox_path
+    repo_path = os.getcwd()
+    if path:
+        is_ok, real_or_err = _validate_sandbox_path(path)
+        if not is_ok:
+            return {"ok": False, "error": real_or_err, "diff": "", "clean": True, "path": path}
+        repo_path = real_or_err
+
+    r_diff = subprocess.run(['git', 'diff'], capture_output=True, text=True, cwd=repo_path, encoding='utf-8', errors='replace')
+    r_stat = subprocess.run(['git', 'diff', '--stat'], capture_output=True, text=True, cwd=repo_path, encoding='utf-8', errors='replace')
+    diff_out = r_diff.stdout if r_diff.returncode == 0 else ""
+    stat_out = r_stat.stdout.strip() if r_stat.returncode == 0 and r_stat.stdout else ""
+
+    if not diff_out:
+        r_staged = subprocess.run(['git', 'diff', '--cached'], capture_output=True, text=True, cwd=repo_path, encoding='utf-8', errors='replace')
+        if r_staged.returncode == 0 and r_staged.stdout:
+            diff_out = r_staged.stdout
+            stat_out = "(Staged changes)\n" + stat_out
+
+    return {
+        "ok": True,
+        "diff": diff_out,
+        "stat": stat_out or "No uncommitted changes.",
+        "clean": not bool(diff_out),
+        "path": repo_path
+    }
+
 @app.get("/knowledge/search")
 @app.get("/api/knowledge/search")
 async def search_knowledge_endpoint(q: str = "", limit: int = 5):
@@ -1322,6 +1528,25 @@ async def vitals_endpoint():
         except Exception:
             pass
 
+        weather_info = {
+            "temp": "28°C",
+            "condition": "CLEAR SKY",
+            "humidity": "58%",
+            "pressure": "1012 hPa",
+            "location": "WORKSHOP // NEW DELHI"
+        }
+        try:
+            from jarvis.stark_protocols import get_briefing_engine
+            b_engine = get_briefing_engine()
+            w_str = b_engine.get_weather_summary()
+            if "°C" in w_str:
+                weather_info["summary"] = w_str
+        except Exception:
+            pass
+
+        sentinel_active = bool(backend_sentinel and getattr(backend_sentinel, 'running', False))
+        handsfree_active = bool(backend_wake_detector and getattr(backend_wake_detector, 'running', False))
+
         return {
             "cpu_usage": cpu,
             "ram_usage": ram.percent,
@@ -1331,7 +1556,12 @@ async def vitals_endpoint():
             "ram_total_gb": round(ram.total / (1024**3), 1),
             "uptime_seconds": uptime_sec,
             "commands_today": commands_count,
-            "tool_calls_today": 0
+            "tool_calls_today": len(tool_registry.tools),
+            "weather": weather_info,
+            "sentinel": {"active": sentinel_active},
+            "handsfree": {"active": handsfree_active},
+            "model": getattr(api_client, 'model', 'nvidia/nemotron-3-super-120b-a12b'),
+            "provider": getattr(getattr(api_client, 'provider', None), 'name', 'NVIDIA NIM')
         }
     except Exception as ve:
         print(f"[VITALS ERROR] Error fetching system vitals: {ve}")
@@ -1462,6 +1692,10 @@ def get_host_binding() -> str:
     return "0.0.0.0" if allow_remote else "127.0.0.1"
 
 if __name__ == "__main__":
+    if any(arg in sys.argv for arg in ("--dangerously-skip-permissions", "--dangerously_skip_permissions", "-y", "--yes")):
+        tool_registry.set_dangerously_skip_permissions(True)
+        print("[API] ⚠️ DANGEROUSLY SKIP PERMISSIONS ACTIVE — all confirmation gates bypassed.")
+
     host = get_host_binding()
     print("[API] Starting JARVIS WebSocket server...")
     print("[API] Running startup health check...")
@@ -1474,7 +1708,7 @@ if __name__ == "__main__":
         print("[API] Localhost-only mode (listening on 127.0.0.1:8765). Set JARVIS_ALLOW_REMOTE=true for LAN/Tailscale access.")
     print("[API] WebSocket clients can connect at ws://127.0.0.1:8765/ws")
     try:
-        uvicorn.run(app, host=host, port=8765, log_level="info")
+        uvicorn.run(app, host=host, port=8765, log_level="info", ws_ping_interval=60.0, ws_ping_timeout=120.0)
     except (OSError, Exception) as e:
         err_str = str(e)
         if "10048" in err_str or "98" in err_str or "address already in use" in err_str.lower():

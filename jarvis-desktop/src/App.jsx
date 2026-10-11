@@ -4,11 +4,11 @@ import Orb from './components/Orb'
 import ChatLog from './components/ChatLog'
 import InputBar from './components/InputBar'
 import SystemVitals from './components/SystemVitals'
-import DirectivesPanel from './components/DirectivesPanel'
-import EmailPanel from './components/EmailPanel'
+import StarkDeckPanel from './components/StarkDeckPanel'
 
 import Sidebar from './components/Sidebar'
 import CalendarPanel from './components/CalendarPanel'
+import DiffViewerModal from './components/DiffViewerModal'
 
 function playStarkChime(type) {
   try {
@@ -80,11 +80,72 @@ export default function App() {
   const [lastStateUpdate, setLastStateUpdate] = useState(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
-  const [isDirectivesOpen, setIsDirectivesOpen] = useState(true)
+  const [isDeckOpen, setIsDeckOpen] = useState(true)
+  const [activeDeckTab, setActiveDeckTab] = useState('directives') // 'directives' | 'dispatches' | 'missions'
+
+  const handleToggleDirectives = () => {
+    if (isDeckOpen && activeDeckTab === 'directives') {
+      setIsDeckOpen(false)
+    } else {
+      setActiveDeckTab('directives')
+      setIsDeckOpen(true)
+    }
+  }
+
+  const handleToggleDispatches = () => {
+    if (isDeckOpen && activeDeckTab === 'dispatches') {
+      setIsDeckOpen(false)
+    } else {
+      setActiveDeckTab('dispatches')
+      setIsDeckOpen(true)
+    }
+  }
   const [currentSessionId, setCurrentSessionId] = useState(null)
   const [sessions, setSessions] = useState([])
   const [deletingSessionIds, setDeletingSessionIds] = useState(new Set())
   const [sessionToast, setSessionToast] = useState(null)
+  const [isDiffOpen, setIsDiffOpen] = useState(false)
+  const [diffData, setDiffData] = useState({ diff: '', summary: '', path: '' })
+
+  const handleOpenDiff = async (customDiff = null) => {
+    if (typeof customDiff === 'string' && customDiff.trim()) {
+      setDiffData({ diff: customDiff, summary: 'Custom Diff / Patch Preview', path: '' })
+      setIsDiffOpen(true)
+      return
+    }
+    if (window.jarvis?.getWorkspaceDiff) {
+      try {
+        const res = await window.jarvis.getWorkspaceDiff()
+        setDiffData({
+          diff: res?.diff || '',
+          summary: res?.stat || '',
+          path: res?.path || ''
+        })
+        setIsDiffOpen(true)
+      } catch (err) {
+        console.warn('Error fetching workspace diff:', err)
+        setIsDiffOpen(true)
+      }
+    } else {
+      setIsDiffOpen(true)
+    }
+  }
+
+  const handleRefreshDiff = async () => {
+    if (window.jarvis?.getWorkspaceDiff) {
+      try {
+        const res = await window.jarvis.getWorkspaceDiff(diffData.path)
+        setDiffData(prev => ({
+          ...prev,
+          diff: res?.diff || '',
+          summary: res?.stat || '',
+          path: res?.path || prev.path
+        }))
+      } catch (err) {
+        console.warn('Error refreshing diff:', err)
+      }
+    }
+  }
 
   const activeAudioRef = useRef(null)
   const timeoutRef = useRef(null)
@@ -341,6 +402,24 @@ export default function App() {
           return
         }
 
+        if (data.type === 'diff_view' || data.type === 'diff') {
+          clearPendingTimeout()
+          setDiffData({
+            diff: data.diff || '',
+            summary: data.stat || data.summary || '',
+            path: data.path || ''
+          })
+          setIsDiffOpen(true)
+          if (data.text) {
+            setMessages(prev => [...prev, {
+              role: 'jarvis',
+              text: data.text,
+              timestamp: timeStr
+            }])
+          }
+          return
+        }
+
         if (data.type === 'chunk') {
           clearPendingTimeout()
           const chunkText = data.text || ''
@@ -438,7 +517,7 @@ export default function App() {
           if (data.status === 'thinking') {
             clearPendingTimeout()
             setOrbState('thinking')
-            // Re-arm timer for 60s while backend is actively processing/thinking
+            // Re-arm timer for 180s while backend is actively processing/thinking
             timeoutRef.current = setTimeout(() => {
               setOrbState('idle')
               setMessages(prev => [...prev, {
@@ -446,7 +525,7 @@ export default function App() {
                 text: 'Connection timeout, sir. Please check if JARVIS backend is running.',
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
               }])
-            }, 60000)
+            }, 180000)
           } else if (data.status === 'connected') {
             clearPendingTimeout()
             setIsConnected(true)
@@ -567,7 +646,7 @@ export default function App() {
         text: 'Connection timeout, sir. Please check if JARVIS backend is running.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
       }])
-    }, 60000)
+    }, 180000)
 
     if (cleanInput.startsWith('/')) {
       if (window.jarvis?.sendSlashCommand) {
@@ -652,17 +731,22 @@ export default function App() {
     }}>
       <TitleBar 
         isConnected={isConnected} 
+        currentSessionId={currentSessionId}
         onToggleSessions={() => setIsSidebarOpen(prev => !prev)} 
         onToggleCalendar={() => setIsCalendarOpen(prev => !prev)}
         isCalendarOpen={isCalendarOpen}
-        onToggleDirectives={() => setIsDirectivesOpen(prev => !prev)}
-        isDirectivesOpen={isDirectivesOpen}
+        onToggleDirectives={handleToggleDirectives}
+        isDirectivesOpen={isDeckOpen && activeDeckTab === 'directives'}
+        onToggleDispatches={handleToggleDispatches}
+        isDispatchesOpen={isDeckOpen && activeDeckTab === 'dispatches'}
+        onToggleDiff={() => handleOpenDiff()}
+        isDiffOpen={isDiffOpen}
       />
       
       <div style={{
         display: 'flex',
         flex: 1,
-        height: 'calc(100vh - 88px)',
+        height: 'calc(100vh - 36px)',
         overflow: 'hidden',
         position: 'relative'
       }}>
@@ -685,44 +769,70 @@ export default function App() {
           isConnected={isConnected} 
           lastStateUpdate={lastStateUpdate} 
           onOpenFullCalendar={() => setIsCalendarOpen(true)}
+          onExecuteCommand={handleSendMessage}
         />
 
         <div style={{
           display: 'flex',
           flexDirection: 'column',
           flex: 1,
+          height: '100%',
           overflow: 'hidden',
           borderLeft: '1px solid var(--border-subtle)',
           borderRight: '1px solid var(--border-subtle)',
-          background: 'var(--bg-secondary)'
+          background: 'var(--bg-secondary)',
+          position: 'relative'
         }}>
           <div style={{
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',
-            padding: '12px 0 4px 0'
+            padding: '8px 0 2px 0',
+            flexShrink: 0
           }}>
             <Orb state={orbState} />
           </div>
 
-          <ChatLog messages={messages} />
+          <ChatLog 
+            messages={messages} 
+            onOpenDiff={handleOpenDiff} 
+            onExecuteCommand={handleSendMessage}
+          />
+
+          <div style={{
+            width: '100%',
+            maxWidth: '860px',
+            margin: '0 auto',
+            padding: '0 20px 14px 20px',
+            boxSizing: 'border-box',
+            flexShrink: 0
+          }}>
+            <InputBar 
+              onSend={handleSendMessage} 
+              currentSessionId={currentSessionId}
+              isHandsFree={isHandsFree}
+              onToggleHandsFree={handleToggleHandsFree}
+              onTriggerVision={handleTriggerVision}
+            />
+          </div>
         </div>
 
-        <DirectivesPanel 
+        <StarkDeckPanel 
           isConnected={isConnected} 
           lastStateUpdate={lastStateUpdate} 
-          isOpen={isDirectivesOpen}
-          onClose={() => setIsDirectivesOpen(false)}
+          isOpen={isDeckOpen}
+          activeDeck={activeDeckTab}
+          onDeckChange={setActiveDeckTab}
+          onClose={() => setIsDeckOpen(false)}
         />
-        <EmailPanel isConnected={isConnected} lastStateUpdate={lastStateUpdate} />
       </div>
 
-      <InputBar 
-        onSend={handleSendMessage} 
-        currentSessionId={currentSessionId}
-        isHandsFree={isHandsFree}
-        onToggleHandsFree={handleToggleHandsFree}
-        onTriggerVision={handleTriggerVision}
+      <DiffViewerModal
+        isOpen={isDiffOpen}
+        onClose={() => setIsDiffOpen(false)}
+        diffText={diffData.diff}
+        summary={diffData.summary}
+        onRefresh={handleRefreshDiff}
       />
     </div>
   )

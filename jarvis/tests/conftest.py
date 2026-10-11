@@ -16,6 +16,7 @@ def config():
     return ConfigManager()
 
 @pytest.fixture
-def memory():
+def memory(tmp_path):
     from jarvis.memory import Memory
-    return Memory()
+    db_file = str(tmp_path / "test_memory.db")
+    return Memory(db_path=db_file)

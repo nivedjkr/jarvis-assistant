@@ -94,7 +94,7 @@ export default function MiniCalendar({ onSelectDate, onOpenFullCalendar }) {
     <div className="mini-calendar-container">
       <div className="mini-calendar-header">
         <div className="mini-title">
-          <span>📅 SCHEDULE</span>
+          <span>// SCHEDULE</span>
           <span className="mini-month-label">{monthNames[month]} {year}</span>
         </div>
         <div className="mini-controls">
@@ -102,7 +102,7 @@ export default function MiniCalendar({ onSelectDate, onOpenFullCalendar }) {
           <button className="mini-nav-btn" onClick={nextMonth}>›</button>
           {onOpenFullCalendar && (
             <button className="mini-expand-btn" onClick={onOpenFullCalendar} title="Open Full Month View">
-              ⛶
+              [+]
             </button>
           )}
         </div>

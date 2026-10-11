@@ -122,7 +122,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1080,
     height: 720,
-    backgroundColor: '#08080b',
+    backgroundColor: '#000000',
     frame: false,
 
     titleBarStyle: 'hidden',
@@ -559,6 +559,35 @@ ipcMain.handle('delete-project', (event, pid) => {
 ipcMain.handle('get-reminders', () => fetchJson('http://127.0.0.1:8765/directives'))
 ipcMain.handle('get-directives', () => fetchJson('http://127.0.0.1:8765/directives'))
 
+ipcMain.handle('create-directive', (event, payload) => {
+  return new Promise((resolve) => {
+    const postData = JSON.stringify({ text: payload?.text, due_date: payload?.due_date || '' })
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 8765,
+      path: '/directives',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, (res) => {
+      let data = ''
+      res.on('data', chunk => data += chunk)
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data))
+        } catch {
+          resolve({ status: 'ok' })
+        }
+      })
+    })
+    req.on('error', () => resolve({ status: 'error' }))
+    req.write(postData)
+    req.end()
+  })
+})
+
 ipcMain.handle('complete-directive', (event, did) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'complete_directive', directive_id: did }))
@@ -584,6 +613,59 @@ ipcMain.handle('check-email', () => {
 
 
 ipcMain.handle('get-calendar-events', () => fetchJson('http://127.0.0.1:8765/calendar/events'))
+
+ipcMain.handle('get-workspace-diff', (event, targetPath) => {
+  return new Promise((resolve) => {
+    const url = `http://127.0.0.1:8765/workspace/diff${targetPath ? '?path=' + encodeURIComponent(targetPath) : ''}`
+    fetchJson(url).then(res => {
+      if (res && res.ok !== undefined) {
+        resolve(res)
+      } else {
+        const cwd = targetPath && fs.existsSync(targetPath) ? targetPath : path.resolve(__dirname, '..', '..')
+        execFile('git', ['diff'], { cwd }, (err, stdout) => {
+          let diffOut = stdout || ''
+          execFile('git', ['diff', '--stat'], { cwd }, (err2, statOut) => {
+            let stat = (statOut || '').trim()
+            if (!diffOut) {
+              execFile('git', ['diff', '--cached'], { cwd }, (err3, stagedOut) => {
+                if (stagedOut && stagedOut.trim()) {
+                  diffOut = stagedOut
+                  stat = '(Staged changes)\n' + stat
+                }
+                resolve({
+                  ok: true,
+                  diff: diffOut,
+                  stat: stat || 'No uncommitted changes.',
+                  clean: !diffOut,
+                  path: cwd
+                })
+              })
+            } else {
+              resolve({
+                ok: true,
+                diff: diffOut,
+                stat: stat || 'No uncommitted changes.',
+                clean: !diffOut,
+                path: cwd
+              })
+            }
+          })
+        })
+      }
+    }).catch(() => {
+      const cwd = targetPath && fs.existsSync(targetPath) ? targetPath : path.resolve(__dirname, '..', '..')
+      execFile('git', ['diff'], { cwd }, (err, stdout) => {
+        resolve({
+          ok: true,
+          diff: stdout || '',
+          stat: '',
+          clean: !stdout,
+          path: cwd
+        })
+      })
+    })
+  })
+})
 
 ipcMain.handle('toggle-fullscreen', () => {
   if (mainWindow) {

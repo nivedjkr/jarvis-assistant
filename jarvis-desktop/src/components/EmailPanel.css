@@ -6,7 +6,7 @@
   flex-direction: column;
   height: 100%;
   box-sizing: border-box;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   overflow: hidden;
   transition: border-color 300ms ease, box-shadow 300ms ease;
 }
@@ -153,15 +153,15 @@
 }
 
 .email-tag.tag-urgent {
-  color: var(--danger);
-  background: rgba(255, 71, 87, 0.12);
-  border: 1px solid rgba(255, 71, 87, 0.3);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.4);
 }
 
 .email-tag.tag-normal {
-  color: var(--accent);
-  background: var(--accent-dim);
-  border: 1px solid var(--border-hover);
+  color: #cccccc;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 .email-tag.tag-noise {

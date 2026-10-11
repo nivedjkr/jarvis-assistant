@@ -172,6 +172,21 @@ class GroqProvider(LLMProvider):
             res = await res
         return res
 
+    async def chat_stream(self, messages: list, tools: Optional[list] = None, max_tokens: int = 2048):
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "timeout": 45.0
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        stream = await self.client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            yield chunk
+
 class AnthropicProvider(LLMProvider):
     def __init__(self):
         try:
@@ -250,6 +265,20 @@ class OllamaProvider(LLMProvider):
             res = await res
         return res
 
+    async def chat_stream(self, messages: list, tools: Optional[list] = None, max_tokens: int = 2048):
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "timeout": 45.0
+        }
+        if tools:
+            kwargs["tools"] = tools
+        stream = await self.client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            yield chunk
+
 class GeminiProvider(LLMProvider):
     def __init__(self):
         model_name = config.get("api.gemini_model", "gemini-2.0-flash")
@@ -286,6 +315,21 @@ class GeminiProvider(LLMProvider):
         while inspect.isawaitable(res):
             res = await res
         return res
+
+    async def chat_stream(self, messages: list, tools: Optional[list] = None, max_tokens: int = 2048):
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "timeout": 45.0
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        stream = await self.client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            yield chunk
 
 def get_provider(name: Optional[str] = None) -> LLMProvider:
     providers = {

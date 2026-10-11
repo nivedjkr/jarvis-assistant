@@ -4,7 +4,7 @@
   border-radius: 8px;
   padding: 8px 10px;
   margin: 6px 10px 10px 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   box-sizing: border-box;
 }
 
@@ -19,12 +19,14 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  font-family: var(--font-sans);
   font-size: 0.65rem;
   color: var(--text-muted);
   font-weight: 700;
 }
 
 .mini-month-label {
+  font-family: var(--font-sans);
   color: var(--accent);
   font-weight: 700;
 }
@@ -61,6 +63,7 @@
   grid-template-columns: repeat(7, 1fr);
   gap: 2px;
   text-align: center;
+  font-family: var(--font-mono);
 }
 
 .mini-grid-head {

@@ -8,7 +8,11 @@ export default function TitleBar({
   onToggleCalendar, 
   isCalendarOpen = false,
   onToggleDirectives,
-  isDirectivesOpen = true
+  isDirectivesOpen = true,
+  onToggleDispatches,
+  isDispatchesOpen = false,
+  onToggleDiff,
+  isDiffOpen = false
 }) {
   const [timeStr, setTimeStr] = useState('')
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -76,17 +80,29 @@ export default function TitleBar({
           className={`sessions-toggle-btn ${isCalendarOpen ? 'active' : ''}`}
           onClick={onToggleCalendar} 
           title="Google Calendar & Schedule"
-          style={{ marginLeft: '4px' }}
         >
-          📅
+          CAL
         </button>
         <button 
           className={`sessions-toggle-btn ${isDirectivesOpen ? 'active' : ''}`}
           onClick={onToggleDirectives} 
-          title="Directives & Tasks"
-          style={{ marginLeft: '4px' }}
+          title="Directives & Google Calendar Tasks"
         >
-          📋
+          DIR
+        </button>
+        <button 
+          className={`sessions-toggle-btn ${isDispatchesOpen ? 'active' : ''}`}
+          onClick={onToggleDispatches} 
+          title="Dispatches & Gmail Inbox"
+        >
+          MSG
+        </button>
+        <button 
+          className={`sessions-toggle-btn diff-btn ${isDiffOpen ? 'active' : ''}`}
+          onClick={onToggleDiff} 
+          title="Stark Visual Diff Inspector"
+        >
+          DIFF
         </button>
         <div className={`status-dot ${isConnected ? 'online' : 'offline'}`} />
         <span className="brand-mark">J.A.R.V.I.S. // COMMAND DECK</span>

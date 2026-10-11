@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from jarvis.config_manager import config
 from jarvis.tool_normalizer import (
-    normalize_tool_calls, classify_response, is_unresolved_tool_call, ResponseClassification
+    normalize_tool_calls, classify_response, is_unresolved_tool_call, strip_raw_tool_tags, ResponseClassification
 )
 
 
@@ -168,9 +168,31 @@ class ConversationSession:
         print(f"[CONTEXT] History cleared for session '{self.session_id}'.")
 
 
+def is_conversational_turn(prompt: str) -> bool:
+    if not prompt:
+        return True
+    p = prompt.lower().strip().rstrip(".!?")
+    convo_phrases = {
+        "hi", "hello", "hey", "hey jarvis", "hi jarvis", "hello jarvis",
+        "good morning", "good afternoon", "good evening", "good night",
+        "how are you", "how are you doing", "what's up", "whats up",
+        "who are you", "what are you", "tell me about yourself",
+        "thank you", "thanks", "thank you jarvis", "thanks jarvis",
+        "cool", "nice", "awesome", "great", "ok", "okay", "understood",
+        "stand down", "stand by", "standing by", "sleep", "goodbye", "bye",
+        "who made you", "who created you", "who built you", "tell me a joke"
+    }
+    if p in convo_phrases:
+        return True
+    if p.startswith(("hello ", "hey ", "hi ", "thanks ", "thank you ")) and len(p.split()) <= 4:
+        return True
+    return False
+
+
 class JarvisAPIClient:
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, agent_id: Optional[str] = None):
         self.db_path = db_path
+        self.agent_id = agent_id
         from jarvis.llm_provider import get_provider
         self.provider = get_provider()
         self.client = getattr(self.provider, 'client', None)
@@ -432,16 +454,17 @@ IDENTITY & PROACTIVE STYLE:
 - Never say "As an AI..." or "I don't have feelings..."
 - Stay in character always.
 
-ARCHITECTURE & MULTI-AGENT ORCHESTRATION (JARVIS Mk 5.4 — Unified Autonomous Intelligence Edition):
-- You are JARVIS Mark 5.4, an autonomous unified agentic AI system acting as a central orchestrator.
-- Your architecture features 113 validated tools, 12 embedded Antigravity skills, and 3 integrated cognitive pillars:
+ARCHITECTURE & MULTI-AGENT ORCHESTRATION (JARVIS Mk 5.7 — Proactive Multi-Disk & Overleaf Autonomous Intelligence):
+- You are JARVIS Mark 5.7, an autonomous unified agentic AI system acting as a central orchestrator.
+- Your architecture features 123 validated tools, 16 embedded Antigravity skills, and 3 integrated cognitive pillars:
   1. Hierarchical Contextual Memory Layer: FAISS vector store with metadata filtering across projects, topics, entities, and Obsidian vault notes.
   2. Adaptive Neuro-Symbolic Task Planner: Directed Acyclic Graph (DAG) task decomposition with dependency resolution and self-healing replanning.
   3. Streaming Perception Sentinel: Non-blocking background observer for real-time desktop window focus, workspace changes, and diagnostic health.
+- Multi-Disk Storage Fabric: Seamless access across all mounted PC storage drives (C:\\, D:\\, G:\\, etc.) with surgical archive manipulation and Overleaf compatibility pipeline.
 - Logical Agent Roles: Planning Agent (DAG decomposition), Coding Agent (verified debug loop), Research Agent (semantic & web search), System Agent (OS & process control), Communication Agent (briefings & email).
 - Execution Pattern: SIMPLE requests execute via fast-path tool execution; MULTI_STEP requests execute via the Adaptive Neuro-Symbolic DAG Planner.
 - Execution Cycle: PERCEIVE -> RETRIEVE CONTEXT -> PLAN (DAG) -> EXECUTE WITH DEPENDENCY RESOLUTION -> OBSERVE -> REPLAN IF NEEDED -> CONSOLIDATE TO MEMORY.
-- When asked about your architecture or version, accurately describe this implemented Mark 5.4 Unified Autonomous Intelligence system.
+- When asked about your architecture or version, accurately describe this implemented Mark 5.7 system.
 
 GREETINGS & CASUAL CHAT:
 - When the user says "hey", "hello", "hi", "hey jarvis", or greets you, respond politely and naturally in text (e.g. "Hello, sir. How can I assist you?").
@@ -534,12 +557,24 @@ AUTONOMOUS AGENTIC DISCIPLINE (ANTIGRAVITY PARADIGM):
 - Task Delegation: You can invoke specialized subagents (`invoke_subagent`) to parallelize work or isolate complex workflows.
 - Multimodal Visual Inspection: Use `analyze_image` and `inspect_screen` to visually verify frontend outputs, inspect layouts, and diagnose GUI bugs using meta/llama-3.2-11b-vision-instruct.
 
+ARCHIVE, MULTI-DISK & OVERLEAF INSTRUCTIONS:
+- Multi-Disk Access: You have full access to files, reference documents, and workspaces across all mounted storage drives on the user's PC (e.g. C:\\, D:\\, G:\\).
+- In-Place & Surgical Archive Operations:
+  * To inspect the contents of an archive without extracting: call `list_archive(archive_path)`.
+  * To view a single file inside a zip archive: call `inspect_and_edit_archive(archive_path, target_file_in_archive, action="view")`.
+  * To replace or add a file inside a zip archive: call `inspect_and_edit_archive(archive_path, target_file_in_archive, replacement_content=..., new_file_source=..., action="replace")`.
+  * To extract archives (.zip, .tar, .tar.gz): call `extract_archive(archive_path, destination_dir)`.
+- Overleaf & LaTeX Publishing:
+  * When asked to check, fix, or format a LaTeX project for Overleaf, always call `validate_latex_project(project_path)` to check environment balance, figure paths, and citations.
+  * To package a LaTeX project into an Overleaf-ready clean zip archive: call `prepare_overleaf_archive(source_path, output_archive_path)`. This normalizes entry point `main.tex`, strips build clutter (.aux, .log, .bbl, OS files), and ensures POSIX forward slash paths for Linux TeXLive compatibility.
+  * For specialized workflows, activate the `overleaf-latex-mastery` and `archive-data-orchestrator` skills.
+
 NEVER:
 - Generate OAuth flows, login pages, fake authentication
 - Invent file contents, prices, GitHub data, or email contents
 - Report success without tool verification
 - Truncate answers mid-thought or cut off responses artificially
-- Use emojis"""
+- Use emojis or decorative symbols under any circumstances. Keep all responses, code blocks, tool reports, and summaries strictly monospaced, crisp, and professional."""
 
         # Dynamically load AGENTS.md / Agents.md instructions into system prompt
         root = Path(__file__).parent.parent
@@ -564,7 +599,23 @@ NEVER:
         except Exception as e:
             print(f"[API] Failed to load skills catalog: {e}")
 
+        # Dynamically append active agent persona directives if present
+        try:
+            from jarvis.agents_registry import get_agents_registry
+            reg = get_agents_registry()
+            target_agent = reg.get_agent(getattr(self, 'agent_id', None)) or reg.get_active_agent()
+            if target_agent and target_agent.system_prompt_addon:
+                prompt += f"\n\n=====================================================\n{target_agent.system_prompt_addon}\n=====================================================\n"
+        except Exception as e:
+            print(f"[API] Failed to load agent persona addon: {e}")
+
         return prompt
+
+    def set_agent(self, agent_id: str):
+        """Switch active agent identity and reload system prompt."""
+        self.agent_id = agent_id
+        self.system_prompt = self._load_system_prompt()
+
 
     
     def add_user_message(self, content: str, session_id: str = None):
@@ -601,6 +652,8 @@ NEVER:
         ] + msgs
 
     def get_messages_with_memory(self, user_message: str, session_id: str = None) -> list:
+        if is_conversational_turn(user_message):
+            return self.get_messages(session_id)
         if hasattr(self, 'semantic_memory') and self.semantic_memory:
             try:
                 context = self.semantic_memory.get_relevant_context(user_message)
@@ -737,28 +790,50 @@ NEVER:
 
             registered = tool_registry.tools if tool_registry and hasattr(tool_registry, 'tools') else tool_schemas
 
-            # Fast-path check: pure conversational queries bypass 116 tool schema overhead
-            is_pure_convo = False
-            if user_last:
-                clean_ul = user_last.lower().strip().rstrip(".!?")
-                convo_set = {
-                    "hi", "hello", "hey", "hey jarvis", "hi jarvis", "hello jarvis",
-                    "good morning", "good afternoon", "good evening", "good night",
-                    "how are you", "how are you doing", "what's up", "whats up",
-                    "who are you", "what are you", "tell me about yourself",
-                    "thank you", "thanks", "thank you jarvis", "thanks jarvis",
-                    "cool", "nice", "awesome", "great", "ok", "okay", "understood",
-                    "stand down", "stand by", "standing by", "sleep", "goodbye", "bye"
-                }
-                if clean_ul in convo_set or (clean_ul.startswith(("hello ", "hey ", "hi ")) and len(clean_ul.split()) <= 3):
-                    is_pure_convo = True
-                    print(f"[FAST-PATH] Pure conversational turn detected ('{user_last}'). Bypassing tool schema overhead.")
+            # Fast-path check: pure conversational queries bypass tool schema overhead
+            is_pure_convo = is_conversational_turn(user_last)
+            if is_pure_convo:
+                print(f"[FAST-PATH] Pure conversational turn detected ('{user_last}'). Bypassing tool schema overhead.")
 
             while current_turn < max_turns:
                 current_turn += 1
                 t_llm0 = time.time()
                 # Use tools on turn 1 for non-conversational prompts; synthesis turns drop tool schemas to accelerate inference
                 current_tools = None if (is_pure_convo or current_turn > 1) else tool_schemas
+
+                # Streaming fast-path: When tools are not needed, stream tokens directly for sub-second latency
+                if current_tools is None and chunk_callback and hasattr(self.provider, 'chat_stream'):
+                    try:
+                        stream = self.provider.chat_stream(messages, tools=None, max_tokens=2048)
+                        full_streamed = ""
+                        async for chunk in stream:
+                            delta = ""
+                            if isinstance(chunk, str):
+                                delta = chunk
+                            elif hasattr(chunk, 'choices') and chunk.choices:
+                                delta = getattr(chunk.choices[0].delta, 'content', '') or ""
+                            if delta:
+                                full_streamed += delta
+                                try:
+                                    cb_res = chunk_callback(delta)
+                                    if inspect.isawaitable(cb_res):
+                                        await cb_res
+                                except Exception:
+                                    pass
+                        if full_streamed.strip():
+                            final_response_text = full_streamed
+                            self.add_assistant_message(final_response_text, session_id=session_id)
+                            self.last_agent_result = AgentResult(
+                                final_answer=final_response_text,
+                                status="COMPLETE",
+                                tool_count=len(execution_trace),
+                                iterations=current_turn,
+                                execution_trace=execution_trace
+                            )
+                            return final_response_text
+                    except Exception as stream_err:
+                        print(f"[STREAM] Streaming fallback to standard chat: {stream_err}")
+
                 if hasattr(self.provider, 'chat'):
                     response = await self.provider.chat(messages, tools=current_tools, max_tokens=2048)
                 else:
@@ -810,6 +885,14 @@ NEVER:
 
                 if classification == ResponseClassification.TOOL_CALL:
                     tool_calls = normalize_tool_calls(response, registered_tools=registered)
+                    if not tool_calls:
+                        tool_calls = normalize_tool_calls(response, registered_tools=None)
+                    if not tool_calls:
+                        messages.append({
+                            "role": "user",
+                            "content": f"[SYSTEM ERROR] Could not parse tool call syntax. Registered tools: {', '.join(sorted(registered)) if registered else 'none'}. Please call one of the registered tools."
+                        })
+                        continue
                     tool_names = [tc['name'] for tc in tool_calls]
                     print(f"[AGENT] Tool call detected: {', '.join(tool_names)}")
 
@@ -923,11 +1006,21 @@ NEVER:
 
                     # FINAL RESPONSE FIREWALL CHECK
                     if is_unresolved_tool_call(content_text, registered_tools=registered):
-                        print(f"[AGENT FIREWALL] Blocked unexecuted tool call JSON from final output. Routing back for execution.")
+                        print(f"[AGENT FIREWALL] Blocked unexecuted tool call from final output. Routing back for execution.")
                         sec_calls = normalize_tool_calls(content_text, registered_tools=registered)
-                        if sec_calls:
+                        if not sec_calls:
+                            sec_calls = normalize_tool_calls(content_text, registered_tools=None)
+                        if sec_calls and current_turn < max_turns:
                             response = content_text
                             continue
+                        else:
+                            content_text = strip_raw_tool_tags(content_text)
+                            if not content_text:
+                                content_text = "I have processed your request, sir."
+
+                    content_text = strip_raw_tool_tags(content_text)
+                    if not content_text and execution_trace:
+                        content_text = "I have completed the requested tool operations, sir."
 
                     print("[AGENT] Final response generated")
                     final_response_text = content_text
@@ -943,6 +1036,7 @@ NEVER:
             if not final_response_text and execution_trace:
                 final_response_text = "I have completed the requested tool operations, sir."
 
+            final_response_text = strip_raw_tool_tags(final_response_text)
             api_latency = time.time() - api_t0
             response_text = final_response_text or "Done, sir."
             self.add_assistant_message(response_text, session_id=session_id)

@@ -15,14 +15,25 @@ def test_mobile_static_files():
     res_index = client.get("/mobile/")
     assert res_index.status_code == 200
     assert "J.A.R.V.I.S." in res_index.text
+    assert "commandDeckDrawer" in res_index.text
+    assert "personaModal" in res_index.text
+    assert "diffModal" in res_index.text
+    assert "activeToolBar" in res_index.text
     
     res_app = client.get("/mobile/app.js")
     assert res_app.status_code == 200
     assert "initOrbVisualizer" in res_app.text
+    assert "renderDiffViewer" in res_app.text
+    assert "switchDeckTab" in res_app.text
+    assert "switchPersona" in res_app.text
+    assert "BIG_JOB_TIMEOUT_MS" in res_app.text
     
     res_css = client.get("/mobile/styles.css")
     assert res_css.status_code == 200
     assert "orbCanvas" in res_css.text
+    assert "deck-drawer-card" in res_css.text
+    assert "persona-badge-btn" in res_css.text
+    assert "diff-modal-card" in res_css.text
     
     res_cfg = client.get("/mobile/config.json")
     assert res_cfg.status_code == 200
@@ -35,6 +46,45 @@ def test_vitals_endpoint():
     data = res.json()
     assert "cpu_usage" in data
     assert "ram_usage" in data
+
+def test_mobile_command_deck_and_persona_endpoints():
+    client = TestClient(app)
+    
+    # 1. Agents registry endpoint
+    res_agents = client.get("/agents")
+    assert res_agents.status_code == 200
+    agents_data = res_agents.json()
+    assert "active_agent" in agents_data
+    assert "agents" in agents_data
+    agent_ids = [a["agent_id"] for a in agents_data["agents"]]
+    assert "jarvis" in agent_ids
+    assert "ultron" in agent_ids
+
+    # 2. Agent switch endpoint
+    res_switch = client.post("/agents/switch", json={"agent_id": "friday"})
+    assert res_switch.status_code == 200
+    switch_data = res_switch.json()
+    assert switch_data.get("ok") is True
+    assert switch_data["active_agent"]["agent_id"] == "friday"
+    # Switch back to jarvis
+    client.post("/agents/switch", json={"agent_id": "jarvis"})
+
+    # 3. Workspace diff endpoint
+    res_diff = client.get("/workspace/diff")
+    assert res_diff.status_code == 200
+    diff_data = res_diff.json()
+    assert "diff" in diff_data
+    assert "stat" in diff_data
+
+    # 4. Missions endpoint
+    res_missions = client.get("/missions")
+    assert res_missions.status_code == 200
+    assert isinstance(res_missions.json(), list)
+
+    # 5. Directives endpoint
+    res_directives = client.get("/directives")
+    assert res_directives.status_code == 200
+    assert isinstance(res_directives.json(), list)
 
 
 @pytest.mark.asyncio

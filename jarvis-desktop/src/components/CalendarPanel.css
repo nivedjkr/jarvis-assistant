@@ -7,7 +7,7 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   overflow: hidden;
   position: relative;
   z-index: 10;
@@ -84,8 +84,9 @@
   background: var(--surface);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
   padding: 4px 10px;
   border-radius: 6px;
   cursor: pointer;
@@ -151,7 +152,7 @@
 .calendar-cell.today {
   border-color: var(--accent);
   box-shadow: 0 0 10px var(--accent-dim);
-  background: rgba(167, 139, 250, 0.08);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .cell-header {

@@ -26,6 +26,13 @@ SYSTEM_TOOLS: Set[str] = {
     "run_command",
     "schedule_task",
     "view_file",
+    "write_to_file",
+    "extract_archive",
+    "list_archive",
+    "create_archive",
+    "inspect_and_edit_archive",
+    "prepare_overleaf_archive",
+    "validate_latex_project",
 }
 
 

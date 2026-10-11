@@ -105,17 +105,25 @@ def _get_allowed_roots() -> List[str]:
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     roots = [
         base_dir,
-        os.path.abspath("D:\\"),
+        os.path.abspath("D:\\") if os.path.exists("D:\\") else base_dir,
         os.path.expanduser("~/Downloads"),
         os.path.expanduser("~/Documents"),
         os.path.expanduser("~/Desktop"),
     ]
+    # Dynamically detect all active mounted disk partitions on the system (e.g. C:\, D:\, G:\)
+    try:
+        import psutil
+        for part in psutil.disk_partitions(all=False):
+            if part.mountpoint and os.path.exists(part.mountpoint):
+                roots.append(part.mountpoint)
+    except Exception:
+        pass
     cfg = _load_config()
     extra_roots = cfg.get("tools", {}).get("allowed_roots", [])
     if isinstance(extra_roots, list):
         roots.extend(extra_roots)
     resolved_roots = [os.path.realpath(r).lower() for r in roots if os.path.exists(r)]
-    return resolved_roots
+    return list(dict.fromkeys(resolved_roots))
 
 def _validate_sandbox_path(path: str) -> Tuple[bool, str]:
     if not path or not isinstance(path, str):
@@ -266,12 +274,16 @@ class WebsiteOpenTool:
         return f"Opening {target_url} in Google Chrome, sir."
 
 class ToolRegistry:
-    def __init__(self, email_service: Optional[Any] = None, calendar_service: Optional[Any] = None, obsidian_client: Optional[Any] = None, mission_manager: Optional[Any] = None):
+    def __init__(self, email_service: Optional[Any] = None, calendar_service: Optional[Any] = None, obsidian_client: Optional[Any] = None, mission_manager: Optional[Any] = None, dangerously_skip_permissions: bool = False):
         self.tools = {}   # name -> async callable
         self.schemas = [] # OpenAI tool schemas
         self.pending_actions: Dict[str, dict] = {}
         self.on_state_change = None  # Callable[[str, str, dict], None]
         self._last_suggestion_time = 0.0
+        self.dangerously_skip_permissions = bool(
+            dangerously_skip_permissions or
+            os.getenv("JARVIS_DANGEROUSLY_SKIP_PERMISSIONS", "").strip().lower() in ("1", "true", "yes", "on")
+        )
 
         shared_auth_mgr = None
         try:
@@ -325,6 +337,11 @@ class ToolRegistry:
         self._register_all()
         # Validate schemas on startup
         validate_tool_schemas(self)
+
+    def set_dangerously_skip_permissions(self, enabled: bool = True) -> bool:
+        """Dynamically enable or disable autonomous permission skipping for risky tools."""
+        self.dangerously_skip_permissions = bool(enabled)
+        return self.dangerously_skip_permissions
 
     def create_pending_action(self, name: str, args: dict, fn, preview: str, require_exact_input: Optional[str] = None) -> str:
         import uuid
@@ -506,12 +523,17 @@ class ToolRegistry:
                 "gmail_auth": "authenticate_google",
                 "calendar_auth": "authenticate_google",
                 "auth_google": "authenticate_google",
-                "auth_gmail": "authenticate_google"
+                "auth_gmail": "authenticate_google",
+                "git_stage": "git_add",
+                "stage_files": "git_add",
+                "git_commit_and_push": "git_add_commit_push",
+                "git_push_all": "git_add_commit_push",
+                "push_to_github": "git_add_commit_push"
             }
             if name_lower in name_alias_map and name_alias_map[name_lower] in self.tools:
                 name = name_alias_map[name_lower]
             else:
-                return f"Unknown tool: {name}"
+                return f"Error: Tool '{name}' not found. Please use one of the available registered tools."
 
         try:
             fn = self.tools[name]
@@ -648,10 +670,10 @@ class ToolRegistry:
             RISKY_TOOLS = {
                 "gh_delete_repo", "gh_merge_pr", "gh_close_issue", "gh_create_repo",
                 "gh_rerun_failed", "gh_mark_notifications_read", "run_command",
-                "git_add_commit_push", "send_email", "delete_sent_email", "delete_calendar_event",
+                "git_add_commit_push", "git_push", "send_email", "delete_sent_email", "delete_calendar_event",
                 "browse_click", "delete_mission", "cancel_mission"
             }
-            if name in RISKY_TOOLS and not is_human_confirmed:
+            if name in RISKY_TOOLS and not is_human_confirmed and not self.dangerously_skip_permissions:
                 require_exact = None
                 if name == "gh_delete_repo":
                     repo_val = normalized_args.get("repo", "")
@@ -672,6 +694,8 @@ class ToolRegistry:
                     preview = f"Execute shell command: '{normalized_args.get('command', '')}'"
                 elif name == "git_add_commit_push":
                     preview = f"Commit staged changes with message '{normalized_args.get('message', '')}' and push"
+                elif name == "git_push":
+                    preview = f"Push commits to remote '{normalized_args.get('remote', 'origin')}' {f'branch ' + normalized_args.get('branch') if normalized_args.get('branch') else ''}"
                 elif name == "send_email":
                     preview = f"Send email to '{normalized_args.get('to', '')}' with subject '{normalized_args.get('subject', '')}'"
                 elif name == "delete_sent_email":
@@ -688,6 +712,9 @@ class ToolRegistry:
                     preview = f"Execute {name} with arguments {normalized_args}"
 
                 return self.create_pending_action(name, normalized_args, fn, preview, require_exact_input=require_exact)
+
+            if name in RISKY_TOOLS and self.dangerously_skip_permissions and not is_human_confirmed:
+                _log_command(f"[DANGEROUSLY_SKIP_PERMISSIONS] Auto-executing {name} with args {normalized_args}", confirmed=True)
 
             # Filter kwargs to match function signature
             sig = inspect.signature(fn)
@@ -735,7 +762,7 @@ class ToolRegistry:
             # Adjacent context suggestion hook
             suggestion = self._check_adjacent_context_suggestion(name, args, result_str)
             if suggestion and "FAILED" not in result_str:
-                result_str = result_str.strip() + f"\n\n💡 {suggestion}"
+                result_str = result_str.strip() + f"\n\nSUGGESTION: {suggestion}"
 
             return result_str
         except Exception as e:
@@ -1500,7 +1527,58 @@ class ToolRegistry:
                 return f"FAILED at git push: {r3.stderr}\nCommitted locally but not pushed."
             
             _log_command(f"git commit -m '{message}' && git push", confirmed=True)
-            return f"✓ Staged changes\n✓ Committed: {message}\n✓ Pushed to GitHub"
+            return f"SUCCESS: Staged changes\nSUCCESS: Committed: {message}\nSUCCESS: Pushed to GitHub"
+
+        def git_add(path: str = ".", repo_path: str = "") -> str:
+            target_path = _get_repo_path(repo_path)
+            r = subprocess.run(
+                ['git', 'add', path],
+                capture_output=True, text=True, cwd=target_path, env=os.environ.copy()
+            )
+            if r.returncode != 0:
+                return f"FAILED at git add: {r.stderr.strip()}"
+            r_stat = subprocess.run(
+                ['git', 'status', '--short'],
+                capture_output=True, text=True, cwd=target_path, env=os.environ.copy()
+            )
+            staged = r_stat.stdout.strip()
+            return f"SUCCESS: Staged '{path}' in {target_path}\n{staged}" if staged else f"SUCCESS: Staged '{path}' (no modified files to stage)."
+
+        def git_commit(message: str, path: str = "") -> str:
+            target_path = _get_repo_path(path)
+            r_check = subprocess.run(
+                ['git', 'status', '--porcelain'],
+                capture_output=True, text=True, cwd=target_path, env=os.environ.copy()
+            )
+            if not r_check.stdout.strip():
+                return "Nothing staged to commit, sir. Use git_add first."
+            r = subprocess.run(
+                ['git', 'commit', '-m', message],
+                capture_output=True, text=True, cwd=target_path, env=os.environ.copy()
+            )
+            if r.returncode != 0:
+                if "nothing to commit" in (r.stdout + r.stderr).lower():
+                    return "Nothing to commit, sir."
+                return f"FAILED at git commit: {r.stderr.strip()}"
+            _log_command(f"git commit -m '{message}'", confirmed=True)
+            return f"SUCCESS: Committed: {message}\n{r.stdout.strip()}"
+
+        def git_push(remote: str = "origin", branch: str = "", path: str = "") -> str:
+            target_path = _get_repo_path(path)
+            cmd = ['git', 'push']
+            if remote:
+                cmd.append(remote)
+            if branch:
+                cmd.append(branch)
+            r = subprocess.run(
+                cmd,
+                capture_output=True, text=True, cwd=target_path, env=os.environ.copy()
+            )
+            if r.returncode != 0:
+                return f"FAILED at git push: {r.stderr.strip()}"
+            _log_command(' '.join(cmd), confirmed=True)
+            out = (r.stdout + "\n" + r.stderr).strip()
+            return f"SUCCESS: Pushed to {remote}{' ' + branch if branch else ''}\n{out}".strip()
         
         def git_status(path: str = "") -> str:
             target_path = _get_repo_path(path)
@@ -1531,11 +1609,15 @@ class ToolRegistry:
             return r.stdout if r.returncode == 0 \
                    else f"FAILED: {r.stderr}"
         
-        def git_diff(path: str = "") -> str:
+        def git_diff(path: str = "", stat_only: bool = False) -> str:
             target_path = _get_repo_path(path)
+            cmd = ['git', 'diff']
+            if stat_only:
+                cmd.append('--stat')
             r = subprocess.run(
-                ['git', 'diff', '--stat'],
-                capture_output=True, text=True, cwd=target_path
+                cmd,
+                capture_output=True, text=True, cwd=target_path,
+                encoding='utf-8', errors='replace'
             )
             return r.stdout or "No changes." \
                    if r.returncode == 0 else f"FAILED: {r.stderr}"
@@ -1764,6 +1846,38 @@ class ToolRegistry:
                       "default": "",
                       "description": "Repository path (auto-detected if empty)"}},
             required=["message"])
+
+        self._add("git_add", git_add,
+            "Stage file modifications in git repository. Pass path='.' to stage all changes.",
+            {"path": {"type": "string",
+                      "default": ".",
+                      "description": "File or folder path to stage, e.g. '.' for all files"},
+             "repo_path": {"type": "string",
+                           "default": "",
+                           "description": "Repository path (auto-detected if empty)"}},
+            required=[])
+
+        self._add("git_commit", git_commit,
+            "Commit staged changes with a descriptive commit message.",
+            {"message": {"type": "string",
+                         "description": "Commit message describing the changes"},
+             "path": {"type": "string",
+                      "default": "",
+                      "description": "Repository path (auto-detected if empty)"}},
+            required=["message"])
+
+        self._add("git_push", git_push,
+            "Push committed local changes to remote repository (requires confirmation).",
+            {"remote": {"type": "string",
+                        "default": "origin",
+                        "description": "Remote name (default: origin)"},
+             "branch": {"type": "string",
+                        "default": "",
+                        "description": "Branch name (empty for current branch)"},
+             "path": {"type": "string",
+                      "default": "",
+                      "description": "Repository path (auto-detected if empty)"}},
+            required=[])
         
         self._add("gh_list_repos", gh_list_repos,
             "List all GitHub repositories for the account.",
@@ -1817,10 +1931,13 @@ class ToolRegistry:
             required=[])
         
         self._add("git_diff", git_diff,
-            "Show what files changed since last commit.",
+            "Show what files changed since last commit or unstaged diff in unified format.",
             {"path": {"type": "string",
                       "default": "",
-                      "description": "Repository path (auto-detected if empty)"}},
+                      "description": "Repository path (auto-detected if empty)"},
+             "stat_only": {"type": "boolean",
+                           "default": False,
+                           "description": "If true, returns only changed files summary statistics instead of full unified diff"}},
             required=[])
         
         self._add("git_create_branch", git_create_branch,
@@ -2114,6 +2231,7 @@ class ToolRegistry:
 
             os.makedirs(real_dest, exist_ok=True)
             import zipfile
+            import tarfile
             try:
                 if zipfile.is_zipfile(real_archive):
                     with zipfile.ZipFile(real_archive, 'r') as zf:
@@ -2124,7 +2242,16 @@ class ToolRegistry:
                                 return f"SECURITY ERROR: Archive member '{member}' attempts directory traversal outside destination."
                         zf.extractall(real_dest)
                         return f"Successfully extracted {len(zf.namelist())} files from '{archive_path}' to '{real_dest}'."
-                return f"Unsupported archive format: '{archive_path}'. Supports .zip archives."
+                elif tarfile.is_tarfile(real_archive):
+                    with tarfile.open(real_archive, 'r:*') as tf:
+                        dest_path = Path(real_dest).resolve()
+                        for member in tf.getmembers():
+                            member_path = (dest_path / member.name).resolve()
+                            if not str(member_path).startswith(str(dest_path)):
+                                return f"SECURITY ERROR: Tar member '{member.name}' attempts directory traversal outside destination."
+                        tf.extractall(real_dest)
+                        return f"Successfully extracted {len(tf.getmembers())} files from tar archive '{archive_path}' to '{real_dest}'."
+                return f"Unsupported archive format: '{archive_path}'. Supports .zip, .tar, .tar.gz, .tgz archives."
             except Exception as e:
                 return f"FAILED to extract archive '{archive_path}': {e}"
 
@@ -2134,6 +2261,7 @@ class ToolRegistry:
             if not os.path.exists(real_archive):
                 return f"Archive not found: '{archive_path}'"
             import zipfile
+            import tarfile
             try:
                 if zipfile.is_zipfile(real_archive):
                     with zipfile.ZipFile(real_archive, 'r') as zf:
@@ -2141,6 +2269,17 @@ class ToolRegistry:
                         if not names:
                             return f"Archive '{archive_path}' is empty."
                         lines = [f"Archive '{archive_path}' contains {len(names)} entries:"]
+                        for n in names[:30]:
+                            lines.append(f"  - {n}")
+                        if len(names) > 30:
+                            lines.append(f"  ... and {len(names) - 30} more entries")
+                        return "\n".join(lines)
+                elif tarfile.is_tarfile(real_archive):
+                    with tarfile.open(real_archive, 'r:*') as tf:
+                        names = [m.name for m in tf.getmembers()]
+                        if not names:
+                            return f"Tar archive '{archive_path}' is empty."
+                        lines = [f"Tar archive '{archive_path}' contains {len(names)} entries:"]
                         for n in names[:30]:
                             lines.append(f"  - {n}")
                         if len(names) > 30:
@@ -2170,23 +2309,423 @@ class ToolRegistry:
             except Exception as e:
                 return f"FAILED to create archive: {e}"
 
+        def inspect_and_edit_archive(archive_path: str, target_file_in_archive: str, replacement_content: Optional[str] = None, new_file_source: Optional[str] = None, output_archive_path: Optional[str] = None, action: Optional[str] = "view", destination_path: Optional[str] = None) -> str:
+            ok, real_archive = _validate_sandbox_path(archive_path)
+            if not ok: return real_archive
+            if not os.path.exists(real_archive):
+                return f"Archive not found: '{archive_path}'"
+
+            import zipfile
+            if not zipfile.is_zipfile(real_archive):
+                return f"Unsupported or corrupted zip archive: '{archive_path}'"
+
+            target_norm = target_file_in_archive.replace("\\", "/").lstrip("/")
+            act = (action or "view").lower().strip()
+
+            if act == "view":
+                try:
+                    with zipfile.ZipFile(real_archive, 'r') as zf:
+                        actual_entry = None
+                        for n in zf.namelist():
+                            if n.replace("\\", "/").lstrip("/") == target_norm:
+                                actual_entry = n
+                                break
+                        if not actual_entry:
+                            candidates = [n for n in zf.namelist() if target_norm.lower() in n.lower()]
+                            cand_str = f" Closest matches: {candidates[:5]}" if candidates else ""
+                            return f"File '{target_file_in_archive}' not found in archive '{archive_path}'.{cand_str}"
+
+                        data = zf.read(actual_entry)
+                        try:
+                            text = data.decode("utf-8")
+                            lines = text.splitlines()
+                            total_l = len(lines)
+                            preview = "\n".join(f"{i+1}: {l}" for i, l in enumerate(lines[:100]))
+                            trunc_note = f"\n... [Truncated: showing first 100 of {total_l} lines]" if total_l > 100 else ""
+                            return f"=== [{target_norm}] in '{archive_path}' ({len(data)} bytes, {total_l} lines) ===\n{preview}{trunc_note}"
+                        except UnicodeDecodeError:
+                            return f"Binary file '{target_norm}' in '{archive_path}' ({len(data)} bytes)."
+                except Exception as e:
+                    return f"FAILED to view file inside archive: {e}"
+
+            elif act == "extract_file":
+                dest_file = destination_path or os.path.basename(target_norm)
+                ok_dest, real_dest = _validate_sandbox_path(dest_file)
+                if not ok_dest: return real_dest
+                try:
+                    with zipfile.ZipFile(real_archive, 'r') as zf:
+                        actual_entry = next((n for n in zf.namelist() if n.replace("\\", "/").lstrip("/") == target_norm), None)
+                        if not actual_entry:
+                            return f"File '{target_file_in_archive}' not found in '{archive_path}'."
+                        os.makedirs(os.path.dirname(real_dest) or ".", exist_ok=True)
+                        with open(real_dest, "wb") as f_out:
+                            f_out.write(zf.read(actual_entry))
+                        return f"Successfully extracted '{target_norm}' from '{archive_path}' to '{dest_file}'."
+                except Exception as e:
+                    return f"FAILED to extract file '{target_norm}': {e}"
+
+            elif act in ("replace", "add", "delete"):
+                out_path = output_archive_path if output_archive_path else real_archive + ".tmp_update.zip"
+                ok_out, real_out = _validate_sandbox_path(out_path)
+                if not ok_out: return real_out
+
+                new_bytes = None
+                if act in ("replace", "add"):
+                    if new_file_source:
+                        ok_src, real_src = _validate_sandbox_path(new_file_source)
+                        if not ok_src: return real_src
+                        if not os.path.exists(real_src):
+                            return f"Source file not found: '{new_file_source}'"
+                        with open(real_src, "rb") as sf:
+                            new_bytes = sf.read()
+                    elif replacement_content is not None:
+                        new_bytes = replacement_content.encode("utf-8")
+                    else:
+                        return f"FAILED: replacement_content or new_file_source must be provided for action '{act}'."
+
+                try:
+                    with zipfile.ZipFile(real_archive, 'r') as zin:
+                        with zipfile.ZipFile(real_out, 'w', zipfile.ZIP_DEFLATED) as zout:
+                            found = False
+                            for item in zin.infolist():
+                                in_norm = item.filename.replace("\\", "/").lstrip("/")
+                                if in_norm == target_norm:
+                                    found = True
+                                    if act == "delete":
+                                        continue
+                                    elif act in ("replace", "add"):
+                                        zout.writestr(item.filename, new_bytes)
+                                else:
+                                    zout.writestr(item, zin.read(item.filename))
+                            if act in ("replace", "add") and not found:
+                                zout.writestr(target_norm, new_bytes)
+
+                    if not output_archive_path:
+                        os.replace(real_out, real_archive)
+                        return f"Successfully updated archive '{archive_path}' (action: {act} on '{target_norm}')."
+                    else:
+                        return f"Successfully created updated archive '{output_archive_path}' (action: {act} on '{target_norm}')."
+                except Exception as e:
+                    if os.path.exists(real_out) and not output_archive_path:
+                        try: os.unlink(real_out)
+                        except Exception: pass
+                    return f"FAILED to modify archive '{archive_path}': {e}"
+            else:
+                return f"Unsupported action '{act}'. Use 'view', 'extract_file', 'replace', 'add', or 'delete'."
+
+        def validate_latex_project(project_path: str) -> str:
+            ok, real_path = _validate_sandbox_path(project_path)
+            if not ok: return real_path
+            if not os.path.exists(real_path):
+                return f"LaTeX project path not found: '{project_path}'"
+
+            import tempfile
+            import zipfile
+            import re
+            from pathlib import Path
+
+            is_zip = zipfile.is_zipfile(real_path)
+            temp_dir_obj = None
+
+            if is_zip:
+                temp_dir_obj = tempfile.TemporaryDirectory()
+                work_dir = Path(temp_dir_obj.name)
+                try:
+                    with zipfile.ZipFile(real_path, 'r') as zf:
+                        zf.extractall(work_dir)
+                except Exception as ze:
+                    return f"FAILED to extract zip for validation: {ze}"
+            else:
+                work_dir = Path(real_path)
+
+            try:
+                tex_files = list(work_dir.rglob("*.tex"))
+                bib_files = list(work_dir.rglob("*.bib"))
+                cls_files = list(work_dir.rglob("*.cls"))
+                sty_files = list(work_dir.rglob("*.sty"))
+                img_extensions = {".png", ".jpg", ".jpeg", ".pdf", ".eps", ".svg"}
+                img_files = [f for f in work_dir.rglob("*") if f.suffix.lower() in img_extensions]
+
+                if not tex_files:
+                    return f"No LaTeX (.tex) files found in '{project_path}'."
+
+                entry_points = []
+                main_candidates = []
+                for tf in tex_files:
+                    try:
+                        content = tf.read_text(encoding="utf-8", errors="replace")
+                        if "\\documentclass" in content and "\\begin{document}" in content:
+                            entry_points.append(tf)
+                            if tf.name.lower() == "main.tex":
+                                main_candidates.append(tf)
+                    except Exception:
+                        pass
+
+                entry_file = main_candidates[0] if main_candidates else (entry_points[0] if entry_points else tex_files[0])
+                rel_entry = entry_file.relative_to(work_dir).as_posix()
+
+                diagnostics = []
+                warnings = []
+
+                all_bib_keys = set()
+                for bf in bib_files:
+                    try:
+                        b_text = bf.read_text(encoding="utf-8", errors="replace")
+                        for match in re.finditer(r"@\w+\s*\{\s*([^,\s]+)\s*,", b_text):
+                            all_bib_keys.add(match.group(1).strip())
+                    except Exception:
+                        pass
+
+                cited_keys = set()
+
+                for tf in tex_files:
+                    rel_tf = tf.relative_to(work_dir).as_posix()
+                    try:
+                        t_content = tf.read_text(encoding="utf-8", errors="replace")
+                    except Exception as e:
+                        warnings.append(f"Cannot read '{rel_tf}': {e}")
+                        continue
+
+                    open_braces = t_content.count("{") - t_content.count("\\{")
+                    close_braces = t_content.count("}") - t_content.count("\\}")
+                    if open_braces != close_braces:
+                        warnings.append(f"'{rel_tf}': Unbalanced curly braces (Open: {open_braces}, Close: {close_braces}).")
+
+                    env_stack = []
+                    lines = t_content.splitlines()
+                    for idx, line in enumerate(lines, 1):
+                        clean_line = re.sub(r"(?<!\\)%.*$", "", line)
+                        for b_match in re.finditer(r"\\begin\{([a-zA-Z0-9*]+)\}", clean_line):
+                            env_stack.append((b_match.group(1), idx))
+                        for e_match in re.finditer(r"\\end\{([a-zA-Z0-9*]+)\}", clean_line):
+                            e_name = e_match.group(1)
+                            if env_stack and env_stack[-1][0] == e_name:
+                                env_stack.pop()
+                            elif env_stack:
+                                expected, s_line = env_stack.pop()
+                                warnings.append(f"'{rel_tf}' line {idx}: Mismatched environment '\\end{{{e_name}}}' (expected '\\end{{{expected}}}' from line {s_line}).")
+                            else:
+                                warnings.append(f"'{rel_tf}' line {idx}: Unexpected '\\end{{{e_name}}}' without matching \\begin.")
+
+                    if env_stack:
+                        for unclosed_env, start_l in env_stack:
+                            diagnostics.append(f"'{rel_tf}': Unclosed environment '\\begin{{{unclosed_env}}}' on line {start_l}.")
+
+                    for img_match in re.finditer(r"\\includegraphics(?:\[.*?\])?\{([^}]+)\}", t_content):
+                        img_ref = img_match.group(1).strip()
+                        if "\\" in img_ref:
+                            diagnostics.append(f"'{rel_tf}': Image path '{img_ref}' contains Windows backslashes. Overleaf requires forward slashes '/'.")
+                        norm_img_ref = img_ref.replace("\\", "/")
+                        cand_paths = [
+                            work_dir / norm_img_ref,
+                            tf.parent / norm_img_ref
+                        ]
+                        found_img = any(cp.exists() for cp in cand_paths)
+                        if not found_img:
+                            for ext in img_extensions:
+                                if any(cp.with_suffix(ext).exists() for cp in cand_paths):
+                                    found_img = True
+                                    break
+                        if not found_img:
+                            warnings.append(f"'{rel_tf}': Referenced image '{img_ref}' not found in project directory.")
+
+                    for bib_match in re.finditer(r"\\(?:bibliography|addbibresource)\{([^}]+)\}", t_content):
+                        b_ref = bib_match.group(1).strip()
+                        b_names = [b.strip() for b in b_ref.split(",")]
+                        for bn in b_names:
+                            bn_clean = bn if bn.endswith(".bib") else f"{bn}.bib"
+                            bn_norm = bn_clean.replace("\\", "/")
+                            if not (work_dir / bn_norm).exists() and not any(bf.name == Path(bn_norm).name for bf in bib_files):
+                                warnings.append(f"'{rel_tf}': Referenced bibliography '{bn}' (.bib) not found.")
+
+                    for c_match in re.finditer(r"\\(?:cite|citep|citet|parencite|textcite)(?:\[.*?\])*\{([^}]+)\}", t_content):
+                        for k in c_match.group(1).split(","):
+                            k_clean = k.strip()
+                            if k_clean:
+                                cited_keys.add((k_clean, rel_tf))
+
+                if bib_files:
+                    for ck, source_tex in cited_keys:
+                        if ck not in all_bib_keys:
+                            warnings.append(f"'{source_tex}': Citation key '{ck}' not found in any .bib file.")
+
+                status = "PASSED (Ready for Overleaf)" if not diagnostics and not warnings else ("WARNINGS DETECTED" if not diagnostics else "CRITICAL ISSUES FOUND")
+
+                report = [
+                    f"=== LaTeX & Overleaf Project Validation Report ===",
+                    f"Target: '{project_path}'",
+                    f"Status: {status}",
+                    f"Entry Point: {rel_entry} ({'Overleaf root standard' if rel_entry == 'main.tex' else 'Custom entry'})",
+                    f"Inventory: {len(tex_files)} .tex file(s), {len(img_files)} figure(s), {len(bib_files)} .bib file(s), {len(cls_files)+len(sty_files)} class/style file(s).",
+                ]
+
+                if diagnostics:
+                    report.append(f"\n[CRITICAL ISSUES - Must fix for Overleaf]:")
+                    for d in diagnostics[:15]:
+                        report.append(f"  ✗ {d}")
+                    if len(diagnostics) > 15:
+                        report.append(f"  ... and {len(diagnostics) - 15} more critical issues")
+
+                if warnings:
+                    report.append(f"\n[WARNINGS & RECOMMENDATIONS]:")
+                    for w in warnings[:15]:
+                        report.append(f"  ! {w}")
+                    if len(warnings) > 15:
+                        report.append(f"  ... and {len(warnings) - 15} more warnings")
+
+                if not diagnostics and not warnings:
+                    report.append("\n✓ All environment blocks balanced.")
+                    report.append("✓ Image references and bibliography files verified.")
+                    report.append("✓ Ready for direct upload to Overleaf via prepare_overleaf_archive.")
+
+                return "\n".join(report)
+
+            finally:
+                if temp_dir_obj:
+                    try: temp_dir_obj.cleanup()
+                    except Exception: pass
+
+        def prepare_overleaf_archive(source_path: str, output_archive_path: str, main_tex_name: Optional[str] = "main.tex", clean_artifacts: Optional[bool] = True, flatten_single_folder: Optional[bool] = True) -> str:
+            ok_src, real_src = _validate_sandbox_path(source_path)
+            if not ok_src: return real_src
+            if not os.path.exists(real_src):
+                return f"Source path not found: '{source_path}'"
+
+            ok_dst, real_dst = _validate_sandbox_path(output_archive_path)
+            if not ok_dst: return real_dst
+
+            import tempfile
+            import zipfile
+            import shutil
+            import re
+            from pathlib import Path
+
+            is_src_zip = zipfile.is_zipfile(real_src)
+            temp_dir = tempfile.TemporaryDirectory()
+            work_src = Path(temp_dir.name)
+
+            try:
+                if is_src_zip:
+                    with zipfile.ZipFile(real_src, 'r') as zf:
+                        zf.extractall(work_src)
+                else:
+                    if os.path.isfile(real_src):
+                        return f"Source '{source_path}' must be a directory or a .zip archive."
+                    for item in os.listdir(real_src):
+                        s = os.path.join(real_src, item)
+                        d = os.path.join(work_src, item)
+                        if os.path.isdir(s):
+                            shutil.copytree(s, d)
+                        else:
+                            shutil.copy2(s, d)
+
+                if flatten_single_folder:
+                    subitems = [f for f in work_src.iterdir()]
+                    if len(subitems) == 1 and subitems[0].is_dir() and not (subitems[0] / ".git").exists():
+                        nested = subitems[0]
+                        for n_item in nested.iterdir():
+                            shutil.move(str(n_item), str(work_src))
+                        try:
+                            nested.rmdir()
+                        except Exception:
+                            pass
+
+                target_main = main_tex_name or "main.tex"
+                main_file = work_src / target_main
+                if not main_file.exists():
+                    tex_cands = list(work_src.rglob("*.tex"))
+                    doc_cand = None
+                    for tc in tex_cands:
+                        try:
+                            t_txt = tc.read_text(encoding="utf-8", errors="replace")
+                            if "\\documentclass" in t_txt:
+                                doc_cand = tc
+                                break
+                        except Exception:
+                            pass
+                    if doc_cand:
+                        shutil.copy2(str(doc_cand), str(main_file))
+
+                cleaned_count = 0
+                if clean_artifacts:
+                    junk_suffixes = {
+                        ".aux", ".log", ".out", ".toc", ".lof", ".lot", ".bbl", ".blg",
+                        ".fls", ".fdb_latexmk", ".synctex.gz", ".nav", ".snm", ".vrb",
+                        ".dvi", ".ps"
+                    }
+                    junk_names = {"__macosx", ".ds_store", "thumbs.db", "desktop.ini"}
+
+                    for p in list(work_src.rglob("*")):
+                        if not p.exists():
+                            continue
+                        if p.is_dir() and (p.name.lower() in (".git", ".github", "__macosx")):
+                            shutil.rmtree(str(p), ignore_errors=True)
+                            cleaned_count += 1
+                            continue
+                        if p.is_file():
+                            if p.name.lower() in junk_names or p.suffix.lower() in junk_suffixes or p.name.startswith("._"):
+                                try:
+                                    p.unlink()
+                                    cleaned_count += 1
+                                except Exception:
+                                    pass
+
+                for tf in list(work_src.rglob("*.tex")) + list(work_src.rglob("*.sty")):
+                    try:
+                        content = tf.read_text(encoding="utf-8", errors="replace")
+                        def _replace_slashes(m):
+                            prefix = m.group(1)
+                            inner_path = m.group(2).replace("\\", "/")
+                            return f"{prefix}{{{inner_path}}}"
+                        updated = re.sub(r"(\\(?:includegraphics(?:\[.*?\])?|input|include))\{([^}]+)\}", _replace_slashes, content)
+                        if updated != content:
+                            tf.write_text(updated, encoding="utf-8")
+                    except Exception:
+                        pass
+
+                os.makedirs(os.path.dirname(real_dst) or ".", exist_ok=True)
+                packaged_files = 0
+                with zipfile.ZipFile(real_dst, 'w', zipfile.ZIP_DEFLATED) as zout:
+                    for root, _, files in os.walk(work_src):
+                        for f in files:
+                            full_f = os.path.join(root, f)
+                            rel_f = os.path.relpath(full_f, work_src).replace("\\", "/")
+                            zout.write(full_f, rel_f)
+                            packaged_files += 1
+
+                size_kb = os.path.getsize(real_dst) / 1024.0
+                return (
+                    f"Successfully created Overleaf-ready archive '{output_archive_path}' ({size_kb:.1f} KB).\n"
+                    f"  • Root Entry Point: '{target_main}' verified.\n"
+                    f"  • Packaged Files: {packaged_files} clean source files.\n"
+                    f"  • Removed Clutter: {cleaned_count} build artifacts and OS junk files stripped.\n"
+                    f"  • Path Separators: Normalized to Linux POSIX standard ('/') for TeXLive compatibility.\n"
+                    f"  • Ready for upload to Overleaf (New Project -> Upload Project)."
+                )
+
+            except Exception as e:
+                return f"FAILED to prepare Overleaf archive: {e}"
+            finally:
+                try: temp_dir.cleanup()
+                except Exception: pass
+
         self._add("get_disk_usage", get_disk_usage,
             "Get real disk space usage.",
             {"path": {"type": "string", "default": "C:\\"}},
             required=[])
 
         self._add("extract_archive", extract_archive,
-            "Extract a .zip archive to a destination directory with path traversal security protection.",
+            "Extract a .zip, .tar, or .tar.gz archive to a destination directory with path traversal security protection.",
             {
-                "archive_path": {"type": "string", "description": "Path to the .zip archive."},
+                "archive_path": {"type": "string", "description": "Path to the archive (.zip, .tar, .tar.gz, .tgz)."},
                 "destination_dir": {"type": "string", "description": "Optional destination directory (defaults to directory named after archive)."}
             },
             required=["archive_path"])
 
         self._add("list_archive", list_archive,
-            "List all files and directory structure inside a .zip archive without extracting.",
+            "List all files and directory structure inside an archive (.zip, .tar, .tar.gz) without extracting.",
             {
-                "archive_path": {"type": "string", "description": "Path to the .zip archive."}
+                "archive_path": {"type": "string", "description": "Path to the archive."}
             },
             required=["archive_path"])
 
@@ -2197,6 +2736,37 @@ class ToolRegistry:
                 "archive_path": {"type": "string", "description": "Destination path for the created .zip archive."}
             },
             required=["source_path", "archive_path"])
+
+        self._add("inspect_and_edit_archive", inspect_and_edit_archive,
+            "Surgically view, replace, add, or delete files inside a .zip archive across any disk without extracting the whole archive.",
+            {
+                "archive_path": {"type": "string", "description": "Path to the .zip archive on any disk."},
+                "target_file_in_archive": {"type": "string", "description": "Relative file path inside the archive (e.g., 'main.tex', 'figures/fig1.png')."},
+                "replacement_content": {"type": "string", "description": "Optional text content to write into the target file."},
+                "new_file_source": {"type": "string", "description": "Optional local file path to copy into the target file location."},
+                "output_archive_path": {"type": "string", "description": "Optional path for new archive. If omitted, updates archive_path in-place."},
+                "action": {"type": "string", "enum": ["view", "extract_file", "replace", "add", "delete"], "default": "view", "description": "Action to perform on target file."},
+                "destination_path": {"type": "string", "description": "Optional local destination path when extracting a single file."}
+            },
+            required=["archive_path", "target_file_in_archive"])
+
+        self._add("validate_latex_project", validate_latex_project,
+            "Deep structural validation of a LaTeX or Overleaf project directory or .zip archive. Inspects environments, images, and bibliography.",
+            {
+                "project_path": {"type": "string", "description": "Path to a directory or .zip archive containing LaTeX project files."}
+            },
+            required=["project_path"])
+
+        self._add("prepare_overleaf_archive", prepare_overleaf_archive,
+            "Prepare and package a LaTeX project into a pristine, Overleaf-ready .zip archive with normalized paths and stripped clutter.",
+            {
+                "source_path": {"type": "string", "description": "Directory or existing zip archive containing the LaTeX project."},
+                "output_archive_path": {"type": "string", "description": "Destination path for the clean Overleaf .zip archive."},
+                "main_tex_name": {"type": "string", "default": "main.tex", "description": "Target primary entrypoint document name."},
+                "clean_artifacts": {"type": "boolean", "default": True, "description": "Remove build artifacts, OS clutter, and git directories."},
+                "flatten_single_folder": {"type": "boolean", "default": True, "description": "Flatten redundant single outer directory."}
+            },
+            required=["source_path", "output_archive_path"])
 
     def _register_semantic_memory_tools(self):
         def remember_fact(fact: str, category: str = "") -> str:
@@ -2477,7 +3047,7 @@ class ToolRegistry:
             if auth_url and not ok:
                 return (
                     f"Opening browser for login, sir. If the browser does not open automatically, please click below:\n\n"
-                    f"[🔑 Click here to Authorize Google Services]({auth_url})\n\n"
+                    f"[AUTHORIZE GOOGLE SERVICES]({auth_url})\n\n"
                     f"Status: {msg}"
                 )
             return msg
@@ -4091,6 +4661,31 @@ class ToolRegistry:
                 "enabled": {"type": "boolean", "description": "True to activate Co-Pilot monitoring, False to pause.", "default": True}
             },
             required=[])
+
+        def write_to_file(path: str, content: str, overwrite: Optional[bool] = True) -> str:
+            is_valid, real_path_or_err = _validate_sandbox_path(path)
+            if not is_valid:
+                return real_path_or_err
+            full = os.path.abspath(real_path_or_err)
+            if os.path.exists(full) and not overwrite:
+                return f"FAILED: File '{path}' already exists and overwrite is set to False."
+            try:
+                os.makedirs(os.path.dirname(full) or '.', exist_ok=True)
+                with open(full, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                size = os.path.getsize(full)
+                return f"Successfully wrote {size} bytes to '{path}'."
+            except Exception as e:
+                return f"FAILED to write to '{path}': {e}"
+
+        self._add("write_to_file", write_to_file,
+            "Create or overwrite a file with specified content.",
+            {
+                "path": {"type": "string", "description": "Path to the target file."},
+                "content": {"type": "string", "description": "Text content to write."},
+                "overwrite": {"type": "boolean", "default": True, "description": "Whether to overwrite if file already exists."}
+            },
+            required=["path", "content"])
 
 
 

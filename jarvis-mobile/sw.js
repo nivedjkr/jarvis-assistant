@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jarvis-mobile-v3';
+const CACHE_NAME = 'jarvis-mobile-v4';
 const ASSETS = [
   './',
   './index.html',

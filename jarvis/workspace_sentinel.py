@@ -126,7 +126,7 @@ class WorkspaceSentinel:
                 if len(parts) < 2:
                     continue
                 file_rel = parts[1].strip()
-                if not file_rel.endswith(".py"):
+                if not (file_rel.endswith(".py") or file_rel.endswith(".tex")):
                     continue
                 file_path = self.workspace_path / file_rel
                 if not file_path.exists() or not file_path.is_file():
@@ -148,24 +148,40 @@ class WorkspaceSentinel:
                                 details={"file": file_rel, "anomaly_type": "MERGE_CONFLICT"}
                             ))
 
-                    # 2. Check for syntax error
-                    try:
-                        ast.parse(content, filename=file_rel)
-                    except SyntaxError as syn_err:
-                        anomaly_key = f"syntax_{file_rel}_{syn_err.lineno}"
-                        if anomaly_key not in self.last_reported_anomalies:
-                            self.last_reported_anomalies.add(anomaly_key)
-                            anomalies.append(PerceptualEvent(
-                                id=f"evt_{uuid.uuid4().hex[:8]}",
-                                event_type="CODE_ANOMALY",
-                                summary=f"Syntax error in '{file_rel}' at line {syn_err.lineno}: {syn_err.msg}",
-                                details={
-                                    "file": file_rel,
-                                    "line": syn_err.lineno,
-                                    "msg": syn_err.msg,
-                                    "anomaly_type": "SYNTAX_ERROR"
-                                }
-                            ))
+                    if file_rel.endswith(".tex"):
+                        import re
+                        begins = re.findall(r"\\begin\{([a-zA-Z0-9*]+)\}", content)
+                        ends = re.findall(r"\\end\{([a-zA-Z0-9*]+)\}", content)
+                        if len(begins) != len(ends):
+                            anomaly_key = f"latex_unbalanced_{file_rel}"
+                            if anomaly_key not in self.last_reported_anomalies:
+                                self.last_reported_anomalies.add(anomaly_key)
+                                anomalies.append(PerceptualEvent(
+                                    id=f"evt_{uuid.uuid4().hex[:8]}",
+                                    event_type="CODE_ANOMALY",
+                                    summary=f"Unbalanced LaTeX environments in '{file_rel}' (\\begin: {len(begins)}, \\end: {len(ends)})",
+                                    details={"file": file_rel, "anomaly_type": "LATEX_UNBALANCED"}
+                                ))
+
+                    # 2. Check for python syntax error
+                    elif file_rel.endswith(".py"):
+                        try:
+                            ast.parse(content, filename=file_rel)
+                        except SyntaxError as syn_err:
+                            anomaly_key = f"syntax_{file_rel}_{syn_err.lineno}"
+                            if anomaly_key not in self.last_reported_anomalies:
+                                self.last_reported_anomalies.add(anomaly_key)
+                                anomalies.append(PerceptualEvent(
+                                    id=f"evt_{uuid.uuid4().hex[:8]}",
+                                    event_type="CODE_ANOMALY",
+                                    summary=f"Syntax error in '{file_rel}' at line {syn_err.lineno}: {syn_err.msg}",
+                                    details={
+                                        "file": file_rel,
+                                        "line": syn_err.lineno,
+                                        "msg": syn_err.msg,
+                                        "anomaly_type": "SYNTAX_ERROR"
+                                    }
+                                ))
                 except Exception:
                     pass
         except Exception:

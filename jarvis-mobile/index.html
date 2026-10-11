@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#040406">
+  <meta name="theme-color" content="#000000">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>JARVIS Mobile Companion</title>
-  <link rel="manifest" href="manifest.json">
-  <link rel="icon" type="image/svg+xml" href="icon.svg">
-  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="manifest" href="/mobile/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/mobile/icon.svg">
+  <link rel="apple-touch-icon" href="/mobile/icon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/mobile/styles.css">
 </head>
 <body>
   <div id="app">
@@ -21,15 +21,15 @@
     <header class="app-header">
       <div class="brand">
         <button class="icon-btn drawer-toggle" id="sessionsToggleBtn" title="Menu & Sessions">
-          ☰
+          MENU
         </button>
-        <button class="icon-btn" id="directivesToggleBtn" title="Directives & Protocols">
-          📋
+        <button class="icon-btn deck-toggle-btn" id="deckToggleBtn" title="Stark Command Deck">
+          DECK
         </button>
-        <div class="brand-text">
-          <span class="title">J.A.R.V.I.S.</span>
-          <span class="subtitle" id="mobileSubtitle">REMOTE COMPANION</span>
-        </div>
+        <button class="persona-badge-btn" id="personaBadgeBtn" title="Switch Agent Persona">
+          <span class="persona-emoji" id="personaEmoji">⚡</span>
+          <span class="persona-name" id="personaName">J.A.R.V.I.S.</span>
+        </button>
       </div>
       <div class="header-actions">
         <div class="vitals-badge" id="vitalsBadge" title="System Hardware Vitals">
@@ -42,15 +42,22 @@
           <span class="status-text" id="statusText">Connecting</span>
         </div>
         <button class="icon-btn" id="settingsToggleBtn" title="Settings">
-          ⚙️
+          CFG
         </button>
       </div>
     </header>
 
-    <!-- Canvas Orb Section (Rendering logic untouched) -->
+    <!-- Canvas Orb Section with Touch Collapsible Controls -->
     <div class="orb-container" id="orbContainer">
+      <button class="orb-toggle-btn" id="orbToggleBtn" title="Toggle Compact HUD Mode">▲</button>
       <canvas id="orbCanvas" width="400" height="400"></canvas>
       <div class="orb-state-label" id="orbStateLabel">IDLE</div>
+    </div>
+
+    <!-- Active Tool Execution Banner (shown during big jobs / multi-step operations) -->
+    <div class="active-tool-bar hidden" id="activeToolBar">
+      <span class="tool-spinner"></span>
+      <span class="active-tool-text" id="activeToolText">JARVIS is thinking...</span>
     </div>
 
     <!-- Main Chat Log -->
@@ -62,28 +69,29 @@
 
     <!-- Quick Action Pills -->
     <div class="action-pills" id="actionPills">
-      <button class="pill-btn" data-cmd="/briefing">🌅 Briefing</button>
-      <button class="pill-btn" data-cmd="/protocol list">🏛️ Protocols</button>
-      <button class="pill-btn" id="mobileHandsFreeBtn">🎙️ Hands-Free</button>
-      <button class="pill-btn" id="mobileCameraBtn">📷 Camera Vision</button>
-      <button class="pill-btn" data-cmd="/copilot status">🛡️ Co-Pilot</button>
-      <button class="pill-btn" data-cmd="/sentinel status">📡 Sentinel</button>
-      <button class="pill-btn" data-cmd="/missions">🚀 Missions</button>
-      <button class="pill-btn" data-cmd="/vitals">📊 Vitals</button>
+      <button class="pill-btn" data-cmd="/briefing">Briefing</button>
+      <button class="pill-btn" data-cmd="/diff">Diff</button>
+      <button class="pill-btn" id="deckMissionsPill">Missions</button>
+      <button class="pill-btn" data-cmd="/protocol list">Protocols</button>
+      <button class="pill-btn" id="mobileHandsFreeBtn">Hands-Free</button>
+      <button class="pill-btn" id="mobileCameraBtn">Camera</button>
+      <button class="pill-btn" data-cmd="/copilot status">Co-Pilot</button>
+      <button class="pill-btn" data-cmd="/sentinel status">Sentinel</button>
+      <button class="pill-btn" data-cmd="/vitals">Vitals</button>
     </div>
 
     <!-- Hidden native camera / photo capture input -->
     <input type="file" id="mobileCameraInput" accept="image/*" capture="environment" style="display:none;" />
 
     <!-- Floating Input Bar -->
-    <footer class="input-container">
+    <footer class="input-container" id="inputContainer">
       <div class="input-wrapper">
         <textarea id="userInput" placeholder="Ask JARVIS..." rows="1"></textarea>
         <button class="cam-btn" id="mobileInputCamBtn" title="Take photo or send image">
-          <span>📷</span>
+          <span>VIS</span>
         </button>
         <button class="mic-btn" id="micBtn" title="Voice Input">
-          <span class="mic-icon">🎙️</span>
+          <span class="mic-icon">MIC</span>
         </button>
         <button class="send-btn" id="sendBtn" title="Send Message">
           <span>➤</span>
@@ -109,47 +117,133 @@
       </div>
     </aside>
 
-    <!-- Directives & Protocols Side Drawer -->
-    <aside class="drawer-overlay hidden" id="directivesDrawer">
-      <div class="drawer-card">
-        <div class="drawer-header">
-          <h3>Directives & Protocols</h3>
-          <button class="close-btn" id="closeDrawerBtn">&times;</button>
+    <!-- Multi-Agent Persona Switcher Modal -->
+    <div class="modal-overlay hidden" id="personaModal">
+      <div class="modal-card persona-modal-card">
+        <div class="modal-header">
+          <h3>Stark Persona Registry</h3>
+          <button class="close-btn" id="closePersonaBtn">&times;</button>
         </div>
-        <div class="drawer-body">
-          <div class="drawer-section">
-            <h4>DIRECTIVES</h4>
-            <ul class="directives-list">
-              <li><span class="code">DIR-01</span> High-precision tool execution gate enforcement</li>
-              <li><span class="code">DIR-02</span> Automated memory fact synthesis & vector recall</li>
-              <li><span class="code">DIR-03</span> Proactive awareness & velocity anomaly tracking</li>
-              <li><span class="code">DIR-04</span> Untrusted external content sandboxing</li>
-            </ul>
+        <div class="modal-body">
+          <p class="modal-hint">Select active system persona for immediate context injection:</p>
+          <div class="persona-grid" id="personaGrid">
+            <!-- Agent cards injected dynamically -->
           </div>
-          <div class="drawer-section">
-            <h4>AUTOMATION PROTOCOLS</h4>
-            <div class="protocol-grid">
-              <button class="protocol-card" data-cmd="/email summary">
-                <span class="proto-title">📩 Executive Email Briefing</span>
-                <span class="proto-desc">Summarize Gmail inbox unread cards</span>
-              </button>
-              <button class="protocol-card" data-cmd="/diagnose">
-                <span class="proto-title">🩺 System Diagnostic Scan</span>
-                <span class="proto-desc">Run full multi-service health check</span>
-              </button>
-              <button class="protocol-card" data-cmd="/memory stats">
-                <span class="proto-title">🧠 Memory Vault Analytics</span>
-                <span class="proto-desc">Inspect SQLite + FAISS memory stats</span>
-              </button>
-              <button class="protocol-card" data-cmd="/provider">
-                <span class="proto-title">🤖 LLM Provider Circuit</span>
-                <span class="proto-desc">View & reset active NIM provider</span>
-              </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stark Command Deck Drawer (Directives, Dispatches & Autonomous Missions) -->
+    <aside class="drawer-overlay hidden" id="commandDeckDrawer">
+      <div class="drawer-card deck-drawer-card">
+        <div class="drawer-header">
+          <h3>Stark Command Deck</h3>
+          <button class="close-btn" id="closeDeckBtn">&times;</button>
+        </div>
+        <!-- Command Deck Tab Switcher -->
+        <div class="deck-tabs-header">
+          <button class="deck-tab-btn active" id="tabDirectivesBtn" data-tab="directives">DIRECTIVES</button>
+          <button class="deck-tab-btn" id="tabDispatchesBtn" data-tab="dispatches">DISPATCHES</button>
+          <button class="deck-tab-btn" id="tabMissionsBtn" data-tab="missions">MISSIONS</button>
+        </div>
+
+        <div class="drawer-body deck-body">
+          <!-- Pane 1: Directives & Protocols -->
+          <div class="deck-pane" id="paneDirectives">
+            <div class="deck-input-group">
+              <input type="text" id="newDirectiveInput" placeholder="+ Add directive or reminder..." />
+              <button class="btn btn-primary btn-sm" id="addDirectiveBtn">ADD</button>
+            </div>
+            <div class="drawer-section">
+              <div class="section-title-row">
+                <h4>ACTIVE DIRECTIVES</h4>
+                <button class="btn-refresh" id="refreshDirectivesBtn" title="Sync Calendar & Directives">⟳</button>
+              </div>
+              <div class="directives-container" id="directivesContainer">
+                <div class="loading-placeholder">Syncing directives...</div>
+              </div>
+            </div>
+            <div class="drawer-section">
+              <h4>HOUSE PROTOCOLS</h4>
+              <div class="protocol-grid">
+                <button class="protocol-card" data-cmd="/briefing">
+                  <span class="proto-title">🌅 Morning Briefing</span>
+                  <span class="proto-desc">Atmospheric weather, hardware vitals, calendar directives & debrief</span>
+                </button>
+                <button class="protocol-card" data-cmd="/protocol workshop">
+                  <span class="proto-title">⚙️ Workshop Protocol</span>
+                  <span class="proto-desc">High-focus development mode with sentinel watchdog</span>
+                </button>
+                <button class="protocol-card" data-cmd="/protocol clean_slate">
+                  <span class="proto-title">🧹 Clean Slate</span>
+                  <span class="proto-desc">Flush memory caches and reset active sessions</span>
+                </button>
+                <button class="protocol-card" data-cmd="/protocol lockdown">
+                  <span class="proto-title">🔒 Lockdown Protocol</span>
+                  <span class="proto-desc">Quarantine external networks and enforce sandbox gates</span>
+                </button>
+                <button class="protocol-card" data-cmd="/protocol overdrive">
+                  <span class="proto-title">⚡ Overdrive Mode</span>
+                  <span class="proto-desc">Max concurrency and parallel subagent reasoning</span>
+                </button>
+                <button class="protocol-card" data-cmd="/diagnose">
+                  <span class="proto-title">🩺 System Diagnostics</span>
+                  <span class="proto-desc">Verify venv, auth, SQLite, audio and gateway status</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pane 2: Dispatches (Gmail Inbox & Sent) -->
+          <div class="deck-pane hidden" id="paneDispatches">
+            <div class="deck-filter-row">
+              <div class="filter-pills">
+                <button class="filter-pill active" id="dispInboxBtn">INBOX</button>
+                <button class="filter-pill" id="dispSentBtn">SENT</button>
+              </div>
+              <button class="btn-refresh" id="refreshDispatchesBtn" title="Fetch latest dispatches">⟳</button>
+            </div>
+            <div class="dispatches-container" id="dispatchesContainer">
+              <div class="loading-placeholder">Loading dispatches...</div>
+            </div>
+          </div>
+
+          <!-- Pane 3: Autonomous Missions -->
+          <div class="deck-pane hidden" id="paneMissions">
+            <div class="section-title-row">
+              <h4>AUTONOMOUS MISSIONS</h4>
+              <button class="btn-refresh" id="refreshMissionsBtn" title="Refresh active missions">⟳</button>
+            </div>
+            <div class="missions-container" id="missionsContainer">
+              <div class="loading-placeholder">Loading missions...</div>
             </div>
           </div>
         </div>
       </div>
     </aside>
+
+    <!-- Stark Visual Diff Inspector Modal -->
+    <div class="modal-overlay hidden" id="diffModal">
+      <div class="modal-card diff-modal-card">
+        <div class="modal-header">
+          <div class="diff-header-title">
+            <h3>Visual Diff Inspector</h3>
+            <span class="diff-stat-badge" id="diffStatBadge">+0 -0</span>
+          </div>
+          <button class="close-btn" id="closeDiffBtn">&times;</button>
+        </div>
+        <div class="diff-modal-toolbar">
+          <span class="diff-path-text" id="diffPathText">Workspace: D:\JARVIS</span>
+          <div class="diff-toolbar-actions">
+            <button class="btn-sm btn-secondary" id="copyDiffBtn">COPY</button>
+            <button class="btn-sm btn-primary" id="refreshDiffBtn">REFRESH</button>
+          </div>
+        </div>
+        <div class="diff-modal-body">
+          <pre class="diff-code-pre"><code id="diffModalCode">No uncommitted changes detected.</code></pre>
+        </div>
+      </div>
+    </div>
 
     <!-- Settings Modal -->
     <div class="modal-overlay hidden" id="settingsModal">
@@ -184,6 +278,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="/mobile/app.js"></script>
 </body>
 </html>

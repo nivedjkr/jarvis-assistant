@@ -103,7 +103,7 @@ export default function EmailPanel({ isConnected = true, lastStateUpdate = null 
       <div className="email-card-list">
         {displayList.length === 0 ? (
           <div className="email-empty-state">
-            <span className="email-empty-icon">✉</span>
+            <span className="email-empty-icon">[0]</span>
             <span>{activeTab === 'inbox' ? 'NO UNREAD EMAILS' : 'NO SENT EMAILS'}</span>
             <span className="email-empty-sub">
               {activeTab === 'inbox' ? 'Ask "check my email" to update inbox' : 'Ask "/email sent" to view sent mails'}

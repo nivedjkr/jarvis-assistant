@@ -13,7 +13,7 @@
 ![Gmail](https://img.shields.io/badge/Gmail-Google%20OAuth-EA4335?style=flat-square&logo=gmail)
 ![Memory](https://img.shields.io/badge/Memory-SQLite%20%2B%20FAISS-003B57?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Version](https://img.shields.io/badge/Release-Mk%205.3.0-brightgreen?style=flat-square)
+![Version](https://img.shields.io/badge/Release-Mk%205.7.0-brightgreen?style=flat-square)
 
 
 **Built by [Nived](https://github.com/nivedjkr)**
@@ -55,6 +55,14 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) direc
 - **Multi-Source Investigation**: Conducts background searches across `web_search_live`, `search_obsidian`, and project files with 15s timeout protection.
 - **Natural Proactive Messages**: Delivers separate follow-up messages starting with *"One more thing, sir..."* over WebSocket event streams.
 
+### 📦 Mark 5.7 Multi-Disk Storage & Overleaf Publishing Pipeline (`tools.py` & `skills/`)
+- **Dynamic Multi-Drive Resolution**: Seamless file operations and cross-referencing across all active storage drives (`C:\`, `D:\`, `G:\`, etc.) with strict sandbox security policies via `BLOCKED_PATTERNS`.
+- **Surgical In-Place Archive Manipulation**: Inspect, read, edit, replace, add, or delete files directly inside zip archives without full extractions via `inspect_and_edit_archive`.
+- **Overleaf-Ready Bundle Preparation**: Automatically structures LaTeX projects for direct Overleaf upload (`prepare_overleaf_archive`), ensuring root entry point `main.tex`, cleaning build artifacts (`.aux`, `.log`, `.bbl`), removing OS clutter (`.DS_Store`, `Thumbs.db`), and normalizing paths to POSIX slashes for Linux TeXLive compatibility.
+- **Deep LaTeX & BibTeX Project Linting**: Verifies environment balance (`\begin{...}` / `\end{...}`), checks image asset references, and confirms bibliography citations via `validate_latex_project`.
+- **16 Bundled Antigravity Skills**: Modular skills library covering `overleaf-latex-mastery`, `archive-data-orchestrator`, `proactive-task-planner`, `document-intelligence`, `agentic-coding`, and more.
+- **Dedicated CLI Commands**: Quick inspection and validation via `/latex <path>` and `/archive <path>`.
+
 ### 🛠️ Unified Tool Call Normalization Layer (`tool_normalizer.py`)
 - **Multi-Format Parsing**: Normalizes native OpenAI `tool_calls` and text-based JSON tool call formats (`tool`/`args`, `name`/`arguments`, `action`/`action_input`, JSON arrays, markdown-wrapped JSON).
 - **Strict Schema Validation**: Validates tool names against registered capabilities and parameter types.
@@ -69,11 +77,11 @@ Comprehensive technical documentation is available in the [`docs/`](docs/) direc
 - **Conversational & Slash Tools**: Supports `/email`, `/email summary`, `"check my email"`, `"read email 1"`, and `"send email"`.
 
 ### 🖥️ Electron Desktop App & Animated Node Network Orb
-- **Sleek Dark Interface**: Built with Electron, React, and Vite using a glassmorphic design system.
+- **Sleek Dark Interface**: Built with Electron, React, and Vite using a glassmorphic Stark HUD design system.
 - **4-State Animated Node Network Orb**: Canvas visualizer providing real-time feedback across `idle`, `listening`, `thinking`, and `speaking` states.
-- **System Vitals Panel**: Live hardware monitoring for CPU utilization, RAM usage, and GPU metrics.
-- **Directives & Protocol Control**: Interactive side panel to view system directives and trigger macro protocols.
-- **TitleBar Command Controls**: Dragable custom window header with native window management and instant `[?] HELP` command reference modal.
+- **Mark 5.9 Stark Command Deck (`StarkDeckPanel.jsx`)**: Consolidated 300px unified multi-deck command panel replacing crowded sidebars. Houses Directives (synced live with Google Calendar and missions, zero test spam), Dispatches (Gmail inbox/sent with unread counters), and Autonomous Missions with tabbed switching.
+- **Mark 5.9 Tactical Gadgets Bay (`SystemVitals.jsx`)**: Fills left panel vertical space with atmospheric weather sensors (`28°C CLEAR SKY`, humidity, barometric pressure), Tactical Action Matrix micro-buttons (`[🌅 BRIEFING]`, `[🛡️ SENTINEL]`, `[⚡ OVERDRIVE]`, `[📷 VISION]`), Acoustic Radar & Waveform wake-word visualizer, and docked `MiniCalendar`.
+- **Mark 5.8 Stark Visual Diff Inspector (`DiffViewerModal.jsx`)**: Interactive dual-mode Unified and Side-by-Side split diff inspector with multi-file tabs, live refresh, and inline diff inspection gates.
 - **FastAPI WebSocket Bridge**: High-performance bidirectional WebSocket communication (`ws://127.0.0.1:8765/ws`) connecting the Python backend to the React interface with tool execution badges (`⚡ TOOL EXECUTED`).
 
 ### 🌐 Headless Web Browsing & DOM Rendering (Playwright Engine)

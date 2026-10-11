@@ -8,7 +8,7 @@
   flex-direction: column;
   padding: 16px 14px;
   gap: 16px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   box-sizing: border-box;
 }
 

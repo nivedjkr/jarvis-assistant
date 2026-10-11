@@ -4,16 +4,16 @@
   left: 0;
   width: 300px;
   height: calc(100vh - 36px);
-  background: rgba(13, 14, 21, 0.95);
+  background: rgba(6, 6, 6, 0.97);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   padding: 16px;
   overflow-y: auto;
   user-select: none;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   z-index: 1000;
-  box-shadow: 12px 0 36px rgba(0, 0, 0, 0.85);
+  box-shadow: 12px 0 36px rgba(0, 0, 0, 0.95);
   backdrop-filter: blur(16px);
   transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -37,10 +37,11 @@
 }
 
 .sidebar-title {
+  font-family: var(--font-sans);
   font-size: 11px;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.12em;
   color: var(--accent);
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -131,9 +132,10 @@
 }
 
 .sidebar-item-name {
+  font-family: var(--font-sans);
   color: var(--text-primary);
   font-weight: 500;
-  font-size: 11px;
+  font-size: 12.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -162,12 +164,13 @@
 }
 
 .sidebar-delete-btn:hover {
-  color: var(--danger);
-  background: rgba(255, 71, 87, 0.15);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .sidebar-item-meta,
 .sidebar-item-sub {
+  font-family: var(--font-mono);
   font-size: 9px;
   color: var(--text-muted);
   margin-top: 4px;

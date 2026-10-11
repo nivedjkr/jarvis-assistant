@@ -114,8 +114,8 @@ export default function DirectivesPanel({ isConnected = true, lastStateUpdate = 
       </div>
 
       {errorToast && (
-        <div className="directives-error-toast" style={{ background: '#721c24', color: '#f8d7da', padding: '6px 10px', fontSize: '11px', borderRadius: '4px', margin: '4px 8px' }}>
-          ⚠️ {errorToast}
+        <div className="directives-error-toast" style={{ background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.25)', color: '#ffffff', padding: '6px 10px', fontSize: '11px', borderRadius: '4px', margin: '4px 8px' }}>
+          [WARN] {errorToast}
         </div>
       )}
       
@@ -153,7 +153,7 @@ export default function DirectivesPanel({ isConnected = true, lastStateUpdate = 
                     disabled={isDeleting}
                     style={{ background: 'transparent', border: 'none', cursor: 'pointer', opacity: 0.6, fontSize: '11px' }}
                   >
-                    {isDeleting ? '⏳' : '✕'}
+                    {isDeleting ? '...' : '✕'}
                   </button>
                 </div>
               )
@@ -188,7 +188,7 @@ export default function DirectivesPanel({ isConnected = true, lastStateUpdate = 
                     disabled={isDeleting}
                     style={{ background: 'transparent', border: 'none', cursor: 'pointer', opacity: 0.6, fontSize: '11px' }}
                   >
-                    {isDeleting ? '⏳' : '✕'}
+                    {isDeleting ? '...' : '✕'}
                   </button>
                 </div>
               )

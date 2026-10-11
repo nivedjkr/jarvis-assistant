@@ -78,7 +78,9 @@ class RelevanceGate:
         "work on", "working on", "building", "project", "architecture", "design",
         "plan", "planning", "implement", "developing", "learning", "exploring",
         "mark 5", "mark 4", "jarvis", "system", "feature", "framework", "database",
-        "algorithm", "model", "migration", "integration"
+        "algorithm", "model", "migration", "integration",
+        "zip", "archive", "overleaf", "latex", "tex", "paper", "report", "thesis",
+        "disk", "drive", "workflow", "automate", "package", "document"
     ]
 
     async def evaluate(
@@ -98,6 +100,13 @@ class RelevanceGate:
                     "reason": "Excluded routine query or greeting pattern."
                 }
 
+        # Exclude direct operational and inspection commands from background web research
+        if re.search(r"^(check|inspect|run|test|debug|build|view|find|search|show|dir|ls|cat)\b", lower_prompt):
+            return {
+                "should_investigate": False,
+                "reason": "Direct operational or inspection command does not warrant proactive web search."
+            }
+
         # Check length / minimal content
         words = lower_prompt.split()
         if len(words) < 3:
@@ -110,16 +119,29 @@ class RelevanceGate:
         matched_triggers = [kw for kw in self.TRIGGER_KEYWORDS if kw in lower_prompt]
         if matched_triggers or len(words) >= 5:
             topic = " ".join(words[:6])
-            if "mark 5" in lower_prompt or "mark v" in lower_prompt:
+            suggested_sources = ["web_search", "obsidian", "project_context"]
+            if any(k in lower_prompt for k in ["overleaf", "latex", "tex"]):
+                topic = "Overleaf and LaTeX document workflow"
+                suggested_sources = ["latex_context", "project_context", "obsidian"]
+            elif any(k in lower_prompt for k in ["zip", "archive", "tar"]):
+                topic = "Archive and multi-disk file orchestration"
+                suggested_sources = ["project_context", "web_search"]
+            elif "mark 5" in lower_prompt or "mark v" in lower_prompt:
                 topic = "Mark 5 architecture and features"
             elif matched_triggers:
-                topic = f"{matched_triggers[0]} topic"
+                trig = matched_triggers[0]
+                if trig in ("project", "system", "feature", "plan", "workflow"):
+                    return {
+                        "should_investigate": False,
+                        "reason": f"Generic trigger '{trig}' without domain specialization."
+                    }
+                topic = f"{trig} topic"
 
             return {
                 "should_investigate": True,
                 "reason": f"Detected actionable proactive topic (keywords: {matched_triggers or 'contextual query'}).",
                 "topic": topic,
-                "suggested_sources": ["web_search", "obsidian", "project_context"]
+                "suggested_sources": suggested_sources
             }
 
         return {
@@ -348,6 +370,13 @@ class ProactiveFollowUpEngine:
                             )
                             if proj_res and "Error" not in str(proj_res):
                                 findings.append({"source": "project_context", "content": str(proj_res)[:300]})
+                        elif src == "latex_context" and hasattr(tool_registry, "execute"):
+                            latex_res = await asyncio.wait_for(
+                                tool_registry.execute("validate_latex_project", {"project_path": "."}),
+                                timeout=15.0
+                            )
+                            if latex_res and "Error" not in str(latex_res) and "not found" not in str(latex_res):
+                                findings.append({"source": "latex_context", "content": str(latex_res)[:300]})
                     except Exception as ie:
                         print(f"[PROACTIVE] Investigation source '{src}' error: {ie}")
 

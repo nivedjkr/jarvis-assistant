@@ -32,7 +32,10 @@ class SemanticMemory:
                 if self.model is None:
                     print("[SEMANTIC] Loading embedding model...")
                     from sentence_transformers import SentenceTransformer
-                    self.model = SentenceTransformer('all-MiniLM-L6-v2')  # small, fast, local
+                    try:
+                        self.model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=True)
+                    except Exception:
+                        self.model = SentenceTransformer('all-MiniLM-L6-v2')  # small, fast, local
         return self.model
 
     def _encode(self, texts: list):
